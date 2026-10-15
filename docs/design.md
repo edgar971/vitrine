@@ -258,7 +258,7 @@ It has no visibility parameter and no `ctx.call_mcp` grant. The draft passes
 
 **Language and structure**
 
-- Python 3.12+.
+- Python 3.15+ (`requires-python = ">=3.15"`), the latest stable release.
 - Full type hints; `mypy --strict` clean.
 - `ruff` (lint and format) is the style; no style debates in review.
 - Small modules with one job each. Functions do one thing; no function needs a comment to be
@@ -358,7 +358,7 @@ drop/                          github.com/edgar971/drop · PyPI and CLI: mcp-dro
 
 ### CI and releases
 
-**CI** runs on Python 3.12 and 3.13: lock check, ruff, mypy, import-linter, pytest with
+**CI** runs on Python 3.15: lock check, ruff, mypy, import-linter, pytest with
 coverage, browser tests, `pip-audit`, and a multi-arch image build without pushing.
 
 **Release** runs on a `v*` tag:
@@ -371,7 +371,7 @@ Commits follow Conventional Commits.
 
 **Container image**
 
-- Built with `uv sync --frozen --no-dev`, from a `python:3.13-slim` base.
+- Built with `uv sync --frozen --no-dev`, from a `python:3.15-slim` base.
 - Runs as user 10001 with a read-only root filesystem; writes only to `/data` and `/tmp`.
 - `ENTRYPOINT ["mcp-drop", "serve"]`.
 

@@ -12,7 +12,7 @@ or **public** links. Status: designed, not built. The build follows `docs/roadma
 ## Commands
 
 Only `uv` is required. Until M0 lands there is no package; the only runnable code is the spike:
-`cd docs/spike && uv run --no-project --python 3.13 --with fastmcp==4.1.0 --with uvicorn --with httpx --with playwright python run.py`.
+`cd docs/spike && uv run --no-project --python 3.15 --with fastmcp==4.1.0 --with uvicorn --with httpx --with playwright python run.py`.
 
 From M0 on:
 

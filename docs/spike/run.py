@@ -1,7 +1,7 @@
 """Start the spike server, run every black-box check, exit non-zero on any FAIL.
 
     cd docs/spike
-    uv run --python 3.13 --with fastmcp==4.1.0 --with uvicorn --with httpx --with playwright python run.py
+    uv run --python 3.15 --with fastmcp==4.1.0 --with uvicorn --with httpx --with playwright python run.py
 
 Chromium: uses /opt/pw-browsers/chromium when present, else Playwright's own (`playwright install chromium`).
 """

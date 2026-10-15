@@ -33,7 +33,7 @@ can view.
 | **Safety** | Private by default. Public needs human confirmation via MCP elicitation and fails closed. Agent-written HTML runs in a CSP sandbox. |
 | **Config** | `DROP_*` environment variables or a TOML file. Secrets only from the environment. |
 | **Runs as** | `uvx mcp-drop serve`, a container image (amd64 and arm64), or the Kubernetes example |
-| **Built with** | Python 3.12+, FastMCP, Starlette/uvicorn, pydantic-settings; uv, ruff, mypy, pytest |
+| **Built with** | Python 3.15+, FastMCP, Starlette/uvicorn, pydantic-settings; uv, ruff, mypy, pytest |
 | **License** | MIT |
 
 ## Documents

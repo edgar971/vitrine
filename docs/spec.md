@@ -597,5 +597,5 @@ Rules:
 |---|---|
 | Versioning | Semantic versioning. The MCP tool names and parameters, the HTTP routes, the config keys and `meta.json` are the public API. |
 | MCP protocol | Both `2025-11-25` and `2026-07-28` clients are supported. The confirmation mechanism follows the negotiated version (§ 6.1). |
-| Python | 3.12 and newer |
+| Python | 3.15 and newer |
 | On-disk format | `meta.json` carries `schema_version`. Upgrades migrate forward on `mcp-drop migrate`; the server refuses to start on data it would misread ([operations](operations.md) § 4). |

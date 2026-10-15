@@ -84,6 +84,14 @@ select = [
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+# FastMCP's injection markers are evaluated once, as markers; that is what B008 guards against.
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+  "fastmcp.dependencies.CurrentAccessToken",
+  "fastmcp.dependencies.CurrentContext",
+  "fastmcp.dependencies.Depends",
+]
+
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
 
@@ -93,6 +101,8 @@ ban-relative-imports = "all"
 "tests/**" = ["D101", "D102", "D103", "D106", "S101", "S104", "S105", "PLR2004"]
 # The domain errors are named as docs/design.md § 3 names them: NotFound, Expired, Conflict, …
 "src/mcp_drop/domain/errors.py" = ["N818"]
+# A tool's parameters are its schema (spec § 5.1): one per documented argument, plus injections.
+"src/mcp_drop/mcp/tools.py" = ["PLR0913", "PLR0917"]
 
 [tool.mypy]
 python_version = "3.15"

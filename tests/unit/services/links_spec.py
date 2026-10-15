@@ -162,6 +162,12 @@ class DescribeVerification:
             with pytest.raises(NotFound):
                 links.verify_view(_forge(f"view|shout|{expires}|0"))
 
+    class WhenTheEpochIsNotANumber:
+        def it_is_not_found(self, links: LinkService, clock: FrozenClock) -> None:
+            expires = int((clock.now() + timedelta(days=1)).timestamp())
+            with pytest.raises(NotFound):
+                links.verify_view(_forge(f"view|{ID}|{expires}|not-an-epoch"))
+
     class WhenTheClaimsAreComparedWithAnArtifact:
         def it_accepts_the_link_at_the_current_epoch(
             self, links: LinkService, artifact: Artifact

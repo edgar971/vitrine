@@ -64,7 +64,7 @@ class ArtifactService:
             )
             artifact_id = claim.id
             if claim.reused:
-                return self._published(self._store.get(claim.id), created=False)
+                return self._published(self._usable(claim.id), created=False)
         artifact = self._store.create(artifact_id, draft, source=client)
         self._record(
             AuditEvent(
@@ -181,18 +181,25 @@ class ArtifactService:
 
     def sweep(self) -> SweepReport:
         """Delete expired artifacts, then clear staging, stale records and old audit months."""
+        already_recorded = {
+            event.artifact for event in self._audit.query() if event.event is AuditEventName.EXPIRED
+        }
         expired = 0
         for artifact_id in self._store.expired_ids():
-            artifact = self._store.get(artifact_id)
-            self._audit.append(
-                AuditEvent(
-                    ts=self._clock.now(),
-                    event=AuditEventName.EXPIRED,
-                    artifact=artifact.id,
-                    client=artifact.source,
+            if artifact_id in already_recorded:
+                # An earlier sweep recorded this expiry but could not finish the deletion.
+                self._store.delete(artifact_id)
+            else:
+                artifact = self._store.get(artifact_id)
+                self._audit.append(
+                    AuditEvent(
+                        ts=self._clock.now(),
+                        event=AuditEventName.EXPIRED,
+                        artifact=artifact.id,
+                        client=artifact.source,
+                    )
                 )
-            )
-            self._store.delete(artifact_id)
+                self._store.delete(artifact_id)
             expired += 1
         return SweepReport(
             expired=expired,

@@ -74,6 +74,17 @@ Nothing has been released yet: `0.1.0` is the first release, and
   `caddy adapt`; a spec loads the example configs with the server's own rules.
 - M4 — `docs/configuration.md`, generated from `Settings` (`just docs`); every setting now
   carries its group and description, and a spec fails when the committed file is stale.
+- M5 — the Hermes Agent plugin (`integrations/hermes/drop/`): `artifact_publish_files` streams
+  files or a folder to `/api/artifacts` as a private artifact (or a new version, with `merge`),
+  the `drop:drop` skill, and the `/share` and `/artifacts` commands. Standard library only, for
+  Python 3.11+; a spec drives a real server through it, and CI runs `hermes plugins validate`.
+- M5 — the README quick start with `uvx`, and connection snippets for Claude Code, Hermes Agent
+  and other MCP clients.
+- The release workflow: on a `v*` tag, every CI job, then PyPI by trusted publishing, the
+  multi-arch image on GHCR with an SBOM and a keyless cosign signature, and a GitHub release from
+  this changelog. `ci.yml` is reusable for it.
+- `docs/security.md` § 6 names the specs that hold each `AGENTS.md` invariant, and a spec fails
+  when one of them is renamed or removed.
 - `TokenBook`: the hashed-token check, shared by `/mcp` and `/api`.
 - `Store.locate`, so a view streams a file instead of reading it into memory.
 

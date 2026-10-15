@@ -272,8 +272,14 @@ The optional **Hermes plugin** (`integrations/hermes/drop/`) adds:
 - a `drop:drop` skill;
 - the `/share` and `/artifacts` commands.
 
-It has no visibility parameter and no `ctx.call_mcp` grant. The draft passes
-`hermes plugins validate` ([`spike/hermes-plugin-drop/`](spike/hermes-plugin-drop/)).
+It has no visibility parameter and no `ctx.call_mcp` grant. It uses only the standard library
+(`http.client`), so it adds nothing to Hermes's environment and runs on every Python Hermes
+supports (3.11+). When drop refuses an upload before reading it (a wrong token, a missing scope,
+a rate limit, an oversized body), the client still reads the refusal, or names those causes when
+the connection was reset first. CI runs `hermes plugins validate` on it at a pinned Hermes commit,
+and `tests/integrations/hermes_spec.py` drives a real server through it. The spike's draft
+([`spike/hermes-plugin-drop/`](spike/hermes-plugin-drop/)) is kept as the record of what was
+first validated.
 
 ## 9. Code and test conventions
 
@@ -382,12 +388,17 @@ drop/                          github.com/edgar971/drop · PyPI and CLI: mcp-dro
 ### CI and releases
 
 **CI** runs on Python 3.15: lock check, ruff, mypy, import-linter, pytest with
-coverage, browser tests, `pip-audit`, and a multi-arch image build without pushing.
+coverage, browser tests, `pip-audit`, a multi-arch image build without pushing, and
+`hermes plugins validate` on the Hermes plugin.
 
-**Release** runs on a `v*` tag:
+**Release** runs on a `v*` tag (`release.yml`). It first runs every CI job on the tagged commit
+(`ci.yml` is reusable) and checks that the tag, the `pyproject.toml` version and a `CHANGELOG.md`
+section agree. Then:
 
-1. `uv build` publishes to PyPI by trusted publishing.
-2. `ghcr.io/edgar971/drop:<version>` is pushed for amd64 and arm64, cosign-signed, with an SBOM.
+1. `uv build` publishes to PyPI by trusted publishing (`uv publish`, in the `pypi` environment).
+2. `ghcr.io/edgar971/drop:<version>` is pushed for amd64 and arm64 with an SBOM and provenance
+   attestation, and its digest is cosign-signed keylessly. No `latest` tag: deployments pin a
+   version or a digest.
 3. Release notes come from `CHANGELOG.md` (Keep a Changelog).
 
 Commits follow Conventional Commits.

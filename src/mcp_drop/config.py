@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import tomllib
 from collections.abc import Mapping
@@ -30,6 +31,7 @@ from mcp_drop.domain.models import PublicMode, Scope
 
 SECRET_KEYS = ("secret", "tokens")
 CONFIG_TABLE = "drop"
+ENV_PREFIX = "DROP_"
 MIN_SECRET_BYTES = 32
 RENDERERS = frozenset({"md", "csv", "tsv", "json"})
 
@@ -204,7 +206,7 @@ class Settings(BaseSettings):
     """The effective configuration, keyed exactly as spec § 8.2 documents it."""
 
     model_config = SettingsConfigDict(
-        env_prefix="DROP_", extra="forbid", frozen=True, validate_default=True
+        env_prefix=ENV_PREFIX, extra="forbid", frozen=True, validate_default=True
     )
 
     data_dir: Path = Path("./data")
@@ -320,10 +322,27 @@ def read_config_file(path: Path) -> dict[str, object]:
     return values
 
 
+def _unknown_env_keys() -> list[str]:
+    """Environment variables carrying the prefix that name no settings field (spec § 8.1).
+
+    pydantic-settings reads only the variables that match a field, so a typo like
+    ``DROP_MAX_UPLAOD`` would otherwise be ignored as quietly as it was mistyped.
+    """
+    fields = {name.lower() for name in Settings.model_fields}
+    return sorted(
+        key
+        for key in os.environ
+        if key.upper().startswith(ENV_PREFIX) and key[len(ENV_PREFIX) :].lower() not in fields
+    )
+
+
 def load_settings(
     *, config_path: Path | None = None, flags: Mapping[str, object] | None = None
 ) -> Settings:
     """Build the effective settings: flags, then ``DROP_*``, then the file (spec § 8.1)."""
+    unknown = _unknown_env_keys()
+    if unknown:
+        raise ConfigError(f"unknown environment key(s): {', '.join(unknown)}")
     file_values = read_config_file(config_path) if config_path is not None else {}
 
     class Configured(Settings):

@@ -292,6 +292,14 @@ class DescribeValidation:
                 load_settings(config_path=tmp_path / "missing.toml")
 
 
+class DescribeTheEnvironmentItself:
+    class WhenAVariableNamesAKeyThatDoesNotExist:
+        def it_refuses_to_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setenv("DROP_MAX_UPLAOD", "1MB")
+            with pytest.raises(ConfigError, match="DROP_MAX_UPLAOD"):
+                load_settings()
+
+
 class DescribeTheDataDirectoryCheck:
     class WhenTheStagingDirectoryIsOnAnotherFilesystem:
         def it_refuses_to_start(self, monkeypatch: pytest.MonkeyPatch) -> None:

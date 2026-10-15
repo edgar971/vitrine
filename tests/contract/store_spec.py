@@ -152,6 +152,16 @@ class DescribeAddingAVersion:
             store.add_version(artifact_id, VersionDraft(files={"report.html": b"new"}, merge=True))
             assert store.read(artifact_id, ENTRY) == b"<h1>hi</h1>"
 
+    class WhenNoFilesAreGiven:
+        def it_carries_the_current_files_over(self, store: Store) -> None:
+            artifact_id = _create(store)
+            store.add_version(artifact_id, VersionDraft(title="Renamed"))
+            assert store.read(artifact_id, ENTRY) == b"<h1>hi</h1>"
+
+        def it_still_writes_the_next_version(self, store: Store) -> None:
+            artifact_id = _create(store)
+            assert store.add_version(artifact_id, VersionDraft(title="Renamed")).version == 2
+
     class WhenNoEntryIsGiven:
         def it_keeps_the_previous_entry_while_it_exists(self, store: Store) -> None:
             artifact_id = _create(

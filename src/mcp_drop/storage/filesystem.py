@@ -117,9 +117,10 @@ class FileStore:
         """Write the next version and replace ``meta.json``; the caller prunes afterwards."""
         with self._locked(artifact_id):
             previous = self._read_meta(artifact_id)
+            # No files means nothing replaces the current ones: the version carries them over.
             source = (
                 layout.version_dir(self._config.root, artifact_id, previous.version)
-                if draft.merge
+                if draft.merge or draft.files is None
                 else None
             )
             with self._staged(draft.files or {}, merge_from=source) as stage:
@@ -476,6 +477,9 @@ def _refuse_type_conflict(stage: Path, target: Path, path: str) -> None:
     """Refuse a path that needs a directory where the version already holds a file (spec § 10)."""
     if target.is_dir():
         raise Invalid(f"{path} names a directory that already exists in this version")
+    # ``target`` is resolved, so the walk must stop at the resolved stage: a relative data_dir or
+    # one reached through a symlink would otherwise never compare equal, and the walk never ends.
+    stage = stage.resolve()
     parent = target.parent
     while parent != stage:
         if parent.exists() and not parent.is_dir():

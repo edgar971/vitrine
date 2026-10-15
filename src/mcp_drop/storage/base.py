@@ -65,7 +65,10 @@ class Store(Protocol):
         ...
 
     def add_version(self, artifact_id: str, draft: VersionDraft) -> Artifact:
-        """Write the next version and replace ``meta.json``; ``NotFound`` for an unknown id."""
+        """Write the next version and replace ``meta.json``; ``NotFound`` for an unknown id.
+
+        ``files=None`` carries the current files over, so a metadata change is still a version.
+        """
         ...
 
     def prune(self, artifact_id: str) -> Artifact:

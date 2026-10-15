@@ -156,6 +156,29 @@ from outer classes) was checked with plain pytest and needs no plugin.
 |---|---|
 | Hermes plugin draft ([`spike/hermes-plugin-drop/`](spike/hermes-plugin-drop/)) through Hermes's `validate_plugin_dir` | All 14 admission checks pass, including the isolated `register()` probe, no built-in collisions and the security scan |
 | Kubernetes example ([`spike/kubernetes-example.yaml`](spike/kubernetes-example.yaml)): `kubeconform -strict`, Kubernetes 1.35 | 9 valid, 1 skipped (ServiceMonitor CRD) |
+| `hermes plugins validate` headless, with a pristine `HOME` and no gateway attached | 14 checks pass, "Validation passed.", exit 0 |
+
+### `hermes plugins validate` on a CI runner
+
+The M0 spike check (M5 depends on it). `python -I -m hermes_cli.main plugins validate <plugin-dir>`
+runs with no configuration, no gateway and an empty `HOME`: the command is self-contained.
+
+Two install paths do **not** work and should not be attempted in CI:
+
+- PyPI `hermes-agent` (0.19.0) predates the subcommand — its `hermes plugins` offers only
+  install, update, remove, list, enable and disable;
+- `uv tool install git+https://github.com/NousResearch/hermes-agent` fails by design: the build
+  backend refuses to build a wheel or an sdist ("Hermes is distributed via the shell installer,
+  Docker image, or Nix").
+
+What works is Hermes's own reusable composite action,
+`NousResearch/hermes-agent/.github/actions/plugin-validate@<ref>`: shallow-clone the repo at that
+ref, run `python3 -S scripts/ci/setup_toolchain.py prepare|install`, build the isolated validator
+runtime with `pm.build_environment`, then run the command above against the plugin directory. Its
+`hermes-ref` input pins the Hermes version the plugin is validated against, and Hermes's own catalog
+CI uses the same machinery on `ubuntu-latest` (`hermes plugins validate --install-deps`). The
+bootstrap `python3` must be 3.11 or newer — the toolchain scripts use `datetime.UTC` and `X | Y`
+unions — which `ubuntu-latest` satisfies.
 
 ## 6. Not yet proven
 

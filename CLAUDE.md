@@ -7,5 +7,6 @@
 ## Claude Code
 
 - Rules (`.claude/rules/`): `mcp.md` loads for `src/mcp_drop/mcp/**`; `tests.md` for `tests/**`.
-- Hooks (`.claude/settings.json`, ruff format + check on edited `.py` files) arrive with M0.
-- Personal preferences go in `CLAUDE.local.md` (gitignored), never here.
+- Hooks (`.claude/settings.json`): `ruff format` + `ruff check --fix` on every edited `.py` file.
+- Gates: `just check` runs everything CI runs. Personal preferences go in `CLAUDE.local.md`
+  (gitignored), never here.

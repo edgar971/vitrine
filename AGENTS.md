@@ -11,17 +11,18 @@ or **public** links. Status: designed, not built. The build follows `docs/roadma
 
 ## Commands
 
-Only `uv` is required. Until M0 lands there is no package; the only runnable code is the spike:
-`cd docs/spike && uv run --no-project --python 3.15 --with fastmcp==4.1.0 --with uvicorn --with httpx --with playwright python run.py`.
-
-From M0 on:
+Only `uv` and `just` are required. The package is empty until M1; M0 ships the toolchain, so
+`just check` is green today.
 
 | Task | Command |
 |---|---|
 | Install | `uv sync` |
 | Every gate CI runs (**before every commit**) | `just check` |
-| One test | `uv run pytest -k <name>` |
-| Serve locally | `uv run mcp-drop serve` |
+| One test | `uv run pytest -k <name> --no-cov` |
+| Serve locally (M1+) | `uv run mcp-drop serve` |
+
+`just` alone lists the recipes (`just lint`, `just types`, `just layers`, `just test`,
+`just test-browser`, `just audit`). CI runs the same recipes, so the two cannot drift.
 
 ## Layout
 

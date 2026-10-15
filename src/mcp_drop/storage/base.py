@@ -61,13 +61,18 @@ class Store(Protocol):
     """Where artifacts live. Every implementation runs ``tests/contract/store_spec.py``."""
 
     def create(self, artifact_id: str, draft: ArtifactDraft, *, source: str) -> Artifact:
-        """Write version 1 and its ``meta.json``; ``Conflict`` if the id is taken (spec § 4.3)."""
+        """Write version 1 and its ``meta.json``; ``Conflict`` if the id is taken (spec § 4.3).
+
+        A draft's ``upload_nonce`` is recorded as spent in the same write.
+        """
         ...
 
     def add_version(self, artifact_id: str, draft: VersionDraft) -> Artifact:
         """Write the next version and replace ``meta.json``; ``NotFound`` for an unknown id.
 
         ``files=None`` carries the current files over, so a metadata change is still a version.
+        A draft's ``upload_nonce`` that was already spent is a ``Conflict``; otherwise it is
+        recorded as spent in the same write, so one upload URL lands at most once (spec § 7.3).
         """
         ...
 
@@ -85,6 +90,13 @@ class Store(Protocol):
 
     def read(self, artifact_id: str, path: str, *, version: int | None = None) -> bytes:
         """Read one file's bytes, applying the path rule when resolving (spec § 4.3)."""
+        ...
+
+    def locate(self, artifact_id: str, path: str, *, version: int | None = None) -> Path:
+        """The local file behind one path, so a view can stream it with ``Range`` (spec § 7.2).
+
+        Same rules as ``read``. A store that is not on local disk returns a spooled copy.
+        """
         ...
 
     def list(self, query: ArtifactQuery) -> ArtifactPage:

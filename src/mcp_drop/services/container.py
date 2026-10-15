@@ -11,6 +11,7 @@ from mcp_drop.services.audit import AuditLog
 from mcp_drop.services.gate import PublicGate
 from mcp_drop.services.limits import RateLimiter
 from mcp_drop.services.links import LinkPolicy, LinkService
+from mcp_drop.services.tokens import TokenBook
 from mcp_drop.storage.base import StoreConfig
 from mcp_drop.storage.filesystem import FileStore
 
@@ -23,10 +24,11 @@ class Services:
     gate: PublicGate
     audit: AuditLog
     limits: RateLimiter
+    tokens: TokenBook
 
     @classmethod
     def from_settings(cls, settings: Settings, *, clock: Clock | None = None) -> Services:
-        """Wire the store, the signer, the audit log, the gate and the buckets from settings."""
+        """Wire the store, the signer, the audit log, the gate, the buckets and the tokens."""
         clock = clock or SystemClock()
         audit = AuditLog(settings.data_dir, retention=settings.audit_retention, clock=clock)
         links = LinkService(
@@ -38,4 +40,5 @@ class Services:
             gate=PublicGate(settings.public_mode),
             audit=audit,
             limits=RateLimiter.from_settings(settings),
+            tokens=TokenBook(settings.tokens),
         )

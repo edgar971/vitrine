@@ -46,13 +46,15 @@ fetching content from URLs, and storage backends other than the filesystem.
 
 ```
 sig  = b64url(body) "." b64url(HMAC-SHA256(secret, body)[0:16])
-body = "view"   "|" id "|" expires_unix "|" link_epoch        (private viewing)
-     | "upload" "|" id "|" expires_unix "|" nonce             (signed upload URL)
+body = "view"   "|" id "|" expires_unix "|" link_epoch                (private viewing)
+     | "upload" "|" id "|" expires_unix "|" nonce "|" client       (signed upload URL)
 ```
 
 - `b64url` is URL-safe base64 without padding.
 - Verification **MUST** use a constant-time comparison.
 - The `kind` is covered by the MAC, so a signature of one kind **MUST NOT** verify as another.
+- An upload URL signs the client that asked for it. The upload is attributed to that client and
+  spends that client's `rate_writes` bucket, whoever runs the `PUT`.
 - A link that is tampered, expired, of the wrong kind, for another id or carrying a stale epoch
   **MUST** produce the same response as an unknown artifact (404).
 - TTLs are *configurable*: default and maximum for view links and for upload URLs (§ 8).
@@ -303,17 +305,22 @@ cover them.
 | Method and path | Auth | Behaviour |
 |---|---|---|
 | `GET /a/{id}/[{path}]` | none | Public artifact, current version. A missing, private or malformed id returns 404. |
-| `GET /a/{id}@{n}/[{path}]` | none | Pinned version `n` of a public artifact |
+| `GET /a/{id}@{n}/[{path}]` | none | Pinned version `n` of a public artifact. A version that is not retained returns 404. |
 | `GET /s/{sig}/[{path}]`, `GET /s/{sig}@{n}/[{path}]` | view signature | The same for any artifact the signature names |
-| `PUT /u/{sig}?filename=` | upload signature | Raw body. Creates the pre-allocated private artifact, or adds a version. Single use. |
-| `POST /api/artifacts` | bearer | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?`, `note?`, `client_ref?`. Returns `201 {id, url, version}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
-| `PUT /api/artifacts/{id}` | bearer | Same body. Adds a version; `merge=true` overlays. |
-| `GET /api/artifacts` | bearer | Same as `artifact_list` |
+| `PUT /u/{sig}?filename=[&title=]` | upload signature | Raw body. Creates the pre-allocated private artifact (`201`), or adds a version that overlays the file on the current ones (`200`). Single use. Returns `{id, url, version, expires_at}`. |
+| `POST /api/artifacts` | bearer, `drop:write` | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?` (repeatable, or comma-separated), `note?`, `client_ref?`. Any other field is refused with 400, so there is no way to send a visibility. Returns `201 {id, url, version, expires_at}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
+| `PUT /api/artifacts/{id}` | bearer, `drop:write` | Same body, without `client_ref`. Adds a version; `merge=true` overlays; `expires_in=never` clears the expiry. |
+| `GET /api/artifacts` | bearer, `drop:read` | Same query parameters and page as `artifact_list` |
 | `GET /healthz` | none | `200 {"ok": true}` when `data_dir` is writable, else 503 |
 | `GET /metrics` on `metrics_port` | none | Prometheus text format, on a separate listener (§ 11) |
 
 The `@{n}` suffix keeps version pinning inside one path segment, so relative asset URLs in
 multi-file HTML keep working under every prefix.
+
+Every `GET` route also answers `HEAD`. A view URL without its trailing slash redirects to it.
+An empty `{path}` serves the entry; an entry in a subdirectory is redirected to (`307`), so its
+relative links resolve beside it. A token without the route's scope gets 403, and the refusal is
+audited (§ 11.3).
 
 ### 7.2 Viewing
 
@@ -342,7 +349,7 @@ Anything else **MUST** be served as `application/octet-stream` with
 | `csv`, `tsv` | Table |
 | `json` | Indented, escaped |
 
-All renderer output is HTML.
+All renderer output is HTML. A file over 2 MiB is served as itself rather than rendered.
 
 **Headers on every artifact response**
 
@@ -354,8 +361,11 @@ All renderer output is HTML.
 | `Cache-Control` | `private, no-store` under `/s/`; `public, max-age=60` under `/a/` |
 | `Content-Security-Policy` | `sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads; frame-ancestors 'none'` |
 
-The `Content-Security-Policy` header applies to HTML, SVG and renderer output. It **MUST NOT**
-include `allow-same-origin`.
+The `Content-Security-Policy` header applies to HTML, SVG, XML (an XHTML namespace makes XML a
+page) and renderer output. It **MUST NOT** include `allow-same-origin`.
+
+Errors on a view are plain text and carry the same headers, with `no-store`. A malformed path
+on a view is a 404 like any other missing file.
 
 `Range` requests **SHOULD** be supported for media.
 
@@ -371,14 +381,20 @@ include `allow-same-origin`.
 **Upload URLs** (`artifact_upload_url`)
 
 - The `id` is always fixed: it is pre-allocated when the caller doesn't give one.
-- The nonce is recorded in `used_upload_nonces` (the last 50 are kept).
+- The nonce is recorded in `used_upload_nonces` (the last 50 are kept), in the same write as
+  the version it lands, so two concurrent `PUT`s of one URL land at most once.
 - A replay returns 409.
+- An id that once held an artifact is never created again by an upload: if the artifact was
+  deleted or expired after the URL was issued, the `PUT` returns 404. Re-creating it would make
+  its old private links (epoch 0) open the new content.
 
 ### 7.4 Host and Origin
 
 The server **MUST** reject requests whose `Host` is not in the allowed set with 421. The allowed
-set is the host of `public_base_url` plus `allowed_hosts`. It **MUST** also reject browser
-requests to `/mcp` whose `Origin` is foreign, with 403.
+set is the host of `public_base_url` plus `allowed_hosts`; hosts compare without their port. It
+**MUST** also reject browser requests to `/mcp` whose `Origin` is foreign, with 403. An `Origin`
+is trusted when it is `public_base_url`'s origin or names a host in `allowed_hosts`; anything
+else, `null` included, is foreign.
 
 Health checks **MUST** send an allowed `Host`.
 
@@ -401,6 +417,9 @@ Behaviour when a bucket is empty:
 
 The source IP honours `X-Forwarded-For` only from `forwarded_allow_ips`. Setting a limit to
 `off` disables it. Counters reset on restart, which is acceptable for a single process.
+
+A refusal from a client's bucket is audited (§ 11.3). A refused view is not: a viewer has no
+client name, and writing a line per refused request would turn a flood into disk writes.
 
 ## 8. Configuration
 
@@ -530,6 +549,7 @@ mcp-drop serve --config drop.toml
 | Condition | MCP | HTTP |
 |---|---|---|
 | Missing or invalid token | 401 (transport) | 401 |
+| Token without the scope | tool not listed; calling it fails as unknown | 403 |
 | Unknown or malformed id; private id on `/a/`; invalid link | tool error `not found` | 404 |
 | Expired artifact | tool error `expired` | 410 |
 | Unsafe path; bad entry; empty artifact | tool error naming the problem | 400 |
@@ -540,7 +560,8 @@ mcp-drop serve --config drop.toml
 | Public refused (§ 6) | tool error stating it stays private | — |
 | Host not allowed / foreign Origin | — | 421 / 403 |
 
-Error messages **MUST NOT** reveal whether a private artifact exists.
+Error messages **MUST NOT** reveal whether a private artifact exists. A 5xx answers
+`internal error` and never the underlying message, which can carry filesystem details.
 
 ## 11. Observability and audit
 
@@ -585,7 +606,7 @@ state change is acknowledged.
 | `upload_url_issued` | `expires_at` |
 | `deleted` | — |
 | `expired` | — (written by the sweep) |
-| `access_denied` | `reason` = `scope` \| `rate_limited`; `tool`, or `route` as a route **name** (`view_private`, `api_create`, …), never a path. A refused resource read is `tool` = `resources/read`. `artifact` is present only when the call named a well-formed id. |
+| `access_denied` | `reason` = `scope` \| `rate_limited`; `tool`, or `route` as a route **name** (`upload`, `api_create`, …), never a path. A refused resource read is `tool` = `resources/read`. `artifact` is present only when the call named a well-formed id. |
 
 Rules:
 

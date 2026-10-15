@@ -1,8 +1,11 @@
 name: ci
 
 on:
+  # Branches only: a `v*` tag runs these same jobs once, through release.yml.
   push:
+    branches: ["**"]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -80,6 +83,26 @@ jobs:
       # kubeconform (from its image), docker compose config and caddy adapt.
       - name: Validate the examples
         run: just examples
+
+  hermes-plugin:
+    name: hermes plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      # Hermes's own admission check: manifest, an isolated register() probe, collisions with
+      # built-in tools and the install-time security scan (docs/research.md § 5). PyPI's
+      # hermes-agent predates the command, so the action builds it from source at the pinned ref.
+      - name: hermes plugins validate
+        uses: NousResearch/hermes-agent/.github/actions/plugin-validate@b51e8b850494e0a95a4b410c3d9b9a26df9ae261
+        with:
+          path: integrations/hermes/drop
+          # The Hermes the plugin is admitted against; bump it with the action's pin.
+          hermes-ref: b51e8b850494e0a95a4b410c3d9b9a26df9ae261
 
   image:
     name: image

@@ -4,8 +4,8 @@ All notable changes to this project are documented here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Nothing has been released yet: `0.1.0` is the first release, and
-[`docs/roadmap.md`](docs/roadmap.md) is the plan that gets there.
+Each version's section is generated from its Conventional Commits by git-cliff
+([CONTRIBUTING.md](CONTRIBUTING.md#changelog)); `0.1.0`'s was written by hand, before that.
 
 ## [Unreleased]
 
@@ -87,6 +87,11 @@ Nothing has been released yet: `0.1.0` is the first release, and
   when one of them is renamed or removed.
 - `TokenBook`: the hashed-token check, shared by `/mcp` and `/api`.
 - `Store.locate`, so a view streams a file instead of reading it into memory.
+- The release process: `just release <version>` bumps every copy of the version, re-locks and
+  writes the changelog section; pre-release tags (`v0.2.0rc1`) publish to TestPyPI and a GitHub
+  pre-release, so a release can be rehearsed end to end. After `0.1.0`, the changelog is generated
+  from Conventional Commits by git-cliff, which a new `commits` CI job enforces.
+- `just wheel-test`, in CI: the built wheel, installed alone, serves `/api` and `/mcp`.
 
 ### Security
 
@@ -108,6 +113,10 @@ Nothing has been released yet: `0.1.0` is the first release, and
 
 ### Changed
 
+- The release workflow pushes, smoke-tests and signs the image before publishing to PyPI, and
+  runs `twine check` first, so a failed release no longer spends a PyPI version.
+- `mcp_drop.__version__` reads the installed package's metadata; `pyproject.toml` is the only
+  place the version is written.
 - The staging sweep takes a grace period: a sweep beside a running server (the periodic one and
   `mcp-drop sweep`) spares staging and unreferenced versions younger than 10 minutes, which a live
   write is still placing. Only the startup sweep clears everything.

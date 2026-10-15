@@ -2,6 +2,8 @@
 
 import runpy
 import sys
+import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -13,11 +15,14 @@ import mcp_drop.services
 import mcp_drop.storage
 import mcp_drop.web
 
+ROOT = Path(__file__).parents[2]
+
 
 class DescribeThePackage:
     class WhenItIsImported:
         def it_exposes_the_version_pyproject_declares(self) -> None:
-            assert mcp_drop.__version__ == "0.1.0"
+            project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+            assert mcp_drop.__version__ == project["project"]["version"]
 
         def it_imports_every_layer_the_layering_contract_names(self) -> None:
             layers = (

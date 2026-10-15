@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Callable
-from datetime import timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -16,6 +18,7 @@ from mcp_drop.domain.errors import (
     Invalid,
     NotFound,
     Refused,
+    StorageUnavailable,
 )
 from mcp_drop.domain.ids import new_id
 from mcp_drop.domain.models import (
@@ -74,6 +77,19 @@ def links(clock: Clock) -> LinkService:
 def service(store: FileStore, links: LinkService, audit: AuditLog, clock: Clock) -> ArtifactService:
     """The service under spec."""
     return ArtifactService(store=store, links=links, audit=audit, clock=clock)
+
+
+@pytest.fixture
+def retaining(
+    store_config: StoreConfig, clock: Clock, links: LinkService, audit: AuditLog
+) -> ArtifactService:
+    """A service whose store keeps two versions, so retention is reachable."""
+    return ArtifactService(
+        store=FileStore(store_config.model_copy(update={"retain_versions": 2}), clock),
+        links=links,
+        audit=audit,
+        clock=clock,
+    )
 
 
 @pytest.fixture
@@ -173,6 +189,19 @@ class DescribeCreate:
         def it_refuses_the_call(self, service: ArtifactService) -> None:
             with pytest.raises(Invalid):
                 service.create(_draft(client_ref="a b"), client=CLIENT)
+
+    class WhenTheRetriedRefNamesAnExpiredArtifact:
+        def it_answers_expired(
+            self,
+            service: ArtifactService,
+            clock: Clock,
+            advance: Callable[[timedelta], None],
+        ) -> None:
+            expires_at = clock.now() + timedelta(minutes=1)
+            service.create(_draft(client_ref="weekly", expires_at=expires_at), client=CLIENT)
+            advance(timedelta(minutes=2))
+            with pytest.raises(Expired):
+                service.create(_draft(client_ref="weekly", expires_at=expires_at), client=CLIENT)
 
 
 class DescribeUpdate:
@@ -427,10 +456,17 @@ class DescribeSweep:
             leftover.mkdir()
             assert service.sweep().staging == 1
 
-        def it_drops_an_old_audit_month(
-            self, service: ArtifactService, audit: AuditLog, tmp_path: Path
-        ) -> None:
-            (audit._root / "2025-01.jsonl").write_text("{}\n")
+        def it_drops_an_old_audit_month(self, service: ArtifactService, tmp_path: Path) -> None:
+            old = AuditEvent(
+                ts=datetime(2025, 1, 5, 9, 0, tzinfo=UTC),
+                event=AuditEventName.CREATED,
+                artifact="k7m2q9x4tz3wbn6r",
+                client=CLIENT,
+                version=1,
+                files=1,
+                bytes=1,
+            )
+            (tmp_path / "audit" / "2025-01.jsonl").write_text(old.model_dump_json() + "\n")
             assert service.sweep().audit_months == 1
 
 
@@ -478,6 +514,88 @@ class DescribeAuditFailures:
             with pytest.raises(AuditUnavailable):
                 broken.revoke_links(artifact_id, client=CLIENT)
             assert store.get(artifact_id).link_epoch == 0
+
+
+class DescribeRacedCreates:
+    class WhenTheSameClientRefIsRaced:
+        def it_produces_one_artifact(
+            self, service: ArtifactService, store: FileStore, audit: AuditLog
+        ) -> None:
+            draft = _draft(client_ref="weekly")
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                list(pool.map(lambda _: _create_swallowing_refusal(service, draft), range(4)))
+            assert len(store.list(ArtifactQuery()).items) == 1
+            assert len(audit.query()) == 1
+
+
+def _create_swallowing_refusal(service: ArtifactService, draft: ArtifactDraft) -> object:
+    """One racing create; a caller that arrives before the artifact lands is refused."""
+    try:
+        return service.create(draft, client=CLIENT)
+    except NotFound:
+        return None
+
+
+class DescribeRetention:
+    class WhenMoreVersionsThanTheRetentionAreWritten:
+        def it_keeps_only_retain_versions(self, retaining: ArtifactService) -> None:
+            published = retaining.create(_draft(), client=CLIENT)
+            for _ in range(2):
+                retaining.update(
+                    published.id, VersionDraft(files={"report.html": b"2"}), client=CLIENT
+                )
+            assert len(retaining.get(published.id).artifact.versions) == 2
+
+        def it_removes_the_dropped_version_directory(self, retaining: ArtifactService) -> None:
+            published = retaining.create(_draft(), client=CLIENT)
+            for _ in range(2):
+                retaining.update(
+                    published.id, VersionDraft(files={"report.html": b"2"}), client=CLIENT
+                )
+            with pytest.raises(NotFound):
+                retaining.get(published.id, version=1)
+
+
+class DescribeAFailingDeletion:
+    class WhenTheDiskRefusesIt:
+        def it_answers_with_a_typed_error(
+            self, service: ArtifactService, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            published = service.create(_draft(), client=CLIENT)
+
+            def refuse(*args: object, **kwargs: object) -> None:
+                raise OSError(28, "No space left on device")
+
+            monkeypatch.setattr(shutil, "rmtree", refuse)
+            with pytest.raises(StorageUnavailable):
+                service.delete(published.id, client=CLIENT)
+
+    class WhenASweepRecordsAnExpiryItCannotFinish:
+        def it_does_not_record_the_same_expiry_twice(
+            self,
+            service: ArtifactService,
+            audit: AuditLog,
+            clock: Clock,
+            advance: Callable[[timedelta], None],
+            monkeypatch: pytest.MonkeyPatch,
+        ) -> None:
+            published = service.create(
+                _draft(expires_at=clock.now() + timedelta(minutes=1)), client=CLIENT
+            )
+            advance(timedelta(minutes=2))
+
+            def refuse(*args: object, **kwargs: object) -> None:
+                raise OSError(28, "No space left on device")
+
+            with monkeypatch.context() as patched:
+                patched.setattr(shutil, "rmtree", refuse)
+                with pytest.raises(StorageUnavailable):
+                    service.sweep()
+            service.sweep()
+            expired = [event for event in audit.query() if event.event is AuditEventName.EXPIRED]
+            assert [event.artifact for event in expired] == [published.id]
+            with pytest.raises(NotFound):
+                service.get(published.id)
 
 
 class DescribeTheRequestHash:

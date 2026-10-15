@@ -65,3 +65,7 @@ class SchemaMismatch(DropError):
 
 class AuditUnavailable(DropError):
     """The audit log cannot be written, so the change does not happen (spec § 11.3)."""
+
+
+class StorageUnavailable(DropError):
+    """The store cannot complete the operation, so nothing changed on disk."""

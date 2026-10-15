@@ -181,6 +181,28 @@ class DescribeAddingAVersion:
                 store.add_version(artifact_id, VersionDraft(files={"a.html": b"x"}, entry="b.html"))
             assert store.get(artifact_id).version == 1
 
+    class WhenTheSamePathsAreUsedWithoutAMerge:
+        def it_accepts_the_replacement(self, store: Store) -> None:
+            artifact_id = _create(store, files={ENTRY: b"y", "data": b"x"})
+            updated = store.add_version(
+                artifact_id, VersionDraft(files={"data/inner.txt": b"z", ENTRY: b"y"})
+            )
+            assert updated.version == 2
+
+    class WhenAMergeNeedsAFileAsADirectory:
+        def it_refuses_the_version(self, store: Store) -> None:
+            artifact_id = _create(store, files={ENTRY: b"y", "data": b"x"})
+            with pytest.raises(Invalid):
+                store.add_version(
+                    artifact_id, VersionDraft(files={"data/inner.txt": b"z"}, merge=True)
+                )
+
+    class WhenAMergeNeedsADirectoryAsAFile:
+        def it_refuses_the_version(self, store: Store) -> None:
+            artifact_id = _create(store, files={ENTRY: b"y", "data/inner.txt": b"x"})
+            with pytest.raises(Invalid):
+                store.add_version(artifact_id, VersionDraft(files={"data": b"z"}, merge=True))
+
     class WhenTheArtifactIsUnknown:
         def it_is_not_found(self, store: Store) -> None:
             with pytest.raises(NotFound):
@@ -345,6 +367,26 @@ class DescribeListing:
                 store.list(ArtifactQuery(cursor="not-a-cursor"))
 
 
+class DescribeTheQuotaOfAMerge:
+    class WhenOnlyTheNewBytesMustFit:
+        def it_charges_the_merge_its_new_bytes(self, merge_quota_store: Store) -> None:
+            artifact_id = new_id()
+            merge_quota_store.create(artifact_id, _draft(files={"a.txt": b"x" * 4}), source=CLIENT)
+            updated = merge_quota_store.add_version(
+                artifact_id, VersionDraft(files={"b.txt": b"y" * 4}, merge=True)
+            )
+            assert updated.version == 2
+
+    class WhenTheNewBytesDoNotFit:
+        def it_refuses_the_write(self, merge_quota_store: Store) -> None:
+            artifact_id = new_id()
+            merge_quota_store.create(artifact_id, _draft(files={"a.txt": b"x" * 4}), source=CLIENT)
+            with pytest.raises(OverQuota):
+                merge_quota_store.add_version(
+                    artifact_id, VersionDraft(files={"b.txt": b"y" * 6}, merge=True)
+                )
+
+
 class DescribeDeleting:
     class WhenTheArtifactExists:
         def it_is_gone(self, store: Store) -> None:
@@ -463,12 +505,13 @@ class DescribeClaimingAClientRef:
             assert claim.reused is False
 
     class WhenTheArtifactNeverArrived:
-        def it_frees_the_key(self, store: Store) -> None:
-            store.claim_ref(client=CLIENT, ref="weekly", request_hash="aa", artifact_id=new_id())
-            claim = store.claim_ref(
-                client=CLIENT, ref="weekly", request_hash="aa", artifact_id=_create(store)
+        def it_keeps_the_key_until_the_ref_ttl(self, store: Store) -> None:
+            pending = new_id()
+            store.claim_ref(client=CLIENT, ref="weekly", request_hash="aa", artifact_id=pending)
+            again = store.claim_ref(
+                client=CLIENT, ref="weekly", request_hash="aa", artifact_id=new_id()
             )
-            assert claim.reused is False
+            assert (again.reused, again.id) == (True, pending)
 
     class WhenTwoCallsRace:
         def it_lets_exactly_one_of_them_win(self, store: Store) -> None:

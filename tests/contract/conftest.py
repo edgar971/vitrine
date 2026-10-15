@@ -39,6 +39,14 @@ def limited_store(
 
 
 @pytest.fixture
+def merge_quota_store(
+    store_factory: Callable[[StoreConfig, Clock], Store], store_config: StoreConfig, clock: Clock
+) -> Store:
+    """A store whose quota sits between a merged version and the bytes the merge adds."""
+    return store_factory(store_config.model_copy(update={"quota": 9, "max_artifact": 12}), clock)
+
+
+@pytest.fixture
 def two_version_store(
     store_factory: Callable[[StoreConfig, Clock], Store], store_config: StoreConfig, clock: Clock
 ) -> Store:

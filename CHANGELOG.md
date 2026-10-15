@@ -30,3 +30,24 @@ Nothing has been released yet: `0.1.0` is the first release, and
   create), `AuditLog` (appended and fsync'd before a change is acknowledged) and `RateLimiter`.
 - M1 — the layering contract now names `domain` below `storage`, which is what it has to be:
   storage cannot be written without the models it stores.
+- M2 — the MCP layer: `HashedTokenVerifier` (SHA-256 hashes, every entry compared, scopes per
+  token); the nine `artifact_*` tools on one `LocalProvider`, each with a title, all four
+  annotation hints, a per-tool scope and described, bounded parameters; the `artifact://{id}`,
+  `artifact://{id}/{path*}` and `artifact://{id}/history` resources; the `share` prompt; and the
+  server instructions of spec § 5.4, asserted against the spec text.
+- M2 — `PublicGate`, the one path to public, for both protocol eras: `InputRequiredResult` on
+  `2026-07-28`, `elicitation/create` on handshake-era connections, one verdict for both. It fails
+  closed on decline, cancel, `confirm: false`, a client without elicitation, a transport error and
+  a client that never answers, and every refusal is audited as `publish_refused`.
+- M2 — the MCP edge: a scope refusal is recorded as `access_denied`, the per-client buckets are
+  spent before any work, and a domain error reaches the client as its own indistinguishable message.
+- `ArtifactService` gains `link`, `upload_url` (the id is pre-allocated and the issue audited),
+  `read_text` (text types up to 1 MB) and `history`; `Services` wires everything from settings.
+
+### Fixed
+
+- A write hung forever when `data_dir` was relative (the default `./data`) or reached through a
+  symlink: the staging walk compared a resolved path with an unresolved one.
+- An `access_denied` audit event could not be built, because `tool` and `route` were not among the
+  fields the event allows.
+- An update without files failed as an empty version; the current files now carry over (spec § 5.1).

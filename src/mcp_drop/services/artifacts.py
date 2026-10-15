@@ -5,27 +5,43 @@ from __future__ import annotations
 import contextlib
 import hashlib
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from functools import partial
+from urllib.parse import urlencode
 
 from pydantic import BaseModel, ConfigDict
 
 from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import AuditUnavailable, DropError, Expired, Invalid, Refused
+from mcp_drop.domain.errors import (
+    AuditUnavailable,
+    DropError,
+    Expired,
+    Invalid,
+    NotFound,
+    Refused,
+    TooLarge,
+)
 from mcp_drop.domain.ids import new_id, validate_client_ref
+from mcp_drop.domain.media import content_type, is_text
 from mcp_drop.domain.models import (
     Artifact,
     ArtifactDetail,
     ArtifactDraft,
+    ArtifactLink,
     ArtifactPage,
     ArtifactQuery,
     GateDecision,
     PublishedArtifact,
+    UploadGrant,
     VersionDraft,
     Visibility,
 )
+from mcp_drop.domain.paths import validate_path
 from mcp_drop.services.audit import AuditEvent, AuditEventName, AuditLog
 from mcp_drop.services.links import LinkService
 from mcp_drop.storage.base import Store
+
+TEXT_READ_LIMIT = 1024 * 1024
 
 
 class SweepReport(BaseModel):
@@ -107,6 +123,75 @@ class ArtifactService:
         return ArtifactDetail(
             artifact=artifact, version=number, files=self._store.files(artifact_id, number)
         )
+
+    def read_text(self, artifact_id: str, path: str) -> str:
+        """One text file of the current version, up to 1 MB, for reading back (spec § 5.2)."""
+        self._usable(artifact_id)
+        validate_path(path)
+        entry = next((file for file in self._store.files(artifact_id) if file.path == path), None)
+        if entry is None:
+            raise NotFound()
+        kind = content_type(path)
+        if not is_text(path):
+            raise Invalid(f"{path} is {kind} ({entry.bytes} bytes): only text files read back")
+        if entry.bytes > TEXT_READ_LIMIT:
+            raise TooLarge(f"{path} is {kind} ({entry.bytes} bytes): text reads back up to 1 MB")
+        try:
+            return self._store.read(artifact_id, path).decode()
+        except UnicodeDecodeError:
+            raise Invalid(f"{path} is {kind} ({entry.bytes} bytes) but not UTF-8") from None
+
+    def expiry(self, after: timedelta) -> datetime:
+        """The moment that lies ``after`` from now on the service's clock."""
+        return self._clock.now() + after
+
+    def link(self, artifact_id: str, *, ttl: timedelta | None = None) -> ArtifactLink:
+        """A fresh private link, or the public URL when the artifact is public (spec § 5.1)."""
+        return self.url_for(self._usable(artifact_id), ttl=ttl)
+
+    def url_for(self, artifact: Artifact, *, ttl: timedelta | None = None) -> ArtifactLink:
+        """The URL that opens ``artifact`` as it is now; a public one carries no expiry."""
+        if artifact.visibility is Visibility.PUBLIC:
+            return ArtifactLink(url=self._links.public_url(artifact.id))
+        link = self._links.view_url(artifact.id, epoch=artifact.link_epoch, ttl=ttl)
+        return ArtifactLink(url=link.url, expires_at=link.expires_at)
+
+    def upload_url(
+        self,
+        filename: str,
+        *,
+        client: str,
+        artifact_id: str | None = None,
+        title: str | None = None,
+        ttl: timedelta | None = None,
+    ) -> UploadGrant:
+        """Issue a single-use upload URL; a new artifact's id is fixed now (spec § 7.3)."""
+        validate_path(filename)
+        if artifact_id is None:
+            artifact_id = new_id()
+        else:
+            self._usable(artifact_id)
+        link = self._links.upload_url(artifact_id, ttl=ttl)
+        # The signature fixes the id, the expiry and the nonce; the name and the title are only
+        # what the holder of that capability chose to call the upload, so they ride unsigned.
+        query = {"filename": filename} | ({"title": title} if title else {})
+        self._audit.append(
+            AuditEvent(
+                ts=self._clock.now(),
+                event=AuditEventName.UPLOAD_URL_ISSUED,
+                artifact=artifact_id,
+                client=client,
+                expires_at=link.expires_at,
+            )
+        )
+        return UploadGrant(
+            id=artifact_id, put_url=f"{link.url}?{urlencode(query)}", expires_at=link.expires_at
+        )
+
+    def history(self, artifact_id: str) -> tuple[AuditEvent, ...]:
+        """The audit events of one existing artifact, newest first (spec § 5.2)."""
+        artifact = self._store.get(artifact_id)
+        return self._audit.query(artifact=artifact.id)
 
     def list(self, query: ArtifactQuery) -> ArtifactPage:
         """List artifacts, newest first; reads are not audited (spec § 11.3)."""

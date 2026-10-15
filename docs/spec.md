@@ -197,13 +197,13 @@ The HTTP API applies the same scopes: `/api` writes need `drop:write`, and listi
 | Tool | Parameters | Result | Scope |
 |---|---|---|---|
 | `artifact_create` | `title`; `files: {path: text}` (UTF-8, total ≤ `max_mcp_body`); `entry?`; `expires_in?`; `tags?`; `note?`; `client_ref?` (§ 4.5) | `{id, url, version, expires_at, created}`. Always **private**; `url` is a fresh private link. `created` is false when `client_ref` matched. | `drop:write` |
-| `artifact_update` | `id`; `files?`; `merge=false`; `entry?`; `title?`; `expires_in?` (`"never"` clears); `tags?`; `note?` | `{id, url, version}`. The id is unchanged. With `merge`, files overlay the current version; without it they replace it. | `drop:write` |
+| `artifact_update` | `id`; `files?`; `merge=false`; `entry?`; `title?`; `expires_in?` (`"never"` clears); `tags?`; `note?` | `{id, url, version}`. The id is unchanged. With `merge`, files overlay the current version; without it they replace it. Without `files`, the current files carry over, so a metadata-only change is still a new version. | `drop:write` |
 | `artifact_get` | `id`; `version?` | Metadata plus `files: [{path, bytes}]` | `drop:read` |
 | `artifact_list` | `query?` (title or tag substring); `tag?`; `visibility?`; `source?`; `limit=20` (max 100); `cursor?` | `{items: [{id, title, visibility, version, updated_at, source, tags}], next_cursor}`, newest first. **No URLs**: links are minted on purpose with `artifact_link`. | `drop:read` |
 | `artifact_link` | `id`; `ttl?` | `{url, expires_at}`. A fresh private link, or the public URL if public. | `drop:share` |
 | `artifact_set_visibility` | `id`; `visibility` | `{id, visibility, url}`. Going public follows § 6. Every change increments the link epoch. | `drop:publish` |
 | `artifact_revoke_links` | `id` | `{id, link_epoch}` | `drop:share` |
-| `artifact_upload_url` | `filename`; `id?`; `title?`; `ttl?` | `{put_url, expires_at, curl}`: a single-use signed upload URL (§ 7.3) | `drop:write` |
+| `artifact_upload_url` | `filename`; `id?`; `title?`; `ttl?` | `{id, put_url, expires_at, curl}`: a single-use signed upload URL (§ 7.3) for the artifact `id`, pre-allocated when none was given. `filename` and `title` ride unsigned in the URL's query: the signature fixes the id, the expiry and the nonce; the rest is the capability holder's to name. | `drop:write` |
 | `artifact_delete` | `id` | `{deleted: id}` | `drop:write` |
 
 Every tool also carries a `title` and all four MCP annotation hints (`readOnlyHint`,
@@ -220,9 +220,11 @@ No tool other than `artifact_set_visibility` takes a visibility, and no HTTP rou
 |---|---|
 | `artifact://{id}` | `meta.json` plus the file list (JSON) |
 | `artifact://{id}/{path}` | Text of one file in the current version. Text types only, up to 1 MB. Anything else returns an error naming the size and type. |
-| `artifact://{id}/history` | This artifact's audit events, newest first (§ 11.3) |
+| `artifact://{id}/history` | This artifact's audit events, newest first (§ 11.3). An unknown id is `not found`. |
 
-Clients use resources to read an artifact back before revising it.
+Clients use resources to read an artifact back before revising it. Every resource needs `drop:read`
+and spends the `rate_reads` bucket. A file named `history` at an artifact's root is shadowed by the
+history resource; read it with `GET /s/…` instead.
 
 ### 5.3 Policy carried in descriptions
 
@@ -285,7 +287,10 @@ The default on `confirm` lets approve/deny-only clients approve: they answer `ac
 content.
 
 The gate **MUST** fail closed. Decline, cancel, timeout, transport error and a client without
-elicitation support all leave the artifact private and return a tool error saying so. Unattended
+elicitation support all leave the artifact private and return a tool error saying so. A client that
+did not declare the elicitation capability is refused without being asked (`unsupported`), and on
+a handshake-era connection the server stops waiting after 10 minutes (`declined`), so a client that
+never answers cannot hold the call open. Unattended
 agents (scheduled jobs) therefore cannot publish publicly under `confirm`.
 
 ## 7. HTTP interface
@@ -580,7 +585,7 @@ state change is acknowledged.
 | `upload_url_issued` | `expires_at` |
 | `deleted` | — |
 | `expired` | — (written by the sweep) |
-| `access_denied` | `reason` = `scope` \| `rate_limited`; `tool`, or `route` as a route **name** (`view_private`, `api_create`, …), never a path |
+| `access_denied` | `reason` = `scope` \| `rate_limited`; `tool`, or `route` as a route **name** (`view_private`, `api_create`, …), never a path. A refused resource read is `tool` = `resources/read`. `artifact` is present only when the call named a well-formed id. |
 
 Rules:
 

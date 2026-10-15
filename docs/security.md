@@ -52,7 +52,7 @@ control is specified and must ship with the tests listed in § 6.
 | T11 | A compromised drop process attacks its surroundings | drop never makes outbound requests (there is no fetch-from-URL feature). Runs non-root with a read-only root filesystem. The Kubernetes example denies all egress and mounts no service-account token. | Spec and example |
 | T12 | A token leaks, or a client is over-privileged | One token per client, revoked by removing one hash; 256-bit tokens. **Scopes** (`drop:read`, `write`, `share`, `publish`): a tool outside the token's scopes is not even listed, and calling it fails as an unknown tool. | Validated (scoped token cannot see or call a write tool) |
 | T13 | The signing secret leaks | Rotating it revokes every private link. Accepted from the environment only, never from config files. | Spec |
-| T14 | Supply chain | `uv.lock` with `--frozen` installs, `pip-audit` in CI, PyPI trusted publishing, a cosign-signed image with an SBOM, the image pinned by digest in deployments | Spec |
+| T14 | Supply chain | `uv.lock` with `--frozen` installs, `pip-audit` in CI, PyPI trusted publishing, a cosign-signed image with an SBOM, the image pinned by digest in deployments | `release.yml`; verification in [operations](operations.md) § 9 |
 | T15 | Phishing pages hosted on the drop domain | Treat drop's hostname as untrusted content: a dedicated hostname with no other app's cookies, and `noindex` | Operator guidance |
 | T16 | A looping or hijacked agent floods writes, links or views | Per-client token buckets for writes, links and reads; a per-IP bucket for views; rejected calls do no work. Quotas cap the damage that does get through. | Spec |
 | T17 | Nobody can tell who published something, or when | An append-only audit log (fsync before acknowledging), with one event per state change, including refused publishes and denied calls. If the audit write fails, the change does not happen. | Spec |
@@ -101,3 +101,35 @@ control is specified and must ship with the tests listed in § 6.
     - a failing audit write aborts the change.
 12. **Idempotency:** concurrent creates with one `client_ref` produce one artifact; a different
     request with the same key conflicts.
+13. **Client plugins:** a plugin's upload tool has no visibility parameter, and what it publishes
+    is private (`tests/integrations/hermes_spec.py`).
+
+### Invariants and the specs that hold them
+
+Each invariant in [`AGENTS.md`](../AGENTS.md), named by its bold lead, has at least one spec
+here. `tests/unit/invariants_spec.py`
+fails when a listed spec is renamed or removed, so this table cannot point at nothing.
+
+| Invariant | Spec |
+|---|---|
+| Private by default | `tests/mcp/tools_spec.py::DescribeArtifactCreate::WhenTheFilesAreValid::it_creates_a_private_artifact` |
+| Private by default | `tests/http/api_spec.py::DescribeCreatingOverTheApi::WhenTheBodyIsValid::it_creates_a_private_artifact` |
+| Private by default | `tests/http/uploads_spec.py::DescribeTheUploadRoute::WhenTheUrlIsValid::it_is_private` |
+| Private by default | `tests/integrations/hermes_spec.py::DescribePublishingFiles::WhenAFolderIsPublished::it_leaves_the_artifact_private` |
+| One path to public | `tests/mcp/gate_spec.py::DescribeThePublicGate::WhenTheHumanDeclines::it_leaves_the_artifact_private` |
+| One path to public | `tests/mcp/gate_spec.py::DescribeThePublicGate::WhenTheClientCannotElicit::it_leaves_the_artifact_private` |
+| One path to public | `tests/mcp/gate_spec.py::DescribeTheHandshakeEraGate::WhenTheHumanNeverAnswers::it_leaves_the_artifact_private` |
+| One path to public | `tests/mcp/gate_spec.py::DescribeTheHandshakeEraGate::WhenTheClientFailsWhileAnswering::it_leaves_the_artifact_private` |
+| One path to public | `tests/http/api_spec.py::DescribeCreatingOverTheApi::WhenAVisibilityIsSent::it_refuses_the_request` |
+| One path to public | `tests/integrations/hermes_spec.py::DescribeRegistering::it_offers_no_way_to_ask_for_visibility` |
+| Every HTTP route authenticates itself | `tests/http/routes_spec.py::DescribeTheRouteTable::WhenTheAppIsAssembled::it_classifies_every_route` |
+| Every HTTP route authenticates itself | `tests/http/routes_spec.py::DescribeTheRouteTable::it_refuses_a_caller_without_credentials` |
+| Signed link segments and tokens are never logged | `tests/http/logs_spec.py::DescribeTheAccessLog::WhenASignedLinkIsViewed::it_never_logs_the_signature` |
+| Signed link segments and tokens are never logged | `tests/http/logs_spec.py::DescribeTheAccessLog::WhenAnUploadUrlIsUsed::it_never_logs_the_signature` |
+| Signed link segments and tokens are never logged | `tests/http/logs_spec.py::DescribeTheAccessLog::WhenABearerTokenIsSent::it_never_logs_the_token` |
+| Every state change is audited | `tests/mcp/audit_spec.py::DescribeTheAuditOfEachChange::WhenAnArtifactIsCreated::it_records_created_once` |
+| Every state change is audited | `tests/unit/services/artifacts_spec.py::DescribeDelete::WhenTheAuditFails::it_keeps_the_artifact` |
+| Every state change is audited | `tests/mcp/audit_spec.py::DescribeTheAuditOfEachChange::WhenTheTitleIsSecret::it_keeps_the_title_out_of_the_log` |
+| Every state change is audited | `tests/unit/services/audit_spec.py::DescribeTheEventModel::WhenItIsInspected::it_holds_only_the_fields_the_spec_documents` |
+| No `allow-same-origin` | `tests/http/policy_spec.py::DescribeTheSandbox::it_never_allows_the_same_origin` |
+| No `allow-same-origin` | `tests/browser/sandbox_spec.py::DescribeTheSandboxInChromium::WhenAgentHtmlIsViewed::it_runs_in_an_opaque_origin` |

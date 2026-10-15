@@ -61,7 +61,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py315"
-src = ["src", "tests"]
+src = ["src", "tests", "integrations/hermes"]
 # The docs are the spec, not code: their examples are hand-wrapped, and the spike is throwaway.
 extend-exclude = ["docs/spike", "**/*.md"]
 
@@ -109,11 +109,15 @@ ban-relative-imports = "all"
 "src/mcp_drop/domain/errors.py" = ["N818"]
 # A tool's parameters are its schema (spec § 5.1): one per documented argument, plus injections.
 "src/mcp_drop/mcp/tools.py" = ["PLR0913", "PLR0917"]
+# Hermes loads a plugin as a package under a name of its own choosing, so it imports itself
+# relatively.
+"integrations/hermes/**" = ["TID252"]
 
 [tool.mypy]
 python_version = "3.15"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "integrations/hermes/drop"]
+mypy_path = "integrations/hermes"
 plugins = ["pydantic.mypy"]
 warn_unreachable = true
 
@@ -125,6 +129,8 @@ warn_required_dynamic_aliases = true
 [tool.pytest.ini_options]
 minversion = "9.1"
 testpaths = ["tests"]
+# The Hermes plugin is not part of the package; the specs import it as Hermes does, as `drop`.
+pythonpath = ["integrations/hermes"]
 python_files = ["*_spec.py"]
 python_classes = ["Describe*", "When*"]
 python_functions = ["it_*"]
@@ -143,7 +149,7 @@ markers = ["browser: drives a real Chromium (Playwright); run with `-m browser`"
 
 [tool.coverage.run]
 branch = true
-source = ["mcp_drop"]
+source = ["mcp_drop", "drop"]
 
 [tool.coverage.report]
 fail_under = 90

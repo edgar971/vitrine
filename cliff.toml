@@ -1,0 +1,49 @@
+# git-cliff: CHANGELOG.md sections from Conventional Commits (CONTRIBUTING.md § Changelog).
+# Run through `just changelog` and `just release`, which pin the git-cliff version.
+
+[changelog]
+# The file's header and the hand-written 0.1.0 section stay as they are: git-cliff renders one
+# version's section, and scripts/release.py places it.
+header = ""
+body = """
+{%- if version -%}
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{%- else -%}
+## [Unreleased]
+{%- endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+{% for commit in commits %}
+- {% if commit.scope %}{{ commit.scope }}: {% endif %}{{ commit.message }}\
+{% if commit.breaking %} (**breaking**){% endif %}
+{%- endfor %}
+{% endfor %}
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+# A commit that is not conventional fails the run (the `commits` CI job), unless skipped below.
+require_conventional = true
+filter_unconventional = false
+split_commits = false
+protect_breaking_commits = true
+filter_commits = false
+sort_commits = "oldest"
+# Only final versions are releases here: an rc tag does not close a section, so a final
+# version's notes cover everything since the previous final version.
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+# Keep a Changelog groups; the HTML comments fix their order and are stripped when rendered.
+commit_parsers = [
+  { message = "^Merge ", skip = true },
+  { message = "^chore\\(deps", skip = true },
+  { message = "^chore\\(release", skip = true },
+  # A security change is marked by its scope: `fix(security): …`.
+  { message = "^[a-z]+\\(security\\)", group = "<!-- 0 -->Security" },
+  { message = "^feat", group = "<!-- 1 -->Added" },
+  { message = "^fix", group = "<!-- 3 -->Fixed" },
+  { message = "^(perf|refactor)", group = "<!-- 2 -->Changed" },
+  { message = "^revert", group = "<!-- 4 -->Removed" },
+  { message = "^(docs|ci|build|test|chore|style)", skip = true },
+]

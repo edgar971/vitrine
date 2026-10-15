@@ -394,20 +394,26 @@ drop/                          github.com/edgar971/drop · PyPI and CLI: mcp-dro
 ### CI and releases
 
 **CI** runs on Python 3.15: lock check, ruff, mypy, import-linter, pytest with
-coverage, browser tests, `pip-audit`, a multi-arch image build without pushing, and
-`hermes plugins validate` on the Hermes plugin.
+coverage, a smoke test of the built wheel (`just wheel-test`), browser tests, `pip-audit`, a
+multi-arch image build without pushing, and `hermes plugins validate` on the Hermes plugin. On a
+pull request, the `commits` job checks every commit is a Conventional Commit.
 
 **Release** runs on a `v*` tag (`release.yml`). It first runs every CI job on the tagged commit
-(`ci.yml` is reusable) and checks that the tag, the `pyproject.toml` version and a `CHANGELOG.md`
-section agree. Then:
+(`ci.yml` is reusable) and checks that the tag is PEP 440 and agrees with `pyproject.toml` (and,
+for a final version, has a `CHANGELOG.md` section). Then:
 
-1. `uv build` publishes to PyPI by trusted publishing (`uv publish`, in the `pypi` environment).
-2. `ghcr.io/edgar971/drop:<version>` is pushed for amd64 and arm64 with an SBOM and provenance
-   attestation, and its digest is cosign-signed keylessly. No `latest` tag: deployments pin a
-   version or a digest.
-3. Release notes come from `CHANGELOG.md` (Keep a Changelog).
+1. `ghcr.io/edgar971/drop:<version>` is pushed for amd64 and arm64 with an SBOM and provenance
+   attestation, the pushed digest is smoke-tested, and the digest is cosign-signed keylessly. No
+   `latest` tag: deployments pin a version or a digest.
+2. `uv build`, `twine check`, then trusted publishing: to PyPI (`pypi` environment) for
+   `vX.Y.Z`, to TestPyPI (`testpypi`) for a pre-release `vX.Y.Z(a|b|rc)N`. The image goes first
+   because a PyPI version can never be uploaded again.
+3. A GitHub release: notes from the version's `CHANGELOG.md` section, or for a pre-release,
+   rendered from the commits by git-cliff and marked as a pre-release.
 
-Commits follow Conventional Commits.
+`pyproject.toml` holds the version; `mcp_drop.__version__` reads it from the installed metadata,
+and `just release <version>` moves the other copies, which a spec keeps in step. The changelog is
+generated from Conventional Commits (`cliff.toml`; CONTRIBUTING.md).
 
 **Container image**
 

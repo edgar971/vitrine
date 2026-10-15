@@ -184,6 +184,12 @@ toolchain scripts use `datetime.UTC` and `X | Y` unions — `ubuntu-latest` sati
 inside a GitHub Actions job, not on a bare shell. Both are satisfied by the runner the action
 targets; neither costs anything to depend on.
 
+The action's step sequence was reproduced end to end before M0 closed, with those three files
+supplied as a runner supplies them: a fresh shallow clone of `main` (`3bdb82d6`), the prepared
+toolchain (`python 3.14.7`, `uv 0.12.3`), the isolated validator runtime built by
+`pm.build_environment`, then the plugin validated with a pristine `HOME` — 14 checks, "Validation
+passed.", exit 0.
+
 ## 6. Not yet proven
 
 These must be covered by the implementation's tests or by a first deployment.

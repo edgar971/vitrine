@@ -90,3 +90,22 @@ one name:
 # Serve locally with the environment's DROP_* settings
 dev:
     uv run mcp-drop serve
+
+# Build the wheel, install it alone in a fresh venv, and drive serve, /api and /mcp through it
+wheel-test:
+    scripts/wheel-test.sh
+
+# Every commit since the last final release is conventional, and renders as the next section
+changelog range="":
+    uvx git-cliff@2.14.2 {{ if range == "" { "--unreleased" } else { range } }} --strip all
+
+# A pre-release (0.2.0rc1) leaves CHANGELOG.md alone. Nothing is tagged or pushed.
+# Prepare a release commit: bump every version copy, re-lock, write the changelog, run the gates
+release version:
+    uv run python scripts/release.py "{{version}}"
+    # uv.lock is resolved against PyPI, whatever index this machine's uv is pointed at.
+    UV_DEFAULT_INDEX=https://pypi.org/simple UV_INDEX_URL=https://pypi.org/simple uv lock
+    uv sync
+    just check
+    @echo "release: review the diff, commit it as 'chore(release): {{version}}', merge, then:"
+    @echo "         git tag v{{version}} <merged commit> && git push origin v{{version}}"

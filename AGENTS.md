@@ -21,6 +21,8 @@ Only `uv` and `just` are required. `just check` runs every gate CI runs, and it 
 | Every gate CI runs (**before every commit**) | `just check` |
 | One test | `uv run pytest -k <name> --no-cov` |
 | Serve locally | `uv run mcp-drop serve` |
+| Test the built wheel | `just wheel-test` |
+| Prepare a release | `just release <version>` (CONTRIBUTING.md § Releasing) |
 
 `just` alone lists the recipes (`just lint`, `just types`, `just layers`, `just test`,
 `just test-browser`, `just audit`, `just docs`, `just examples`, `just image-test`). The last two
@@ -54,7 +56,9 @@ relatively, and has its own ruff target (`integrations/hermes/ruff.toml`). The s
   (`docs/design.md` § 9). The names are the documentation of behaviour.
 - Comments say *why*, never *what*. A tool's docstring is its description for the model, so keep
   it accurate and short.
-- Conventional Commits; `CHANGELOG.md` (Keep a Changelog) once the package exists.
+- Conventional Commits, checked in CI: the message *is* the changelog entry (git-cliff,
+  `cliff.toml`), so write it for someone upgrading, and use the `security` scope for a security
+  fix. Do not hand-edit `CHANGELOG.md`'s `[Unreleased]` after `0.1.0`.
 
 ## Invariants (never break; each has a test in `docs/security.md` § 6)
 

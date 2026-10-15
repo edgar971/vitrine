@@ -112,11 +112,13 @@ ban-relative-imports = "all"
 # Hermes loads a plugin as a package under a name of its own choosing, so it imports itself
 # relatively.
 "integrations/hermes/**" = ["TID252"]
+# The release script runs git and uvx from PATH, like the justfile that calls it, with fixed args.
+"scripts/**" = ["S603", "S607"]
 
 [tool.mypy]
 python_version = "3.15"
 strict = true
-files = ["src", "tests", "integrations/hermes/drop"]
+files = ["src", "tests", "integrations/hermes/drop", "scripts"]
 mypy_path = "integrations/hermes"
 plugins = ["pydantic.mypy"]
 warn_unreachable = true
@@ -130,7 +132,7 @@ warn_required_dynamic_aliases = true
 minversion = "9.1"
 testpaths = ["tests"]
 # The Hermes plugin is not part of the package; the specs import it as Hermes does, as `drop`.
-pythonpath = ["integrations/hermes"]
+pythonpath = ["integrations/hermes", "scripts"]
 python_files = ["*_spec.py"]
 python_classes = ["Describe*", "When*"]
 python_functions = ["it_*"]

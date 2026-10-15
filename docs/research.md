@@ -79,11 +79,12 @@ gateways.
 ## 5. Validation record
 
 The throwaway spike in [`spike/`](spike/) implements the load-bearing mechanisms and checks them
-from the outside.
+from the outside. All 59 checks passed on Python 3.13, and again on 3.15.0 (2026-10-15) when the
+project moved to 3.15.
 
 ```bash
 cd spike
-uv run --no-project --python 3.13 --with fastmcp==4.1.0 --with uvicorn --with httpx \
+uv run --no-project --python 3.15 --with fastmcp==4.1.0 --with uvicorn --with httpx \
   --with playwright python run.py          # exit 0 when every check passes
 ```
 

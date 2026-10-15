@@ -206,14 +206,26 @@ class DescribeLinkClaims:
             with pytest.raises(ValidationError):
                 _claims(nonce="abc")
 
+        def it_refuses_a_client(self) -> None:
+            with pytest.raises(ValidationError):
+                _claims(client="hermes")
+
     class WhenItIsAnUploadLink:
         def it_carries_the_nonce(self) -> None:
-            claims = _claims(kind=LinkKind.UPLOAD, epoch=None, nonce="abc")
+            claims = _claims(kind=LinkKind.UPLOAD, epoch=None, nonce="abc", client="hermes")
             assert claims.nonce == "abc"
+
+        def it_carries_the_client_that_asked_for_it(self) -> None:
+            claims = _claims(kind=LinkKind.UPLOAD, epoch=None, nonce="abc", client="hermes")
+            assert claims.client == "hermes"
 
         def it_refuses_the_epoch(self) -> None:
             with pytest.raises(ValidationError):
-                _claims(kind=LinkKind.UPLOAD, nonce="abc")
+                _claims(kind=LinkKind.UPLOAD, nonce="abc", client="hermes")
+
+        def it_refuses_a_missing_client(self) -> None:
+            with pytest.raises(ValidationError):
+                _claims(kind=LinkKind.UPLOAD, epoch=None, nonce="abc")
 
     class WhenItIsNeither:
         def it_refuses_the_payload(self) -> None:

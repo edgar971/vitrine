@@ -32,6 +32,7 @@ from mcp_drop.domain.errors import (
 )
 from mcp_drop.domain.ids import is_valid_id
 from mcp_drop.domain.models import (
+    NONCES_KEPT,
     Artifact,
     ArtifactDraft,
     ArtifactPage,
@@ -48,6 +49,7 @@ from mcp_drop.storage.base import RefClaim, StoreConfig
 REF_ID = "id"
 REF_HASH = "request_hash"
 REF_AT = "created_at"
+UPLOAD_REUSED = "this upload URL was already used"
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +111,7 @@ class FileStore:
                     source=source,
                     client_ref=draft.client_ref,
                     tags=draft.tags,
+                    used_upload_nonces=_spend((), draft.upload_nonce),
                 )
                 self._write_meta(artifact)
             return artifact
@@ -117,6 +120,9 @@ class FileStore:
         """Write the next version and replace ``meta.json``; the caller prunes afterwards."""
         with self._locked(artifact_id):
             previous = self._read_meta(artifact_id)
+            # Checked and spent under the artifact's lock, so two PUTs of one URL cannot both land.
+            if draft.upload_nonce is not None and draft.upload_nonce in previous.used_upload_nonces:
+                raise Conflict(UPLOAD_REUSED)
             # No files means nothing replaces the current ones: the version carries them over.
             source = (
                 layout.version_dir(self._config.root, artifact_id, previous.version)
@@ -144,6 +150,9 @@ class FileStore:
                         "tags": previous.tags if draft.tags is None else draft.tags,
                         "expires_at": _updated_expiry(previous, draft),
                         "updated_at": at,
+                        "used_upload_nonces": _spend(
+                            previous.used_upload_nonces, draft.upload_nonce
+                        ),
                     }
                 )
                 self._write_meta(artifact)
@@ -180,6 +189,10 @@ class FileStore:
 
     def read(self, artifact_id: str, path: str, *, version: int | None = None) -> bytes:
         """Read one file's bytes, applying the path rule when resolving (spec § 4.3)."""
+        return self.locate(artifact_id, path, version=version).read_bytes()
+
+    def locate(self, artifact_id: str, path: str, *, version: int | None = None) -> Path:
+        """The local file behind one path, for streaming it; the same rules as ``read``."""
         artifact = self._read_meta(artifact_id)
         directory = layout.version_dir(self._config.root, artifact_id, version or artifact.version)
         if not directory.is_dir():
@@ -187,7 +200,7 @@ class FileStore:
         target = resolve_path(directory, path)
         if not target.is_file():
             raise NotFound()
-        return target.read_bytes()
+        return target
 
     def list(self, query: ArtifactQuery) -> ArtifactPage:
         """Scan the ``meta.json`` files, newest first, one page at a time (spec § 5.1)."""
@@ -574,3 +587,10 @@ def _parse_time(value: object) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _spend(spent: tuple[str, ...], nonce: str | None) -> tuple[str, ...]:
+    """Record a used upload nonce, keeping the newest ``NONCES_KEPT`` (spec § 7.3)."""
+    if nonce is None:
+        return spent
+    return (*spent, nonce)[-NONCES_KEPT:]

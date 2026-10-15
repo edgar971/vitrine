@@ -7,14 +7,15 @@ is `docs/security.md`. When this file and the spec disagree, the spec wins: fix 
 ## What drop is
 
 A self-hosted MCP server that turns agent output into **private** (signed, expiring, revocable)
-or **public** links. Status: M2 done (the core plus the MCP layer: auth, tools, resources, the
-`share` prompt and the public gate); the web layer and the CLI follow `docs/roadmap.md` (M3 → M5).
+or **public** links. Status: M3 done (the core, the MCP layer, and the web layer: views, uploads,
+the API and the middleware, assembled with `/mcp` by `mcp_drop.app.build_app`); the CLI and
+operations follow `docs/roadmap.md` (M4 → M5).
 
 ## Commands
 
 Only `uv` and `just` are required. `just check` runs every gate CI runs, and it is green: the
-core (M1) and the MCP layer (M2) exist, while `mcp-drop serve` still reports that there is nothing
-to serve until the web layer and the CLI land.
+core (M1), the MCP layer (M2) and the web layer (M3) exist, while `mcp-drop serve` still reports
+that there is nothing to serve until the CLI lands (M4).
 
 | Task | Command |
 |---|---|
@@ -25,6 +26,7 @@ to serve until the web layer and the CLI land.
 
 `just` alone lists the recipes (`just lint`, `just types`, `just layers`, `just test`,
 `just test-browser`, `just audit`). CI runs the same recipes, so the two cannot drift.
+`just test-browser` needs Chromium once: `uv run playwright install chromium`.
 
 ## Layout
 
@@ -38,8 +40,11 @@ enforces it.
 - MCP tools follow `docs/design.md` § 4: one `LocalProvider` per feature, all four
   `ToolAnnotations` hints, `Annotated[T, Field(...)]` parameters, `Depends`/`CurrentAccessToken`
   injection and a per-tool scope. Each rule exists because a client or the model reads it.
-- Domain errors are typed and mapped once per edge (MCP, HTTP), because a hand-written message
-  in a tool is how "this private artifact exists" leaks.
+- Domain errors are typed and mapped once per edge (MCP: `@domain_errors`; HTTP:
+  `web/responses.problem`), because a hand-written message in a tool or route is how "this
+  private artifact exists" leaks.
+- Every HTTP route is classified in `web/routes.ROUTE_ACCESS`; the route-table spec fails on one
+  that is not.
 - Tests are specs: `*_spec.py`, `Describe*`/`When*` classes, one outcome per `it_*`
   (`docs/design.md` § 9). The names are the documentation of behaviour.
 - Comments say *why*, never *what*. A tool's docstring is its description for the model, so keep

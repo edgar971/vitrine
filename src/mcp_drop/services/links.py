@@ -69,11 +69,17 @@ class LinkService:
         """The unsigned URL of a public artifact: the id is the secret (spec § 2)."""
         return f"{self._policy.base_url}/a/{artifact_id}/"
 
-    def upload_url(self, artifact_id: str, *, ttl: timedelta | None = None) -> UploadLink:
-        """Mint a single-use upload URL, with the nonce the caller records (spec § 7.3)."""
+    def upload_url(
+        self, artifact_id: str, *, client: str, ttl: timedelta | None = None
+    ) -> UploadLink:
+        """Mint a single-use upload URL for ``client``, with the nonce the store records (§ 7.3).
+
+        The client is signed in, so the upload is attributed to whoever asked for the URL and
+        spends that client's bucket, whoever ends up running the ``PUT``.
+        """
         expires_at = self._expiry(ttl, self._policy.upload_ttl, self._policy.upload_ttl_max)
         nonce = new_nonce()
-        signature = self._sign(self._body(LinkKind.UPLOAD, artifact_id, expires_at, nonce))
+        signature = self._sign(self._body(LinkKind.UPLOAD, artifact_id, expires_at, nonce, client))
         return UploadLink(
             url=f"{self._policy.base_url}/u/{signature}", expires_at=expires_at, nonce=nonce
         )
@@ -112,20 +118,27 @@ class LinkService:
     def _claims(self, body: bytes, kind: LinkKind) -> LinkClaims:
         """Turn a proven body into claims, refusing anything the spec does not allow."""
         try:
-            claimed_kind, artifact_id, expires, payload = body.decode().split(SEPARATOR)
+            claimed_kind, artifact_id, expires, *payload = body.decode().split(SEPARATOR)
             expires_at = datetime.fromtimestamp(int(expires), tz=UTC)
-            epoch = int(payload) if kind is LinkKind.VIEW else None
         except UnicodeDecodeError, ValueError:
             raise NotFound() from None
         if claimed_kind != kind or not is_valid_id(artifact_id) or expires_at <= self._clock.now():
             raise NotFound()
-        if kind is LinkKind.VIEW:
-            return LinkClaims(kind=kind, id=artifact_id, expires_at=expires_at, epoch=epoch)
-        return LinkClaims(kind=kind, id=artifact_id, expires_at=expires_at, nonce=payload)
+        match kind, payload:
+            case LinkKind.VIEW, [epoch] if epoch.isascii() and epoch.isdigit():
+                return LinkClaims(
+                    kind=kind, id=artifact_id, expires_at=expires_at, epoch=int(epoch)
+                )
+            case LinkKind.UPLOAD, [nonce, client] if nonce and client:
+                return LinkClaims(
+                    kind=kind, id=artifact_id, expires_at=expires_at, nonce=nonce, client=client
+                )
+            case _:
+                raise NotFound()
 
-    def _body(self, kind: LinkKind, artifact_id: str, expires_at: datetime, payload: str) -> str:
+    def _body(self, kind: LinkKind, artifact_id: str, expires_at: datetime, *payload: str) -> str:
         """The signed string: the kind first, so a signature cannot change into another kind."""
-        return SEPARATOR.join((kind.value, artifact_id, str(int(expires_at.timestamp())), payload))
+        return SEPARATOR.join((kind.value, artifact_id, str(int(expires_at.timestamp())), *payload))
 
     def _expiry(self, ttl: timedelta | None, default: timedelta, ceiling: timedelta) -> datetime:
         """Clamp the requested lifetime to the configured ceiling (spec § 3)."""

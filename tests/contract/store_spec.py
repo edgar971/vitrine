@@ -598,3 +598,59 @@ class DescribeUsage:
             artifact_id = _create(store, files={ENTRY: b"0123456789"})
             store.delete(artifact_id)
             assert store.usage_bytes() == 0
+
+
+class DescribeUploadNonces:
+    class WhenACreateSpendsOne:
+        def it_records_it(self, store: Store) -> None:
+            assert store.get(_create(store, upload_nonce="n1")).used_upload_nonces == ("n1",)
+
+    class WhenAVersionSpendsOne:
+        def it_records_it_after_the_earlier_ones(self, store: Store) -> None:
+            artifact_id = _create(store, upload_nonce="n1")
+            store.add_version(artifact_id, VersionDraft(merge=True, upload_nonce="n2"))
+            assert store.get(artifact_id).used_upload_nonces == ("n1", "n2")
+
+    class WhenTheNonceWasAlreadySpent:
+        def it_conflicts(self, store: Store) -> None:
+            artifact_id = _create(store, upload_nonce="n1")
+            with pytest.raises(Conflict):
+                store.add_version(artifact_id, VersionDraft(merge=True, upload_nonce="n1"))
+
+        def it_writes_no_version(self, store: Store) -> None:
+            artifact_id = _create(store, upload_nonce="n1")
+            with pytest.raises(Conflict):
+                store.add_version(artifact_id, VersionDraft(merge=True, upload_nonce="n1"))
+            assert store.get(artifact_id).version == 1
+
+    class WhenMoreThanFiftyAreSpent:
+        def it_keeps_the_newest_fifty(self, store: Store) -> None:
+            artifact_id = _create(store, upload_nonce="n0")
+            for number in range(1, 51):
+                store.add_version(artifact_id, VersionDraft(upload_nonce=f"n{number}"))
+            assert store.get(artifact_id).used_upload_nonces[0] == "n1"
+
+
+class DescribeLocate:
+    class WhenThePathNamesAFile:
+        def it_returns_a_readable_file(self, store: Store) -> None:
+            artifact_id = _create(store)
+            assert store.locate(artifact_id, ENTRY).read_bytes() == b"<h1>hi</h1>"
+
+    class WhenAVersionIsPinned:
+        def it_returns_that_version_s_file(self, store: Store) -> None:
+            artifact_id = _create(store)
+            store.add_version(artifact_id, VersionDraft(files={ENTRY: b"<h1>two</h1>"}))
+            assert store.locate(artifact_id, ENTRY, version=1).read_bytes() == b"<h1>hi</h1>"
+
+    class WhenThePathIsMissing:
+        def it_is_not_found(self, store: Store) -> None:
+            artifact_id = _create(store)
+            with pytest.raises(NotFound):
+                store.locate(artifact_id, "missing.html")
+
+    class WhenThePathEscapes:
+        def it_refuses_it(self, store: Store) -> None:
+            artifact_id = _create(store)
+            with pytest.raises(Invalid):
+                store.locate(artifact_id, "../meta.json")

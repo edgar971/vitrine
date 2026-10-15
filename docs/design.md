@@ -21,7 +21,7 @@ easy to extend.**
      │ MCP + Bearer        │ HTTP + Bearer / signed URL       │ GET /a/… /s/…
      ▼                     ▼                                  ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│ ASGI middleware: Host/Origin guard → body limit → redacting access log       │
+│ ASGI middleware: proxy headers → redacting access log → Host/Origin → body   │
 ├────────────────────────────┬──────────────────────────────┬──────────────────┤
 │ mcp/  (FastMCP)            │ web/  (Starlette routes)     │ metrics (own     │
 │  LocalProviders: tools,    │  /a /s views, /api, /u,      │ port, optional)  │
@@ -41,7 +41,7 @@ src/mcp_drop/
   __main__.py            python -m mcp_drop → cli
   cli.py                 serve · config check · token new|hash · secret new · sweep
   config.py              Settings (pydantic-settings): env + TOML, validation
-  app.py                 build_app(settings) → ASGI app; lifespan wires services
+  app.py                 build_app(settings) → one Starlette app: web routes + /mcp, one middleware stack
   domain/
     models.py            Artifact, Version, Visibility, LinkClaims (pydantic, frozen)
     errors.py            DropError → NotFound, Expired, TooLarge, OverQuota, Conflict, Refused
@@ -59,6 +59,7 @@ src/mcp_drop/
     gate.py              PublicGate: public_mode, the question, and the verdict on an answer
     audit.py             AuditLog: append (fsync) and query; retention sweep
     limits.py            RateLimiter: token buckets per client and per IP
+    tokens.py            TokenBook: the hashed-token check both /mcp and /api use
     container.py         Services: the composition root both edges are built from
   mcp/
     server.py            build_mcp(settings, services) → FastMCP(providers=[…], auth=…)
@@ -74,10 +75,10 @@ src/mcp_drop/
     prompts.py           LocalProvider `prompts`: share
     instructions.py      the server instructions text (spec § 5.4), one constant
   web/
-    routes.py            view, upload, api and health handlers
-    responses.py         MIME allowlist, security headers, renderer dispatch
+    routes.py            view, upload, api and health handlers; ROUTE_ACCESS classifies each
+    responses.py         security headers, the sandbox CSP, and DropError → status, once
     renderers.py         md, csv, tsv, json
-    middleware.py        body limit, redacting access log
+    middleware.py        Host/Origin guard, streaming body limit, redacting access log
 ```
 
 **Dependency direction:** `mcp`/`web` → `services` → `storage` → `domain`, and every layer may use

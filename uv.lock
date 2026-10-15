@@ -779,6 +779,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
+    { name = "markdown-it-py" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "starlette" },
@@ -801,6 +802,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastmcp", specifier = ">=4.1,<4.2" },
+    { name = "markdown-it-py", specifier = ">=4.2" },
     { name = "pydantic", specifier = ">=2.14" },
     { name = "pydantic-settings", specifier = ">=2.16" },
     { name = "starlette", specifier = ">=1.8,<2" },

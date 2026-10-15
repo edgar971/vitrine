@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 from mcp_drop.domain import layout
 from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import NotFound, SchemaMismatch
+from mcp_drop.domain.errors import NotFound, OverQuota, SchemaMismatch
 from mcp_drop.domain.ids import new_id
 from mcp_drop.domain.models import ArtifactDraft, VersionDraft
 from mcp_drop.storage.base import StoreConfig
@@ -225,6 +226,25 @@ class DescribeTheMetaFile:
             path.write_text(json.dumps(written))
             with pytest.raises(SchemaMismatch):
                 store.get(artifact_id)
+
+
+class DescribeTheQuota:
+    class WhenSeveralWritersRaceForTheLastHeadroom:
+        def it_never_exceeds_the_quota(self, store_config: StoreConfig, clock: Clock) -> None:
+            store = FileStore(
+                store_config.model_copy(update={"quota": 8, "max_artifact": 8}), clock
+            )
+
+            def create(index: int) -> bool:
+                try:
+                    store.create(new_id(), _draft(files={ENTRY: b"x" * 8}), source=CLIENT)
+                except OverQuota:
+                    return False
+                return True
+
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                list(pool.map(create, range(4)))
+            assert store.usage_bytes() <= 8
 
 
 class DescribeIdempotencyRecords:

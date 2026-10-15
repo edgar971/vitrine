@@ -27,6 +27,7 @@ from mcp_drop.domain.errors import (
     NotFound,
     OverQuota,
     SchemaMismatch,
+    StorageUnavailable,
     TooLarge,
 )
 from mcp_drop.domain.ids import is_valid_id
@@ -51,10 +52,11 @@ REF_AT = "created_at"
 
 @dataclass(frozen=True, slots=True)
 class _Stage:
-    """A staged version: where it is and what it holds, before it is renamed into place."""
+    """A staged version: where it is, what it holds and what it adds to the store."""
 
     path: Path
     entries: tuple[FileEntry, ...]
+    new_bytes: int = 0
 
     @property
     def size(self) -> int:
@@ -77,6 +79,7 @@ class FileStore:
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
         self._refs_lock = threading.Lock()
+        self._writes_lock = threading.Lock()
         layout.ensure(config.root)
 
     def create(self, artifact_id: str, draft: ArtifactDraft, *, source: str) -> Artifact:
@@ -88,8 +91,9 @@ class FileStore:
             with self._staged(draft.files) as stage:
                 at = self._clock.now()
                 entry = choose_entry(files=stage.paths, requested=draft.entry)
-                self._refuse_oversized(stage)
-                self._place(artifact_id, stage.path)
+                with self._writes_lock:
+                    self._refuse_oversized(stage)
+                    self._place(artifact_id, stage.path)
                 version = Version(
                     n=1, at=at, note=draft.note, bytes=stage.size, files=len(stage.entries)
                 )
@@ -123,9 +127,10 @@ class FileStore:
                 entry = choose_entry(
                     files=stage.paths, requested=draft.entry, previous=previous.entry
                 )
-                self._refuse_oversized(stage)
                 number = previous.version + 1
-                self._place(artifact_id, stage.path, number)
+                with self._writes_lock:
+                    self._refuse_oversized(stage)
+                    self._place(artifact_id, stage.path, number)
                 version = Version(
                     n=number, at=at, note=draft.note, bytes=stage.size, files=len(stage.entries)
                 )
@@ -200,7 +205,12 @@ class FileStore:
         with self._locked(artifact_id):
             if not (directory / layout.META_FILE).exists():
                 raise NotFound()
-            shutil.rmtree(directory)
+            try:
+                shutil.rmtree(directory)
+            except OSError as error:
+                raise StorageUnavailable(
+                    f"cannot delete {artifact_id}: {error.strerror or error}"
+                ) from error
             with self._refs_lock:
                 for path, claimed in self._ref_records():
                     if claimed is not None and claimed.get(REF_ID) == artifact_id:
@@ -300,7 +310,7 @@ class FileStore:
         return removed
 
     def sweep_refs(self) -> int:
-        """Remove idempotency records past ``ref_ttl`` or pointing at nothing (§ 4.5)."""
+        """Remove idempotency records past ``ref_ttl`` (spec § 4.5: the sweep frees stale keys)."""
         removed = 0
         with self._refs_lock:
             for path, claimed in self._ref_records():
@@ -324,11 +334,13 @@ class FileStore:
         """Stage the files under ``tmp/``; the stage is discarded unless the block places it."""
         stage = self._config.root / layout.TMP_DIR / uuid.uuid4().hex
         stage.mkdir(parents=True)
+        shared = _inodes(merge_from) if merge_from is not None else frozenset()
         try:
             if merge_from is not None:
                 _link_tree(merge_from, stage)
             for path, content in files.items():
                 target = resolve_path(stage, path)
+                _refuse_type_conflict(stage, target, path)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 if target.exists():
                     target.unlink()
@@ -338,15 +350,18 @@ class FileStore:
                 raise Invalid("a version needs at least one file")
             if len(entries) > self._config.max_files:
                 raise TooLarge(f"a version holds at most {self._config.max_files} files")
-            yield _Stage(path=stage, entries=entries)
+            new_bytes = sum(
+                entry.bytes for entry in entries if _inode(stage / entry.path) not in shared
+            )
+            yield _Stage(path=stage, entries=entries, new_bytes=new_bytes)
         finally:
             shutil.rmtree(stage, ignore_errors=True)
 
     def _refuse_oversized(self, stage: _Stage) -> None:
-        """Refuse a version over ``max_artifact`` or one that would break ``quota``."""
+        """Refuse a version over ``max_artifact``, or one whose new bytes would break ``quota``."""
         if stage.size > self._config.max_artifact:
             raise TooLarge(f"a version is limited to {self._config.max_artifact} bytes")
-        if self.usage_bytes() + stage.size > self._config.quota:
+        if self.usage_bytes() + stage.new_bytes > self._config.quota:
             raise OverQuota(f"the store is limited to {self._config.quota} bytes")
 
     def _place(self, artifact_id: str, stage: Path, version: int = 1) -> None:
@@ -404,14 +419,16 @@ class FileStore:
             yield path, _read_ref(path)
 
     def _ref_is_stale(self, claimed: Mapping[str, object]) -> bool:
-        """Whether a record outlived ``ref_ttl`` or names an artifact that is gone."""
+        """Whether a record outlived ``ref_ttl``.
+
+        A claim whose artifact has not landed yet is live, not stale: freeing it early is what
+        lets a retried create build a second artifact under the same key (spec § 4.5).
+        """
         claimed_at = _parse_time(claimed.get(REF_AT))
-        if claimed_at is None or self._clock.now() - claimed_at >= self._config.ref_ttl:
-            return True
         artifact_id = claimed.get(REF_ID)
-        if not isinstance(artifact_id, str) or not is_valid_id(artifact_id):
+        if claimed_at is None or not isinstance(artifact_id, str) or not is_valid_id(artifact_id):
             return True
-        return not layout.meta_file(self._config.root, artifact_id).exists()
+        return self._clock.now() - claimed_at >= self._config.ref_ttl
 
 
 def _ref_path(root: Path, client: str, ref: str) -> Path:
@@ -453,6 +470,30 @@ def _link_tree(source: Path, target: Path) -> None:
             destination.mkdir(exist_ok=True)
         elif path.is_file():
             os.link(path, destination)
+
+
+def _refuse_type_conflict(stage: Path, target: Path, path: str) -> None:
+    """Refuse a path that needs a directory where the version already holds a file (spec § 10)."""
+    if target.is_dir():
+        raise Invalid(f"{path} names a directory that already exists in this version")
+    parent = target.parent
+    while parent != stage:
+        if parent.exists() and not parent.is_dir():
+            raise Invalid(
+                f"{path} needs the directory {parent.name}, which this version holds as a file"
+            )
+        parent = parent.parent
+
+
+def _inode(path: Path) -> tuple[int, int]:
+    """The identity of one file, which a hard link shares and a fresh copy does not."""
+    info = path.stat()
+    return info.st_dev, info.st_ino
+
+
+def _inodes(root: Path) -> frozenset[tuple[int, int]]:
+    """The identities of every file under ``root``."""
+    return frozenset(_inode(path) for path in root.rglob("*") if path.is_file())
 
 
 def _scan_tree(directory: Path) -> tuple[FileEntry, ...]:

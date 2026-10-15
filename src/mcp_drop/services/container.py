@@ -11,6 +11,7 @@ from mcp_drop.services.audit import AuditLog
 from mcp_drop.services.gate import PublicGate
 from mcp_drop.services.limits import RateLimiter
 from mcp_drop.services.links import LinkPolicy, LinkService
+from mcp_drop.services.metrics import Metrics, NoMetrics
 from mcp_drop.services.tokens import TokenBook
 from mcp_drop.storage.base import StoreConfig
 from mcp_drop.storage.filesystem import FileStore
@@ -25,20 +26,29 @@ class Services:
     audit: AuditLog
     limits: RateLimiter
     tokens: TokenBook
+    metrics: Metrics
 
     @classmethod
-    def from_settings(cls, settings: Settings, *, clock: Clock | None = None) -> Services:
+    def from_settings(
+        cls, settings: Settings, *, clock: Clock | None = None, metrics: Metrics | None = None
+    ) -> Services:
         """Wire the store, the signer, the audit log, the gate, the buckets and the tokens."""
         clock = clock or SystemClock()
-        audit = AuditLog(settings.data_dir, retention=settings.audit_retention, clock=clock)
+        metrics = metrics or NoMetrics()
+        audit = AuditLog(
+            settings.data_dir, retention=settings.audit_retention, clock=clock, metrics=metrics
+        )
         links = LinkService(
             LinkPolicy.from_settings(settings), settings.secret.get_secret_value().encode(), clock
         )
         store = FileStore(StoreConfig.from_settings(settings), clock)
         return cls(
-            artifacts=ArtifactService(store=store, links=links, audit=audit, clock=clock),
+            artifacts=ArtifactService(
+                store=store, links=links, audit=audit, clock=clock, metrics=metrics
+            ),
             gate=PublicGate(settings.public_mode),
             audit=audit,
-            limits=RateLimiter.from_settings(settings),
+            limits=RateLimiter.from_settings(settings, metrics=metrics),
             tokens=TokenBook(settings.tokens),
+            metrics=metrics,
         )

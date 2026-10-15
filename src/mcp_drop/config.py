@@ -171,6 +171,12 @@ def parse_tokens(value: object) -> dict[str, TokenEntry]:
     return entries
 
 
+def unscoped_tokens(value: str) -> list[str]:
+    """The names of ``DROP_TOKENS`` entries that omit their scopes, and so get all four (§ 8.2)."""
+    entries = [chunk.split(":") for chunk in parse_list(value)]
+    return [parts[0] for parts in entries if len(parts) <= len(("name", "sha256"))]
+
+
 ByteSize = Annotated[int, BeforeValidator(parse_size)]
 Duration = Annotated[timedelta, BeforeValidator(parse_duration)]
 Rate = Annotated[TickRate | None, BeforeValidator(parse_rate)]

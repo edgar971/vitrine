@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -208,6 +211,32 @@ class DescribeTheCrashWindows:
             (orphan / ENTRY).write_bytes(b"partial")
             assert store.sweep_staging() == 1
             assert not orphan.exists()
+
+    class WhenTheSweepRunsBesideAWriterWithAGrace:
+        def it_spares_a_fresh_stage(self, store: FileStore, store_config: StoreConfig) -> None:
+            fresh = store_config.root / layout.TMP_DIR / "in-flight"
+            fresh.mkdir()
+            store.sweep_staging(grace=timedelta(minutes=10))
+            assert fresh.exists()
+
+        def it_spares_a_placed_version_whose_meta_has_not_landed(
+            self, store: FileStore, store_config: StoreConfig
+        ) -> None:
+            artifact_id = _create(store)
+            placed = layout.version_dir(store_config.root, artifact_id, 2)
+            placed.mkdir()
+            store.sweep_staging(grace=timedelta(minutes=10))
+            assert placed.exists()
+
+        def it_removes_a_stage_older_than_the_grace(
+            self, store: FileStore, store_config: StoreConfig
+        ) -> None:
+            stale = store_config.root / layout.TMP_DIR / "abandoned"
+            stale.mkdir()
+            an_hour_ago = time.time() - 3600
+            os.utime(stale, (an_hour_ago, an_hour_ago))
+            store.sweep_staging(grace=timedelta(minutes=10))
+            assert not stale.exists()
 
     class WhenMetaJsonCannotBeRead:
         def it_never_deletes_a_version_it_cannot_account_for(

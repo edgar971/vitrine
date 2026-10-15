@@ -29,6 +29,10 @@ dependencies = [
   "uvicorn>=0.54",
 ]
 
+# The Prometheus listener on metrics_port (spec § 11.2) is the only optional feature.
+[project.optional-dependencies]
+metrics = ["prometheus-client>=0.26"]
+
 [project.scripts]
 mcp-drop = "mcp_drop.cli:main"
 
@@ -46,6 +50,7 @@ dev = [
   "mypy>=2.4",
   "playwright>=1.64",
   "pre-commit>=4.7",
+  "prometheus-client>=0.26",
   "pytest>=9.1",
   "pytest-asyncio>=1.4",
   "pytest-cov>=7.1",

@@ -1,6 +1,7 @@
-"""The M0 surface: an importable, typed package with no behaviour yet."""
+"""The package surface: an importable, typed package and its ``mcp-drop`` entry point."""
 
 import runpy
+import sys
 
 import pytest
 
@@ -36,16 +37,17 @@ class DescribeThePackage:
 
 
 class DescribeTheCommandLine:
-    class WhenNothingIsBuiltYet:
-        def it_exits_nonzero(self) -> None:
-            assert mcp_drop.cli.main() == 1
-
-        def it_points_at_the_roadmap(self, capsys: pytest.CaptureFixture[str]) -> None:
-            mcp_drop.cli.main()
-            assert "docs/roadmap.md" in capsys.readouterr().err
+    class WhenNoCommandIsGiven:
+        def it_exits_as_a_usage_error(self) -> None:
+            with pytest.raises(SystemExit) as exit_info:
+                mcp_drop.cli.main([])
+            assert exit_info.value.code == 2
 
     class WhenItIsRunAsAModule:
-        def it_exits_with_the_same_status(self) -> None:
-            with pytest.raises(SystemExit) as exit_info:
+        def it_runs_the_same_commands(
+            self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+        ) -> None:
+            monkeypatch.setattr(sys, "argv", ["mcp-drop", "--version"])
+            with pytest.raises(SystemExit):
                 runpy.run_module("mcp_drop", run_name="__main__")
-            assert exit_info.value.code == 1
+            assert capsys.readouterr().out == f"mcp-drop {mcp_drop.__version__}\n"

@@ -42,6 +42,7 @@ from mcp_drop.domain.models import (
 from mcp_drop.domain.paths import validate_path
 from mcp_drop.services.audit import AuditEvent, AuditEventName, AuditLog
 from mcp_drop.services.links import LinkService
+from mcp_drop.services.metrics import Metrics, NoMetrics
 from mcp_drop.storage.base import Store
 
 TEXT_READ_LIMIT = 1024 * 1024
@@ -65,8 +66,17 @@ class SweepReport(BaseModel):
 class ArtifactService:
     """The pipeline every mutation follows: validate, write, audit, and undo if the audit fails."""
 
-    def __init__(self, *, store: Store, links: LinkService, audit: AuditLog, clock: Clock) -> None:
+    def __init__(
+        self,
+        *,
+        store: Store,
+        links: LinkService,
+        audit: AuditLog,
+        clock: Clock,
+        metrics: Metrics | None = None,
+    ) -> None:
         """Wire the seams; nothing is global."""
+        self._metrics = metrics or NoMetrics()
         self._store = store
         self._links = links
         self._audit = audit
@@ -106,6 +116,7 @@ class ArtifactService:
             ),
             rollback=partial(self._store.delete, artifact.id),
         )
+        self._metrics.version_created(client)
         return self._published(artifact)
 
     def update(self, artifact_id: str, draft: VersionDraft, *, client: str) -> PublishedArtifact:
@@ -125,6 +136,7 @@ class ArtifactService:
             ),
             rollback=partial(self._undo_version, previous, artifact.version),
         )
+        self._metrics.version_created(client)
         return self._published(self._store.prune(artifact_id))
 
     def get(self, artifact_id: str, *, version: int | None = None) -> ArtifactDetail:
@@ -283,6 +295,8 @@ class ArtifactService:
         artifact = self._store.get(artifact_id)
         if artifact.visibility is visibility:
             return artifact
+        if visibility is Visibility.PUBLIC:
+            self._metrics.gate(gate)
         if visibility is Visibility.PUBLIC and not gate.approves():
             self._audit.append(
                 AuditEvent(
@@ -325,8 +339,15 @@ class ArtifactService:
         )
         return updated
 
-    def sweep(self) -> SweepReport:
-        """Delete expired artifacts, then clear staging, stale records and old audit months."""
+    def usage(self) -> tuple[int, int]:
+        """How many artifacts exist and the bytes their versions hold, for the gauges (§ 11.2)."""
+        return self._store.count(), self._store.usage_bytes()
+
+    def sweep(self, *, grace: timedelta = timedelta(0)) -> SweepReport:
+        """Delete expired artifacts, then clear staging, stale records and old audit months.
+
+        ``grace`` spares staging younger than it, for a sweep beside a running server.
+        """
         already_recorded = {
             event.artifact for event in self._audit.query() if event.event is AuditEventName.EXPIRED
         }
@@ -349,7 +370,7 @@ class ArtifactService:
             expired += 1
         return SweepReport(
             expired=expired,
-            staging=self._store.sweep_staging(),
+            staging=self._store.sweep_staging(grace=grace),
             refs=self._store.sweep_refs(),
             audit_months=self._audit.sweep(),
         )

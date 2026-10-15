@@ -1,9 +1,15 @@
 name: release
 
-# A `v*` tag publishes that version (docs/design.md § 10): the wheel and sdist to PyPI by trusted
-# publishing, the multi-arch image to GHCR signed with cosign and carrying an SBOM, and a GitHub
-# release whose notes are the version's CHANGELOG.md section. Nothing is published unless every
-# CI gate passes on the tagged commit.
+# A `v*` tag publishes that version (docs/design.md § 10): the multi-arch image to GHCR, smoke-
+# tested and signed with cosign, with an SBOM; then the wheel and sdist by trusted publishing; then
+# a GitHub release. Nothing is published unless every CI gate passes on the tagged commit.
+#
+# - `vX.Y.Z` is a release: PyPI, and notes from its CHANGELOG.md section.
+# - `vX.Y.ZrcN` (or aN, bN) is a pre-release to rehearse one: TestPyPI, and notes rendered from
+#   the commits since the last release; the GitHub release is marked as a pre-release.
+#
+# The image goes first: a PyPI version can never be uploaded again, so it is spent only once the
+# image is out and verified.
 on:
   push:
     tags: ["v*"]
@@ -29,6 +35,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -41,47 +48,27 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
+          # PEP 440, as scripts/release.py accepts it: `-rc.1` would publish as `rc1` and the
+          # tag, the package and the image would disagree.
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$ ]]; then
+            echo "::error::tag $TAG is not vX.Y.Z or vX.Y.Z(a|b|rc)N"
+            exit 1
+          fi
           version="${TAG#v}"
           project="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)"
           if [ "$version" != "$project" ]; then
             echo "::error::tag $TAG does not match the pyproject.toml version $project"
             exit 1
           fi
-          if ! grep -q "^## \[$version\]" CHANGELOG.md; then
+          prerelease=false
+          if [[ "$version" =~ (a|b|rc)[0-9]+$ ]]; then
+            prerelease=true
+          elif ! grep -qF "## [$version]" CHANGELOG.md; then
             echo "::error::CHANGELOG.md has no [$version] section"
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
-
-  pypi:
-    name: pypi
-    needs: [ci, version]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # PyPI trusts this workflow, in this environment, to publish mcp-drop: no token is stored.
-    environment:
-      name: pypi
-      url: https://pypi.org/project/mcp-drop/${{ needs.version.outputs.version }}/
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - name: Check out
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
-        with:
-          version: "0.13.1"
-          python-version: "3.15"
-
-      - name: Build the wheel and the sdist
-        run: uv build
-
-      - name: Publish by trusted publishing
-        run: uv publish --trusted-publishing always
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
   image:
     name: image
@@ -127,6 +114,12 @@ jobs:
           # built only from what this tag names.
           no-cache: true
 
+      # What was pushed, not a local rebuild: the runner pulls its own (amd64) image by digest.
+      - name: Smoke-test the pushed image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: docker/smoke.sh "$IMAGE@$DIGEST"
+
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
@@ -135,6 +128,49 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign sign --yes "$IMAGE@$DIGEST"
+
+  pypi:
+    name: pypi
+    needs: [ci, version, image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # PyPI (or TestPyPI, for a pre-release) trusts this workflow, in this environment, to publish
+    # mcp-drop: no token is stored.
+    environment:
+      name: ${{ needs.version.outputs.prerelease == 'true' && 'testpypi' || 'pypi' }}
+      url: ${{ needs.version.outputs.prerelease == 'true' && 'https://test.pypi.org' || 'https://pypi.org' }}/project/mcp-drop/${{ needs.version.outputs.version }}/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.1"
+          python-version: "3.15"
+
+      - name: Build the wheel and the sdist
+        run: uv build
+
+      # The metadata PyPI renders and validates; a rejection here costs nothing.
+      - name: Check the distributions
+        run: uvx twine@6.2.0 check --strict dist/*
+
+      - name: Publish by trusted publishing
+        env:
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          if [ "$PRERELEASE" = "true" ]; then
+            uv publish --trusted-publishing always --publish-url https://test.pypi.org/legacy/
+          else
+            uv publish --trusted-publishing always
+          fi
+
 
   github:
     name: github release
@@ -148,19 +184,36 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # git-cliff walks back to the previous release tag.
+          fetch-depth: 0
 
-      - name: Release notes from CHANGELOG.md
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.1"
+
+      - name: Release notes
         env:
           VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
-          awk -v heading="## [$VERSION]" '
-            index($0, heading) == 1 { found = 1; next }
-            found && /^## \[/ { exit }
-            found { print }
-          ' CHANGELOG.md > notes.md
+          if [ "$PRERELEASE" = "true" ]; then
+            # cliff.toml counts only final tags, so this is everything since the last release.
+            uvx git-cliff@2.14.2 --unreleased --strip all | tail -n +2 > notes.md
+          else
+            awk -v heading="## [$VERSION]" '
+              index($0, heading) == 1 { found = 1; next }
+              found && /^## \[/ { exit }
+              found { print }
+            ' CHANGELOG.md > notes.md
+          fi
 
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags=(--prerelease); fi
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md "${flags[@]}"

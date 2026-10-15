@@ -49,12 +49,50 @@ New behaviour needs an `it_` that fails without it; a security fix also covers t
 ## Commits and pull requests
 
 - [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/): `feat:`, `fix:`, `docs:`,
-  `test:`, `ci:`, `chore:`, `refactor:`, `perf:`.
+  `test:`, `ci:`, `build:`, `chore:`, `refactor:`, `perf:`. The `commits` CI job refuses a pull
+  request with any other message (merge commits are fine).
 - One concern per commit; a commit that changes the contract also changes
   [`docs/spec.md`](docs/spec.md) (and [`docs/security.md`](docs/security.md) for a new threat or
   control).
 - A decision that is expensive to reverse gets an ADR in [`docs/adr/`](docs/adr/).
-- Update `CHANGELOG.md` under `## [Unreleased]`.
+
+## Changelog
+
+`CHANGELOG.md` is generated from commit messages by [git-cliff](https://git-cliff.org)
+([`cliff.toml`](cliff.toml)), so **the commit message is the changelog entry**: write it for
+someone upgrading.
+
+| Commit | Section |
+|---|---|
+| `fix(security): …` (any type with the `security` scope) | Security |
+| `feat: …` | Added |
+| `perf: …`, `refactor: …` | Changed |
+| `fix: …` | Fixed |
+| `revert: …` | Removed |
+| `docs:`, `ci:`, `build:`, `test:`, `chore:`, `style:` | left out |
+
+`just changelog` shows the section the next release would get. Do not edit `## [Unreleased]` by
+hand; the one exception is `0.1.0`, whose notes were written before the changelog was generated.
+
+## Releasing
+
+1. **Rehearse with a pre-release.** `just release 0.2.0rc1` bumps every copy of the version
+   (`pyproject.toml`, the example image tags, the Hermes plugin), re-locks and runs the gates.
+   Commit it as `chore(release): 0.2.0rc1`, merge, and tag the merged commit:
+   `git tag v0.2.0rc1 <sha> && git push origin v0.2.0rc1`. The release workflow pushes and signs
+   `ghcr.io/edgar971/drop:0.2.0rc1`, publishes to **TestPyPI**, and creates a GitHub pre-release
+   with notes rendered from the commits.
+2. **Check the rehearsal**: install it with
+   `uvx --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match --from mcp-drop==0.2.0rc1 mcp-drop --version`
+   (its dependencies come from PyPI),
+   connect a client, and verify the image as [operations](docs/operations.md) § 9 says.
+3. **Release.** `just release 0.2.0` does the same and also writes the `## [0.2.0]` section of
+   `CHANGELOG.md`. Commit, merge and tag `v0.2.0`: this one goes to **PyPI**, and its notes are
+   that section.
+
+The tag must be PEP 440 (`v0.2.0rc1`, not `v0.2.0-rc.1`), and the workflow refuses a tag that
+disagrees with `pyproject.toml`. The image is pushed and verified before anything reaches PyPI,
+because a PyPI version can never be uploaded twice.
 
 ## Reporting a vulnerability
 

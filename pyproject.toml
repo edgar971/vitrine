@@ -88,8 +88,11 @@ convention = "google"
 ban-relative-imports = "all"
 
 [tool.ruff.lint.per-file-ignores]
-# Specs are named for the behaviour they describe; the name is the documentation.
-"tests/**" = ["D101", "D102", "D103", "D106", "S101", "PLR2004"]
+# Specs are named for the behaviour they describe; the name is the documentation. Tests also
+# carry fake secrets and non-loopback hosts on purpose.
+"tests/**" = ["D101", "D102", "D103", "D106", "S101", "S104", "S105", "PLR2004"]
+# The domain errors are named as docs/design.md § 3 names them: NotFound, Expired, Conflict, …
+"src/mcp_drop/domain/errors.py" = ["N818"]
 
 [tool.mypy]
 python_version = "3.15"
@@ -130,7 +133,8 @@ source = ["mcp_drop"]
 fail_under = 90
 show_missing = true
 
-# Dependencies point one way (docs/design.md § 3): mcp/web -> services -> storage/domain.
+# Dependencies point one way (docs/design.md § 3): mcp/web -> services -> storage -> domain.
+# `|` marks modules that must not import each other; domain sits below storage, which uses it.
 [tool.importlinter]
 root_package = "mcp_drop"
 include_external_packages = true
@@ -141,7 +145,8 @@ type = "layers"
 layers = [
   "mcp_drop.mcp | mcp_drop.web",
   "mcp_drop.services",
-  "mcp_drop.storage | mcp_drop.domain",
+  "mcp_drop.storage",
+  "mcp_drop.domain",
 ]
 
 [[tool.importlinter.contracts]]

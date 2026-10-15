@@ -43,6 +43,26 @@ Nothing has been released yet: `0.1.0` is the first release, and
   spent before any work, and a domain error reaches the client as its own indistinguishable message.
 - `ArtifactService` gains `link`, `upload_url` (the id is pre-allocated and the issue audited),
   `read_text` (text types up to 1 MB) and `history`; `Services` wires everything from settings.
+- M3 — the web layer on Starlette: `/a/{id}` and `/s/{sig}` views (version pins, `Range`, `HEAD`,
+  the extension allowlist, the sandbox CSP without `allow-same-origin`, `nosniff`, `no-referrer`,
+  `noindex`, per-prefix caching), the Markdown, CSV/TSV and JSON renderers, single-use
+  `PUT /u/{sig}` uploads, the multipart `/api/artifacts` API with per-scope bearer auth, and
+  `/healthz`.
+- M3 — `mcp_drop.app.build_app`: `/mcp` and the web routes in one app behind one middleware stack
+  (trusted proxy headers, a redacting access log, the Host/Origin guard and streaming body
+  limits), plus the per-IP view bucket with `Retry-After`.
+- M3 — specs over real uvicorn for every ported spike check (headers, traversal, limits,
+  rebinding), the route-table spec, log redaction, and a Playwright Chromium spec for the sandbox.
+- `TokenBook`: the hashed-token check, shared by `/mcp` and `/api`.
+- `Store.locate`, so a view streams a file instead of reading it into memory.
+
+### Changed
+
+- An upload URL now signs the client that asked for it (`"upload"|id|expires|nonce|client`), so
+  an upload is attributed to, and rate-limited as, that client.
+- An upload's nonce is spent in the same write as its version, so two `PUT`s of one URL land at
+  most once; an upload never re-creates an id that was deleted or expired.
+- `markdown-it-py` is a declared dependency (it was only present through FastMCP).
 
 ### Fixed
 

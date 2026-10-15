@@ -7,6 +7,7 @@ import hashlib
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from functools import partial
+from pathlib import Path
 from urllib.parse import urlencode
 
 from pydantic import BaseModel, ConfigDict
@@ -14,6 +15,7 @@ from pydantic import BaseModel, ConfigDict
 from mcp_drop.domain.clock import Clock
 from mcp_drop.domain.errors import (
     AuditUnavailable,
+    Conflict,
     DropError,
     Expired,
     Invalid,
@@ -31,6 +33,7 @@ from mcp_drop.domain.models import (
     ArtifactPage,
     ArtifactQuery,
     GateDecision,
+    LinkClaims,
     PublishedArtifact,
     UploadGrant,
     VersionDraft,
@@ -42,6 +45,10 @@ from mcp_drop.services.links import LinkService
 from mcp_drop.storage.base import Store
 
 TEXT_READ_LIMIT = 1024 * 1024
+UPLOAD_REUSED = "this upload URL was already used"
+# An id that once held an artifact is never handed to a new one: its old private links (epoch 0)
+# would open the new content.
+GONE = frozenset({AuditEventName.DELETED, AuditEventName.EXPIRED})
 
 
 class SweepReport(BaseModel):
@@ -81,6 +88,10 @@ class ArtifactService:
             artifact_id = claim.id
             if claim.reused:
                 return self._published(self._usable(claim.id), created=False)
+        return self._create(artifact_id, draft, client=client)
+
+    def _create(self, artifact_id: str, draft: ArtifactDraft, *, client: str) -> PublishedArtifact:
+        """Write version 1 under ``artifact_id`` and audit it, undoing the write if it can't."""
         artifact = self._store.create(artifact_id, draft, source=client)
         self._record(
             AuditEvent(
@@ -171,7 +182,7 @@ class ArtifactService:
             artifact_id = new_id()
         else:
             self._usable(artifact_id)
-        link = self._links.upload_url(artifact_id, ttl=ttl)
+        link = self._links.upload_url(artifact_id, client=client, ttl=ttl)
         # The signature fixes the id, the expiry and the nonce; the name and the title are only
         # what the holder of that capability chose to call the upload, so they ride unsigned.
         query = {"filename": filename} | ({"title": title} if title else {})
@@ -187,6 +198,56 @@ class ArtifactService:
         return UploadGrant(
             id=artifact_id, put_url=f"{link.url}?{urlencode(query)}", expires_at=link.expires_at
         )
+
+    def upload_claims(self, signature: str) -> LinkClaims:
+        """Verify an upload URL's signature, so the edge can spend its client's bucket first."""
+        return self._links.verify_upload(signature)
+
+    def upload(
+        self, claims: LinkClaims, filename: str, content: bytes, *, title: str | None = None
+    ) -> PublishedArtifact:
+        """Land one ``PUT /u/{sig}``: create the pre-allocated artifact, or add a version (§ 7.3).
+
+        A version overlays the file on the current ones, so adding an image keeps the page that
+        shows it. The nonce is spent in the same write, so a second ``PUT`` is a ``Conflict``.
+        """
+        validate_path(filename)
+        if claims.client is None or claims.nonce is None:
+            raise NotFound()
+        try:
+            self._store.get(claims.id)
+        except NotFound:
+            if any(event.event in GONE for event in self._audit.query(artifact=claims.id)):
+                raise NotFound() from None
+            draft = ArtifactDraft(
+                title=title or filename, files={filename: content}, upload_nonce=claims.nonce
+            )
+            try:
+                return self._create(claims.id, draft, client=claims.client)
+            except Conflict:
+                # Another PUT of the same URL created it first.
+                raise Conflict(UPLOAD_REUSED) from None
+        version = VersionDraft(files={filename: content}, merge=True, upload_nonce=claims.nonce)
+        return self.update(claims.id, version, client=claims.client)
+
+    def open_public(self, artifact_id: str, *, version: int | None = None) -> Artifact:
+        """The artifact behind ``/a/{id}``: a private id is as unknown as a missing one (§ 7.1)."""
+        artifact = self._store.get(artifact_id)
+        if artifact.visibility is not Visibility.PUBLIC:
+            raise NotFound()
+        return self._viewable(artifact, version)
+
+    def open_signed(self, signature: str, *, version: int | None = None) -> Artifact:
+        """The artifact behind ``/s/{sig}``; any bad link answers like a missing artifact (§ 3)."""
+        claims = self._links.verify_view(signature)
+        artifact = self._store.get(claims.id)
+        if not self._links.accepts(claims, artifact):
+            raise NotFound()
+        return self._viewable(artifact, version)
+
+    def locate(self, artifact: Artifact, path: str, *, version: int | None = None) -> Path:
+        """The file a view streams, from the version the artifact was opened at."""
+        return self._store.locate(artifact.id, path, version=version or artifact.version)
 
     def history(self, artifact_id: str) -> tuple[AuditEvent, ...]:
         """The audit events of one existing artifact, newest first (spec § 5.2)."""
@@ -292,6 +353,14 @@ class ArtifactService:
             refs=self._store.sweep_refs(),
             audit_months=self._audit.sweep(),
         )
+
+    def _viewable(self, artifact: Artifact, version: int | None) -> Artifact:
+        """Refuse an expired artifact (410) and a version that is not retained (404)."""
+        if artifact.is_expired(self._clock.now()):
+            raise Expired()
+        if version is not None and version not in {kept.n for kept in artifact.versions}:
+            raise NotFound()
+        return artifact
 
     def _usable(self, artifact_id: str) -> Artifact:
         """Read an artifact, refusing one whose expiry has passed (spec § 4.3)."""

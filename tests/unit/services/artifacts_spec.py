@@ -26,6 +26,7 @@ from mcp_drop.domain.models import (
     ArtifactDraft,
     ArtifactQuery,
     GateDecision,
+    LinkClaims,
     VersionDraft,
     Visibility,
 )
@@ -752,3 +753,203 @@ class DescribeDenials:
         def it_records_access_denied(self, audit: AuditLog) -> None:
             audit.deny(client=CLIENT, reason=DenialReason.SCOPE, tool="artifact_create")
             assert audit.query()[0].event is AuditEventName.ACCESS_DENIED
+
+
+def _signature(url: str, marker: str) -> str:
+    """The signature segment of a link URL, as the web edge takes it from the path."""
+    return url.split(marker)[1].split("?", maxsplit=1)[0].rstrip("/")
+
+
+def _lands(service: ArtifactService, claims: LinkClaims) -> bool:
+    """Run one upload, reporting whether it landed or lost to another PUT of the same URL."""
+    try:
+        service.upload(claims, "report.pdf", b"%PDF")
+    except Conflict:
+        return False
+    return True
+
+
+class DescribeUpload:
+    class WhenTheUrlPreAllocatedANewId:
+        def it_creates_the_artifact_under_that_id(self, service: ArtifactService) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            assert service.upload(claims, "report.pdf", b"%PDF").id == grant.id
+
+        def it_is_private(self, service: ArtifactService) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            service.upload(claims, "report.pdf", b"%PDF")
+            assert service.get(grant.id).artifact.visibility is Visibility.PRIVATE
+
+        def it_records_the_client_that_asked_for_the_url(self, service: ArtifactService) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            service.upload(claims, "report.pdf", b"%PDF")
+            assert service.get(grant.id).artifact.source == CLIENT
+
+        def it_titles_it_after_the_file(self, service: ArtifactService) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            service.upload(claims, "report.pdf", b"%PDF")
+            assert service.get(grant.id).artifact.title == "report.pdf"
+
+        def it_audits_the_creation(self, service: ArtifactService, audit: AuditLog) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            service.upload(claims, "report.pdf", b"%PDF")
+            assert _events(audit, grant.id)[0].event is AuditEventName.CREATED
+
+    class WhenTheSameUrlIsUsedTwice:
+        def it_conflicts(self, service: ArtifactService) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            service.upload(claims, "report.pdf", b"%PDF")
+            with pytest.raises(Conflict):
+                service.upload(claims, "report.pdf", b"%PDF")
+
+        def it_writes_no_second_version(self, service: ArtifactService) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            service.upload(claims, "report.pdf", b"%PDF")
+            with pytest.raises(Conflict):
+                service.upload(claims, "report.pdf", b"%PDF")
+            assert service.get(grant.id).artifact.version == 1
+
+    class WhenTwoPutsOfOneUrlRace:
+        def it_lands_exactly_one(self, service: ArtifactService) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                landed = list(pool.map(lambda _: _lands(service, claims), range(8)))
+            assert landed.count(True) == 1
+
+    class WhenTheUrlNamesAnExistingArtifact:
+        def it_adds_a_version(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            grant = service.upload_url("chart.png", client=CLIENT, artifact_id=published.id)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            assert service.upload(claims, "chart.png", b"PNG").version == 2
+
+        def it_keeps_the_files_already_there(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            grant = service.upload_url("chart.png", client=CLIENT, artifact_id=published.id)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            service.upload(claims, "chart.png", b"PNG")
+            paths = [file.path for file in service.get(published.id).files]
+            assert paths == ["chart.png", ENTRY]
+
+        def it_refuses_a_replay(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            grant = service.upload_url("chart.png", client=CLIENT, artifact_id=published.id)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            service.upload(claims, "chart.png", b"PNG")
+            with pytest.raises(Conflict):
+                service.upload(claims, "chart.png", b"PNG")
+
+    class WhenTheArtifactWasDeletedAfterTheUrlWasIssued:
+        def it_is_not_found_rather_than_recreated(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            grant = service.upload_url("chart.png", client=CLIENT, artifact_id=published.id)
+            service.delete(published.id, client=CLIENT)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            with pytest.raises(NotFound):
+                service.upload(claims, "chart.png", b"PNG")
+
+    class WhenANewUploadIsDeletedAndReplayed:
+        def it_is_not_found_rather_than_recreated(self, service: ArtifactService) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            service.upload(claims, "report.pdf", b"%PDF")
+            service.delete(grant.id, client=CLIENT)
+            with pytest.raises(NotFound):
+                service.upload(claims, "report.pdf", b"%PDF")
+
+    class WhenTheFilenameEscapes:
+        def it_refuses_it(self, service: ArtifactService) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            claims = service.upload_claims(_signature(grant.put_url, "/u/"))
+            with pytest.raises(Invalid):
+                service.upload(claims, "../report.pdf", b"%PDF")
+
+    class WhenTheSignatureIsAViewLink:
+        def it_is_not_found(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            with pytest.raises(NotFound):
+                service.upload_claims(_signature(published.url, "/s/"))
+
+
+class DescribeOpenSigned:
+    class WhenTheLinkIsValid:
+        def it_opens_the_artifact(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            assert service.open_signed(_signature(published.url, "/s/")).id == published.id
+
+    class WhenTheLinksWereRevoked:
+        def it_is_not_found(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            service.revoke_links(published.id, client=CLIENT)
+            with pytest.raises(NotFound):
+                service.open_signed(_signature(published.url, "/s/"))
+
+    class WhenTheArtifactHasExpired:
+        def it_answers_expired(
+            self, service: ArtifactService, clock: Clock, advance: Callable[[timedelta], None]
+        ) -> None:
+            published = service.create(
+                _draft(expires_at=clock.now() + timedelta(minutes=1)), client=CLIENT
+            )
+            advance(timedelta(minutes=2))
+            with pytest.raises(Expired):
+                service.open_signed(_signature(published.url, "/s/"))
+
+    class WhenAPinnedVersionIsNoLongerKept:
+        def it_is_not_found(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            with pytest.raises(NotFound):
+                service.open_signed(_signature(published.url, "/s/"), version=2)
+
+
+class DescribeOpenPublic:
+    class WhenTheArtifactIsPublic:
+        def it_opens_it(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            service.set_visibility(
+                published.id, Visibility.PUBLIC, client=CLIENT, gate=GateDecision.APPROVED
+            )
+            assert service.open_public(published.id).id == published.id
+
+    class WhenTheArtifactIsPrivate:
+        def it_is_not_found(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            with pytest.raises(NotFound):
+                service.open_public(published.id)
+
+    class WhenAPrivateArtifactHasExpired:
+        def it_is_still_not_found(
+            self, service: ArtifactService, clock: Clock, advance: Callable[[timedelta], None]
+        ) -> None:
+            published = service.create(
+                _draft(expires_at=clock.now() + timedelta(minutes=1)), client=CLIENT
+            )
+            advance(timedelta(minutes=2))
+            with pytest.raises(NotFound):
+                service.open_public(published.id)
+
+
+class DescribeLocate:
+    class WhenAVersionIsPinned:
+        def it_finds_the_file_of_that_version(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            service.update(
+                published.id, VersionDraft(files={ENTRY: b"<h1>two</h1>"}), client=CLIENT
+            )
+            artifact = service.open_signed(_signature(published.url, "/s/"), version=1)
+            assert service.locate(artifact, ENTRY, version=1).read_bytes() == b"<h1>hi</h1>"
+
+    class WhenThePathEscapes:
+        def it_refuses_it(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            artifact = service.open_signed(_signature(published.url, "/s/"))
+            with pytest.raises(Invalid):
+                service.locate(artifact, "../meta.json")

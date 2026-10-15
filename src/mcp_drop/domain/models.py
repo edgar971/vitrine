@@ -11,6 +11,7 @@ from mcp_drop.domain.errors import ConfigError, SchemaMismatch
 
 SCHEMA_VERSION = 1
 TAG_LIMIT = 200
+NONCES_KEPT = 50
 
 
 class Visibility(StrEnum):
@@ -186,6 +187,7 @@ class ArtifactDraft(BaseModel):
     note: str = ""
     expires_at: AwareDatetime | None = None
     client_ref: str | None = None
+    upload_nonce: str | None = None
 
 
 class VersionDraft(BaseModel):
@@ -201,6 +203,7 @@ class VersionDraft(BaseModel):
     note: str = ""
     expires_at: AwareDatetime | None = None
     clear_expiry: bool = False
+    upload_nonce: str | None = None
 
     @model_validator(mode="after")
     def _expiry_is_not_ambiguous(self) -> VersionDraft:
@@ -264,14 +267,20 @@ class LinkClaims(BaseModel):
     expires_at: AwareDatetime
     epoch: int | None = None
     nonce: str | None = None
+    client: str | None = None
 
     @model_validator(mode="after")
     def _payload_matches_the_kind(self) -> LinkClaims:
-        """A view link carries an epoch, an upload link a nonce, never both."""
-        if self.kind is LinkKind.VIEW and (self.epoch is None or self.nonce is not None):
-            raise ValueError("a view link carries an epoch and no nonce")
-        if self.kind is LinkKind.UPLOAD and (self.nonce is None or self.epoch is not None):
-            raise ValueError("an upload link carries a nonce and no epoch")
+        """A view link carries an epoch; an upload link a nonce and the client that asked for it."""
+        upload_fields = (self.nonce, self.client)
+        if self.kind is LinkKind.VIEW and (
+            self.epoch is None or any(field is not None for field in upload_fields)
+        ):
+            raise ValueError("a view link carries an epoch and nothing else")
+        if self.kind is LinkKind.UPLOAD and (
+            any(field is None for field in upload_fields) or self.epoch is not None
+        ):
+            raise ValueError("an upload link carries a nonce and a client, and no epoch")
         return self
 
 

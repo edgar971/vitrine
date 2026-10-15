@@ -21,6 +21,7 @@ from tests.conftest import FrozenClock
 BASE = "https://drop.example.com"
 SECRET = b"0123456789abcdef0123456789abcdef"
 ID = "k7m2q9x4tz3wbn6r"
+CLIENT = "hermes"
 MAC_BYTES = 16
 
 
@@ -91,18 +92,34 @@ class DescribeViewLinks:
 class DescribeUploadLinks:
     class WhenOneIsMinted:
         def it_points_at_the_signed_upload_path(self, links: LinkService) -> None:
-            assert links.upload_url(ID).url.startswith(f"{BASE}/u/")
+            assert links.upload_url(ID, client=CLIENT).url.startswith(f"{BASE}/u/")
 
         def it_carries_a_nonce(self, links: LinkService) -> None:
-            assert links.upload_url(ID).nonce
+            assert links.upload_url(ID, client=CLIENT).nonce
 
         def it_is_single_use_when_it_is_read_back(self, links: LinkService) -> None:
-            link = links.upload_url(ID)
+            link = links.upload_url(ID, client=CLIENT)
             assert links.verify_upload(_signature(link.url, "/u/")).nonce == link.nonce
 
         def it_clamps_the_ttl_to_the_upload_ceiling(self, links: LinkService, clock: Clock) -> None:
-            link = links.upload_url(ID, ttl=timedelta(days=365))
+            link = links.upload_url(ID, client=CLIENT, ttl=timedelta(days=365))
             assert link.expires_at == clock.now() + timedelta(hours=1)
+
+        def it_signs_the_client_that_asked_for_it(self, links: LinkService) -> None:
+            link = links.upload_url(ID, client=CLIENT)
+            assert links.verify_upload(_signature(link.url, "/u/")).client == CLIENT
+
+    class WhenTheBodyHasNoClient:
+        def it_is_not_found(self, links: LinkService, clock: Clock) -> None:
+            expires = int((clock.now() + timedelta(minutes=5)).timestamp())
+            with pytest.raises(NotFound):
+                links.verify_upload(_forge(f"upload|{ID}|{expires}|nonce"))
+
+    class WhenTheClientIsEmpty:
+        def it_is_not_found(self, links: LinkService, clock: Clock) -> None:
+            expires = int((clock.now() + timedelta(minutes=5)).timestamp())
+            with pytest.raises(NotFound):
+                links.verify_upload(_forge(f"upload|{ID}|{expires}|nonce|"))
 
 
 class DescribeVerification:
@@ -119,7 +136,7 @@ class DescribeVerification:
                 links.verify_upload(signature)
 
         def it_refuses_an_upload_signature_used_to_view(self, links: LinkService) -> None:
-            signature = _signature(links.upload_url(ID).url, "/u/")
+            signature = _signature(links.upload_url(ID, client=CLIENT).url, "/u/")
             with pytest.raises(NotFound):
                 links.verify_view(signature)
 

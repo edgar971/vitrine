@@ -7,10 +7,9 @@ is `docs/security.md`. When this file and the spec disagree, the spec wins: fix 
 ## What drop is
 
 A self-hosted MCP server that turns agent output into **private** (signed, expiring, revocable)
-or **public** links. Status: M1–M3 done (the core, the MCP layer, and the web layer, assembled
-with `/mcp` by `mcp_drop.app.build_app`), and the M4 CLI (`mcp-drop serve`, `backup`, `migrate`, …)
-with optional metrics; the container image and deployment examples follow `docs/roadmap.md`
-(rest of M4 → M5).
+or **public** links. Status: M1–M4 done (the core, the MCP layer, the web layer assembled with
+`/mcp` by `mcp_drop.app.build_app`, the `mcp-drop` CLI, metrics, the image and `examples/`); the
+client integrations follow `docs/roadmap.md` (M5).
 
 ## Commands
 
@@ -24,7 +23,9 @@ Only `uv` and `just` are required. `just check` runs every gate CI runs, and it 
 | Serve locally | `uv run mcp-drop serve` |
 
 `just` alone lists the recipes (`just lint`, `just types`, `just layers`, `just test`,
-`just test-browser`, `just audit`). CI runs the same recipes, so the two cannot drift.
+`just test-browser`, `just audit`, `just docs`, `just examples`, `just image-test`). The last two
+need Docker; CI runs them as their own jobs. After changing a `Settings` field, run `just docs`:
+`docs/configuration.md` is generated, and a spec fails while it is stale. CI runs the same recipes, so the two cannot drift.
 `just test-browser` needs Chromium once: `uv run playwright install chromium`.
 
 ## Layout

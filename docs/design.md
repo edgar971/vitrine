@@ -44,6 +44,7 @@ src/mcp_drop/
   app.py                 build_app(settings) → one Starlette app: web routes + /mcp, one middleware stack,
                          and the lifespan that sweeps at startup and every sweep_interval
   metrics.py             PrometheusMetrics: the metrics_port exporter (the optional `metrics` extra)
+  reference.py           docs/configuration.md, rendered from Settings (`just docs`)
   domain/
     models.py            Artifact, Version, Visibility, LinkClaims (pydantic, frozen)
     errors.py            DropError → NotFound, Expired, TooLarge, OverQuota, Conflict, Refused

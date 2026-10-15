@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Nothing in the run may reach out for a newer resolution: the lock is the input.
+      UV_FROZEN: "1"
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          # Pinned so a run is reproducible; bump deliberately, with the lock.
+          version: "0.13.1"
+          python-version: "3.15"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just@1.58.0
+
+      - name: Install the environment
+        run: uv sync --locked
+
+      # Every gate is a justfile recipe, so CI and a local `just check` cannot drift.
+      - name: Lock check
+        run: just lock-check
+
+      - name: Ruff
+        run: just lint
+
+      - name: mypy
+        run: just types
+
+      - name: import-linter
+        run: just layers
+
+      - name: pytest with coverage
+        run: just test
+
+      - name: pip-audit
+        run: just audit

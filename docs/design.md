@@ -46,6 +46,7 @@ src/mcp_drop/
     models.py            Artifact, Version, Visibility, LinkClaims (pydantic, frozen)
     errors.py            DropError → NotFound, Expired, TooLarge, OverQuota, Conflict, Refused
     ids.py               artifact ids (80-bit Crockford base32), client refs, upload nonces
+    media.py             the extension allowlist (spec § 7.2) and which types read back as text
     paths.py             the one path rule, and the entry rule that goes with it
     layout.py            the data_dir layout (spec § 4.1) and its same-filesystem check
     clock.py             the clock seam, so a service never reads the wall clock
@@ -55,13 +56,19 @@ src/mcp_drop/
   services/
     artifacts.py         ArtifactService: create, update, get, list, delete, set_visibility
     links.py             LinkService: sign/verify view and upload links
-    gate.py              PublicGate: public_mode + era-aware confirmation
+    gate.py              PublicGate: public_mode, the question, and the verdict on an answer
     audit.py             AuditLog: append (fsync) and query; retention sweep
     limits.py            RateLimiter: token buckets per client and per IP
+    container.py         Services: the composition root both edges are built from
   mcp/
-    server.py            build_mcp(settings) → FastMCP(providers=[…], auth=…)
+    server.py            build_mcp(settings, services) → FastMCP(providers=[…], auth=…)
     auth.py              HashedTokenVerifier, scopes
-    deps.py              Depends() providers: artifact_service(), link_service(), gate()
+    deps.py              Depends() providers: artifact_service(), public_gate(), from the lifespan
+    gate.py              the era-aware half of the gate: InputRequiredResult or elicitation/create
+    middleware.py        EdgeMiddleware: audit scope refusals, spend the caller's bucket
+    errors.py            @domain_errors: DropError → ToolError/ResourceError, once
+    policy.py            a component's scope and bucket, carried on its tags
+    results.py           the tool results no domain model already is
     tools.py             LocalProvider `tools`: the nine artifact_* tools
     resources.py         LocalProvider `resources`: artifact://… and artifact://{id}/history
     prompts.py           LocalProvider `prompts`: share
@@ -120,7 +127,8 @@ These rules were validated against FastMCP 4.1 (see [`research.md`](research.md)
 | Inject services with `Depends(...)` and the caller with `CurrentAccessToken()` | Injected parameters are hidden from the schema; no globals, and easy test overrides |
 | Use per-tool `auth=require_scopes(...)` | A token without the scope does not even *see* the tool. Least privilege comes for free. |
 | Return typed pydantic models | FastMCP derives the output schema, so clients get structured results |
-| Domain errors become `ToolError` once, in one place | Tools contain no try/except boilerplate, and messages never leak whether a private artifact exists |
+| Domain errors become `ToolError` once, in one place (`@domain_errors`, a wrapper: FastMCP masks an unknown exception before middleware sees it) | Tools contain no try/except boilerplate, and messages never leak whether a private artifact exists |
+| A tool's scope and rate bucket live in its `tags` | The edge middleware audits a scope refusal and spends the bucket from the same record `require_scopes` enforces |
 | Keep sync tools sync | FastMCP runs them in a worker thread (`run_in_thread=True`), so file I/O never blocks the loop |
 | Set a `timeout` on tools that touch disk | One slow disk cannot pin a worker forever |
 | The public gate is the only `async` tool that awaits the client | It returns `InputRequiredResult` on `2026-07-28` connections (spec § 6.1) |

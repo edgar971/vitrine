@@ -65,6 +65,10 @@ class LinkService:
         signature = self._sign(self._body(LinkKind.VIEW, artifact_id, expires_at, str(epoch)))
         return SignedLink(url=f"{self._policy.base_url}/s/{signature}/", expires_at=expires_at)
 
+    def public_url(self, artifact_id: str) -> str:
+        """The unsigned URL of a public artifact: the id is the secret (spec § 2)."""
+        return f"{self._policy.base_url}/a/{artifact_id}/"
+
     def upload_url(self, artifact_id: str, *, ttl: timedelta | None = None) -> UploadLink:
         """Mint a single-use upload URL, with the nonce the caller records (spec § 7.3)."""
         expires_at = self._expiry(ttl, self._policy.upload_ttl, self._policy.upload_ttl_max)

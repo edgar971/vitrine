@@ -7,14 +7,14 @@ is `docs/security.md`. When this file and the spec disagree, the spec wins: fix 
 ## What drop is
 
 A self-hosted MCP server that turns agent output into **private** (signed, expiring, revocable)
-or **public** links. Status: M1 done (config, domain, storage and the services are in and green);
-the MCP layer, the web layer and the CLI follow `docs/roadmap.md` (M2 → M5).
+or **public** links. Status: M2 done (the core plus the MCP layer: auth, tools, resources, the
+`share` prompt and the public gate); the web layer and the CLI follow `docs/roadmap.md` (M3 → M5).
 
 ## Commands
 
 Only `uv` and `just` are required. `just check` runs every gate CI runs, and it is green: the
-core (M1) exists, while `mcp-drop serve` still reports that there is nothing to serve until the
-MCP and web layers land.
+core (M1) and the MCP layer (M2) exist, while `mcp-drop serve` still reports that there is nothing
+to serve until the web layer and the CLI land.
 
 | Task | Command |
 |---|---|

@@ -76,7 +76,7 @@ release that changes the on-disk format bumps `schema_version` and says so in th
 | What | Steps | Effect |
 |---|---|---|
 | A client token | `mcp-drop token new <name>-2` → add its entry to `DROP_TOKENS` → update the client → remove the old entry | No downtime; the two entries overlap |
-| A client's scopes | Edit that client's entry in `DROP_TOKENS`, then restart | It takes effect on the client's next connection |
+| A client's scopes | Edit that client's entry in `DROP_TOKENS`, then restart | Tokens are checked on every request, so it applies as soon as the server is back; the client's open upload URLs follow the new scopes too |
 | `DROP_SECRET` | `mcp-drop secret new` → replace → restart | **Every private link and upload URL stops working.** Public URLs are unaffected. Agents mint fresh links with `artifact_link`. |
 
 ## 6. Monitoring
@@ -96,7 +96,7 @@ The audit log (`mcp-drop audit --since 24h`) is where an operator answers "who p
 
 | Situation | Action |
 |---|---|
-| A private link was shared too widely | `artifact_revoke_links(id)` (or `mcp-drop audit --id` to see who minted links) |
+| A private link was shared too widely | `artifact_revoke_links(id)`. Minting a link is not audited; `mcp-drop audit --id` shows who changed the artifact and who asked for upload URLs |
 | Something is public that shouldn't be | `artifact_set_visibility(id, private)` removes `/a/` access at once and revokes private links. Then `artifact_delete` if needed. |
 | A client token leaked | Remove its entry from `DROP_TOKENS` and restart. Review `mcp-drop audit --client <name>`. |
 | `DROP_SECRET` leaked | Rotate it (§ 5); every private link dies. Review the audit log. |

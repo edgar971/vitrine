@@ -27,6 +27,7 @@ from mcp_drop.domain.errors import (
     Invalid,
     NotFound,
     OverQuota,
+    Refused,
     SchemaMismatch,
     StorageUnavailable,
     TooLarge,
@@ -45,7 +46,7 @@ from mcp_drop.domain.models import (
     Visibility,
 )
 from mcp_drop.domain.paths import choose_entry, resolve_path
-from mcp_drop.storage.base import RefClaim, StoreConfig
+from mcp_drop.storage.base import CHANGED, PUBLIC_UPDATE, RefClaim, StoreConfig
 
 REF_ID = "id"
 REF_HASH = "request_hash"
@@ -117,10 +118,20 @@ class FileStore:
                 self._write_meta(artifact)
             return artifact
 
-    def add_version(self, artifact_id: str, draft: VersionDraft) -> Artifact:
+    def add_version(
+        self,
+        artifact_id: str,
+        draft: VersionDraft,
+        *,
+        if_version: int | None = None,
+        if_private: bool = False,
+    ) -> Artifact:
         """Write the next version and replace ``meta.json``; the caller prunes afterwards."""
         with self._locked(artifact_id):
             previous = self._read_meta(artifact_id)
+            _check_version(previous, if_version)
+            if if_private and previous.visibility is Visibility.PUBLIC:
+                raise Refused(PUBLIC_UPDATE)
             # Checked and spent under the artifact's lock, so two PUTs of one URL cannot both land.
             if draft.upload_nonce is not None and draft.upload_nonce in previous.used_upload_nonces:
                 raise Conflict(UPLOAD_REUSED)
@@ -231,12 +242,15 @@ class FileStore:
                     if claimed is not None and claimed.get(REF_ID) == artifact_id:
                         path.unlink(missing_ok=True)
 
-    def set_visibility(self, artifact_id: str, visibility: Visibility) -> Artifact:
+    def set_visibility(
+        self, artifact_id: str, visibility: Visibility, *, if_version: int | None = None
+    ) -> Artifact:
         """Persist a visibility change, moving the link epoch with it (spec § 4.4)."""
         with self._locked(artifact_id):
             artifact = self._read_meta(artifact_id)
             if artifact.visibility is visibility:
                 return artifact
+            _check_version(artifact, if_version)
             return self._update_meta(
                 artifact,
                 visibility=visibility,
@@ -287,6 +301,14 @@ class FileStore:
                 return RefClaim(id=str(claimed[REF_ID]), request_hash=request_hash, reused=True)
             _write_ref(path, record)
             return RefClaim(id=artifact_id, request_hash=request_hash, reused=False)
+
+    def release_ref(self, *, client: str, ref: str, artifact_id: str) -> None:
+        """Free a ``client_ref`` whose create failed, unless it now names another artifact."""
+        path = _ref_path(self._config.root, client, ref)
+        with self._refs_lock:
+            claimed = _read_ref(path)
+            if claimed is not None and claimed[REF_ID] == artifact_id:
+                path.unlink(missing_ok=True)
 
     def usage_bytes(self) -> int:
         """The bytes the versions hold, hard links counted once (spec § 8.2)."""
@@ -596,9 +618,13 @@ def _decode_cursor(cursor: str) -> tuple[datetime, str]:
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         stamp, artifact_id = base64.urlsafe_b64decode(padded).decode().split("|")
-        return datetime.fromisoformat(stamp), artifact_id
+        after = datetime.fromisoformat(stamp)
     except (ValueError, binascii.Error, UnicodeDecodeError) as error:
         raise Invalid("the cursor is not a cursor") from error
+    # A naive time cannot be compared with the stored, aware ones.
+    if after.tzinfo is None:
+        raise Invalid("the cursor is not a cursor")
+    return after, artifact_id
 
 
 def _parse_time(value: object) -> datetime | None:
@@ -616,3 +642,9 @@ def _spend(spent: tuple[str, ...], nonce: str | None) -> tuple[str, ...]:
     if nonce is None:
         return spent
     return (*spent, nonce)[-NONCES_KEPT:]
+
+
+def _check_version(artifact: Artifact, expected: int | None) -> None:
+    """Refuse a change that was decided against a version that is no longer the current one."""
+    if expected is not None and artifact.version != expected:
+        raise Conflict(CHANGED)

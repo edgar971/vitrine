@@ -9,6 +9,7 @@ Decisions that are expensive to reverse ([`docs/design.md`](../design.md) § 10)
 | [0002](0002-one-gate-to-public.md) | `PublicGate` is the only path to public, and it fails closed |
 | [0003](0003-self-contained-auth.md) | Auth is self-contained: hashed tokens and HMAC links, no proxy dependency |
 | [0004](0004-protocol-era-handling.md) | Both MCP protocol eras are implemented, behind one gate |
+| [0005](0005-gated-public-updates.md) | New content on a public artifact goes through the gate, bound to what the human saw |
 
 New ADRs: copy the shape of an existing one, number it after the last, and link it here and from
 the pull request that makes the decision.

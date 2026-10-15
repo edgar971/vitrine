@@ -21,6 +21,13 @@ from mcp_drop.domain.models import (
 if TYPE_CHECKING:
     from mcp_drop.config import Settings
 
+# Every store words these refusals the same way, so a caller sees one message whichever store ran.
+PUBLIC_UPDATE = (
+    "this artifact is public, so new content would be public at once: make it private first, "
+    "or update it with artifact_update and a token that may publish, which asks the user"
+)
+CHANGED = "the artifact changed while waiting for confirmation; ask again"
+
 
 class StoreConfig(BaseModel):
     """What a ``Store`` needs from the configuration (spec § 8.2)."""
@@ -67,12 +74,22 @@ class Store(Protocol):
         """
         ...
 
-    def add_version(self, artifact_id: str, draft: VersionDraft) -> Artifact:
+    def add_version(
+        self,
+        artifact_id: str,
+        draft: VersionDraft,
+        *,
+        if_version: int | None = None,
+        if_private: bool = False,
+    ) -> Artifact:
         """Write the next version and replace ``meta.json``; ``NotFound`` for an unknown id.
 
         ``files=None`` carries the current files over, so a metadata change is still a version.
         A draft's ``upload_nonce`` that was already spent is a ``Conflict``; otherwise it is
         recorded as spent in the same write, so one upload URL lands at most once (spec § 7.3).
+        The preconditions are checked under the same lock as the write: ``if_version`` is a
+        ``Conflict`` when another version landed first, and ``if_private`` is ``Refused`` when the
+        artifact is public, since its new content would be public at once (security T19).
         """
         ...
 
@@ -103,12 +120,22 @@ class Store(Protocol):
         """Scan the ``meta.json`` files, newest first, one page at a time (spec § 5.1)."""
         ...
 
+    def release_ref(self, *, client: str, ref: str, artifact_id: str) -> None:
+        """Free a ``client_ref`` claimed for a create that failed, if it still names that id."""
+        ...
+
     def delete(self, artifact_id: str) -> None:
         """Remove the artifact and free its ``client_ref`` (spec § 4.5)."""
         ...
 
-    def set_visibility(self, artifact_id: str, visibility: Visibility) -> Artifact:
-        """Persist a visibility change the gate has already decided (spec § 6)."""
+    def set_visibility(
+        self, artifact_id: str, visibility: Visibility, *, if_version: int | None = None
+    ) -> Artifact:
+        """Persist a visibility change the gate has already decided (spec § 6).
+
+        ``if_version`` is the version the human was shown; a later one is a ``Conflict``, so
+        content added while they decided is never published under their approval (security T20).
+        """
         ...
 
     def revoke_links(self, artifact_id: str) -> Artifact:

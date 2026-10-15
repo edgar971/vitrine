@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import AuditUnavailable, SchemaMismatch
+from mcp_drop.domain.errors import AuditUnavailable
 from mcp_drop.domain.models import GateDecision, Visibility
 from mcp_drop.services.audit import (
     AuditEvent,
@@ -268,10 +268,24 @@ class DescribeReading:
             assert [event.version for event in audit.query(since=since)] == [2]
 
     class WhenALineIsNotAnEvent:
-        def it_refuses_the_file(self, audit: AuditLog, tmp_path: Path) -> None:
+        def it_skips_the_line(self, audit: AuditLog, tmp_path: Path) -> None:
             (tmp_path / "audit" / "2026-10.jsonl").write_text("not an event\n")
-            with pytest.raises(SchemaMismatch):
-                audit.query()
+            assert audit.query() == ()
+
+        def it_still_reads_the_events_around_it(self, audit: AuditLog, tmp_path: Path) -> None:
+            audit.append(_created())
+            with (tmp_path / "audit" / "2026-10.jsonl").open("a") as log:
+                log.write("not an event\n")
+            audit.append(_created())
+            assert len(audit.query()) == 2
+
+    class WhenACrashTornTheLastLine:
+        def it_starts_the_next_event_on_a_line_of_its_own(
+            self, audit: AuditLog, tmp_path: Path
+        ) -> None:
+            (tmp_path / "audit" / "2026-10.jsonl").write_text('{"ts": "2026-10')
+            audit.append(_created())
+            assert len(audit.query()) == 1
 
     class WhenTheFileIsEmpty:
         def it_returns_nothing(self, audit: AuditLog, tmp_path: Path) -> None:

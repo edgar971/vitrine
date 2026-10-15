@@ -2,10 +2,11 @@
 # drop's image: multi-arch (amd64, arm64), non-root, and fine on a read-only root filesystem.
 # Everything it writes goes to /data (artifacts, staging, audit), so mount a volume there.
 
-ARG UV_VERSION=0.13.1
 ARG PYTHON_VERSION=3.15
 
-FROM ghcr.io/astral-sh/uv:${UV_VERSION}-trixie-slim AS build
+# Base images are pinned by digest, so a moved tag cannot change a signed release; Dependabot
+# bumps the tag and the digest together.
+FROM ghcr.io/astral-sh/uv:0.13.1-trixie-slim@sha256:2a4b12b30aa1a0f1d1f420ad3f4ac27716d5c2962302ac8a7af67ac3287bf36c AS build
 ARG PYTHON_VERSION
 # A uv-managed CPython under /python, copied whole into the runtime image; bytecode is compiled
 # here because the runtime filesystem is read-only.
@@ -30,7 +31,7 @@ COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv --mount=type=secret,id=ca_bundle,required=false \
     with-ca uv sync --no-dev --extra metrics --no-editable
 
-FROM debian:trixie-slim
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
 LABEL org.opencontainers.image.title="drop" \
       org.opencontainers.image.description="Private and public links for agent output (MCP server)" \
       org.opencontainers.image.source="https://github.com/edgar971/drop" \

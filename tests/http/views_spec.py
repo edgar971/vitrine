@@ -142,7 +142,20 @@ class DescribeVersionPinning:
             )
             assert http.get(published.url).text == "<h1>two</h1>"
 
-    @pytest.mark.parametrize("pin", ["@2", "@0", "@x", "@", "@-1"])
+    class WhenThePinnedVersionHadAnotherEntry:
+        def it_opens_that_version_s_own_entry(
+            self, http: httpx2.Client, services: Services
+        ) -> None:
+            report = services.artifacts.create(
+                ArtifactDraft(title="Report", files={"report.txt": b"v1"}), client=CLIENT
+            )
+            services.artifacts.update(
+                report.id, VersionDraft(files={"index.html": b"<p>v2</p>"}), client=CLIENT
+            )
+            pinned = report.url.replace(signature(report.url), f"{signature(report.url)}@1")
+            assert http.get(pinned).text == "v1"
+
+    @pytest.mark.parametrize("pin", ["@2", "@0", "@x", "@", "@-1", "@" + "9" * 5000])
     def it_answers_404_for_a_pin_that_names_no_kept_version(
         self, http: httpx2.Client, published: PublishedArtifact, pin: str
     ) -> None:
@@ -236,4 +249,4 @@ class DescribeANestedEntry:
                 ),
                 client=CLIENT,
             )
-            assert http.get(nested.url).headers["Location"] == "site/index.html"
+            assert http.get(nested.url).headers["Location"] == "./site/index.html"

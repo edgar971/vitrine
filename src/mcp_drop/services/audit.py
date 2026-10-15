@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
+from typing import BinaryIO
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from mcp_drop.domain import layout
 from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import AuditUnavailable, SchemaMismatch
+from mcp_drop.domain.errors import AuditUnavailable
 from mcp_drop.domain.models import GateDecision, Visibility
 from mcp_drop.services.metrics import Metrics, NoMetrics
+
+logger = logging.getLogger(__name__)
 
 
 class AuditEventName(StrEnum):
@@ -145,8 +149,10 @@ class AuditLog:
         line = event.model_dump_json(by_alias=True, exclude_none=True)
         path = layout.audit_file(self._data_dir, event.ts)
         try:
-            with path.open("a", encoding="utf-8") as handle:
-                handle.write(f"{line}\n")
+            with path.open("a+b") as handle:
+                # A crash mid-append leaves a torn line; starting a fresh one keeps this event
+                # readable instead of glued to the fragment.
+                handle.write(_fresh_line(handle) + line.encode() + b"\n")
                 handle.flush()
                 os.fsync(handle.fileno())
         except OSError as error:
@@ -208,19 +214,34 @@ class AuditLog:
         return removed
 
     def _read_month(self, path: Path) -> list[AuditEvent]:
-        """Parse one month's lines, newest last-then-reversed, refusing anything unreadable."""
+        """Parse one month's lines, newest first.
+
+        A line that is not an event (a write torn by a crash) is skipped and logged, so one bad
+        line cannot stop every upload and sweep that reads the log.
+        """
         events = []
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
+        ):
             if not line.strip():
                 continue
             try:
                 events.append(AuditEvent.model_validate_json(line))
-            except ValidationError as error:
-                raise SchemaMismatch(
-                    f"{path.name} line {number} is not an audit event: {error}"
-                ) from error
+            except ValidationError:
+                logger.warning(
+                    "audit: %s line %d is not an audit event; skipped", path.name, number
+                )
         events.reverse()
         return events
+
+
+def _fresh_line(handle: BinaryIO) -> bytes:
+    """A newline when the file ends mid-line, so the next event starts on its own line."""
+    size = handle.seek(0, os.SEEK_END)
+    if size == 0:
+        return b""
+    handle.seek(size - 1)
+    return b"" if handle.read(1) == b"\n" else b"\n"
 
 
 def _matches(

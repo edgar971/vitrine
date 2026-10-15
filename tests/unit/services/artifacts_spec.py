@@ -187,6 +187,12 @@ class DescribeCreate:
             with pytest.raises(Conflict):
                 service.create(_draft(title="Other", client_ref="weekly"), client=CLIENT)
 
+    class WhenACreateWithARefFails:
+        def it_frees_the_ref_for_the_retry(self, service: ArtifactService) -> None:
+            with pytest.raises(Invalid):
+                service.create(_draft(client_ref="weekly", entry="missing.html"), client=CLIENT)
+            assert service.create(_draft(client_ref="weekly"), client=CLIENT).created
+
     class WhenTheClientRefIsMalformed:
         def it_refuses_the_call(self, service: ArtifactService) -> None:
             with pytest.raises(Invalid):

@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
+from typing import NoReturn
 from urllib.parse import urlencode
 
 from pydantic import BaseModel, ConfigDict
@@ -39,11 +40,12 @@ from mcp_drop.domain.models import (
     VersionDraft,
     Visibility,
 )
-from mcp_drop.domain.paths import validate_path
+from mcp_drop.domain.paths import choose_entry, validate_path
 from mcp_drop.services.audit import AuditEvent, AuditEventName, AuditLog
+from mcp_drop.services.gate import GateBinding
 from mcp_drop.services.links import LinkService
 from mcp_drop.services.metrics import Metrics, NoMetrics
-from mcp_drop.storage.base import Store
+from mcp_drop.storage.base import PUBLIC_UPDATE, Store
 
 TEXT_READ_LIMIT = 1024 * 1024
 UPLOAD_REUSED = "this upload URL was already used"
@@ -98,6 +100,14 @@ class ArtifactService:
             artifact_id = claim.id
             if claim.reused:
                 return self._published(self._usable(claim.id), created=False)
+            try:
+                return self._create(artifact_id, draft, client=client)
+            except DropError:
+                # Nothing was created, so a retry (or a corrected request) must find the key free.
+                self._store.release_ref(
+                    client=client, ref=draft.client_ref, artifact_id=artifact_id
+                )
+                raise
         return self._create(artifact_id, draft, client=client)
 
     def _create(self, artifact_id: str, draft: ArtifactDraft, *, client: str) -> PublishedArtifact:
@@ -119,10 +129,43 @@ class ArtifactService:
         self._metrics.version_created(client)
         return self._published(artifact)
 
-    def update(self, artifact_id: str, draft: VersionDraft, *, client: str) -> PublishedArtifact:
-        """Write the next version; the id and its links stay the same (spec § 5.1)."""
+    def update(
+        self,
+        artifact_id: str,
+        draft: VersionDraft,
+        *,
+        client: str,
+        gate: GateDecision | None = None,
+        seen_version: int | None = None,
+    ) -> PublishedArtifact:
+        """Write the next version; the id and its links stay the same (spec § 5.1).
+
+        New content on a public artifact is public at once, so it needs the gate's approval
+        (``gate``), given for ``seen_version``. Without one, only a private artifact is updated,
+        and the check runs under the store's lock, so a concurrent publish cannot slip between.
+        """
         previous = self._usable(artifact_id)
-        artifact = self._store.add_version(artifact_id, draft)
+        if gate is not None:
+            self._metrics.gate(gate)
+            if not gate.approves():
+                self._refuse_publish(
+                    previous,
+                    client=client,
+                    gate=gate,
+                    reason=f"the public gate answered {gate.value}: no version was written",
+                )
+        elif previous.visibility is Visibility.PUBLIC:
+            self._refuse_publish(previous, client=client, gate=GateDecision.UNSUPPORTED)
+        try:
+            artifact = self._store.add_version(
+                artifact_id,
+                draft,
+                if_version=None if gate is None else seen_version,
+                if_private=gate is None,
+            )
+        except Refused:
+            # It became public between the read above and the write.
+            self._refuse_publish(previous, client=client, gate=GateDecision.UNSUPPORTED)
         self._record(
             AuditEvent(
                 ts=self._clock.now(),
@@ -178,6 +221,10 @@ class ArtifactService:
             return ArtifactLink(url=self._links.public_url(artifact.id))
         link = self._links.view_url(artifact.id, epoch=artifact.link_epoch, ttl=ttl)
         return ArtifactLink(url=link.url, expires_at=link.expires_at)
+
+    def gate_binding(self, artifact_id: str, *, client: str, request: str) -> GateBinding:
+        """What ties a gate question about ``request`` to the answer that comes back for it."""
+        return GateBinding(self._links, artifact_id, client, request)
 
     def upload_url(
         self,
@@ -257,6 +304,22 @@ class ArtifactService:
             raise NotFound()
         return self._viewable(artifact, version)
 
+    def entry_of(self, artifact: Artifact, *, version: int | None = None) -> str:
+        """The file a link opens; a pinned older version opens its own entry (spec § 4.3).
+
+        Only the current entry is stored, so an older version keeps it while it has that file,
+        and otherwise falls back the way a new version would.
+        """
+        if version is None or version == artifact.version:
+            return artifact.entry
+        files = [entry.path for entry in self._store.files(artifact.id, version)]
+        if artifact.entry in files:
+            return artifact.entry
+        try:
+            return choose_entry(files=files)
+        except Invalid:
+            raise NotFound() from None
+
     def locate(self, artifact: Artifact, path: str, *, version: int | None = None) -> Path:
         """The file a view streams, from the version the artifact was opened at."""
         return self._store.locate(artifact.id, path, version=version or artifact.version)
@@ -290,25 +353,29 @@ class ArtifactService:
         *,
         client: str,
         gate: GateDecision,
+        seen_version: int | None = None,
     ) -> Artifact:
-        """Apply the gate's decision; this is the only path that can widen access (spec § 6)."""
+        """Apply the gate's decision; this is the only path that can widen access (spec § 6).
+
+        ``seen_version`` is the version the human approved: a later one is a ``Conflict``.
+        """
         artifact = self._store.get(artifact_id)
         if artifact.visibility is visibility:
             return artifact
         if visibility is Visibility.PUBLIC:
             self._metrics.gate(gate)
         if visibility is Visibility.PUBLIC and not gate.approves():
-            self._audit.append(
-                AuditEvent(
-                    ts=self._clock.now(),
-                    event=AuditEventName.PUBLISH_REFUSED,
-                    artifact=artifact.id,
-                    client=client,
-                    gate=gate,
-                )
+            self._refuse_publish(
+                artifact,
+                client=client,
+                gate=gate,
+                reason=f"the public gate answered {gate.value}: the artifact stays private",
             )
-            raise Refused(f"the public gate answered {gate.value}: the artifact stays private")
-        updated = self._store.set_visibility(artifact_id, visibility)
+        updated = self._store.set_visibility(
+            artifact_id,
+            visibility,
+            if_version=seen_version if visibility is Visibility.PUBLIC else None,
+        )
         self._record(
             AuditEvent(
                 ts=self._clock.now(),
@@ -391,8 +458,8 @@ class ArtifactService:
         return artifact
 
     def _published(self, artifact: Artifact, *, created: bool = True) -> PublishedArtifact:
-        """Every result carries a fresh private link; nothing here can make it public."""
-        link = self._links.view_url(artifact.id, epoch=artifact.link_epoch)
+        """A fresh private link, or the public URL of an artifact the gate made public."""
+        link = self.url_for(artifact)
         return PublishedArtifact(
             id=artifact.id,
             url=link.url,
@@ -400,6 +467,21 @@ class ArtifactService:
             expires_at=link.expires_at,
             created=created,
         )
+
+    def _refuse_publish(
+        self, artifact: Artifact, *, client: str, gate: GateDecision, reason: str = PUBLIC_UPDATE
+    ) -> NoReturn:
+        """Audit a refused publish and refuse it; the content stays where it was (spec § 6)."""
+        self._audit.append(
+            AuditEvent(
+                ts=self._clock.now(),
+                event=AuditEventName.PUBLISH_REFUSED,
+                artifact=artifact.id,
+                client=client,
+                gate=gate,
+            )
+        )
+        raise Refused(reason)
 
     def _record(self, event: AuditEvent, *, rollback: Callable[[], None]) -> None:
         """Audit a change that already landed, undoing it when the log cannot be written."""

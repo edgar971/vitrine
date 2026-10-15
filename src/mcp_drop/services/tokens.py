@@ -11,6 +11,7 @@ import hmac
 from collections.abc import Mapping
 
 from mcp_drop.config import TokenEntry
+from mcp_drop.domain.models import Scope
 
 
 def token_hash(token: str) -> str:
@@ -34,3 +35,11 @@ class TokenBook:
             if hmac.compare_digest(entry.sha256, digest):
                 match = entry
         return match
+
+    def allows(self, client: str, scope: Scope) -> bool:
+        """Whether ``client`` is still configured with ``scope``.
+
+        A capability minted for a client (an upload URL) is only as good as that client: removing
+        its token, or the scope, stops what it already handed out (security T21).
+        """
+        return any(entry.name == client and scope in entry.scopes for entry in self._entries)

@@ -66,10 +66,12 @@ class Scope(StrEnum):
 
 
 class LinkKind(StrEnum):
-    """The two signed-link kinds; the kind is inside the MAC (spec § 3)."""
+    """The signed kinds; the kind is inside the MAC, so one can never pass for another (§ 3)."""
 
     VIEW = "view"
     UPLOAD = "upload"
+    # Not a link: the state a gate question carries to its answer (security T20).
+    GATE = "gate"
 
 
 class Version(BaseModel):

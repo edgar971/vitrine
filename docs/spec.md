@@ -142,6 +142,7 @@ The same rule **MUST** apply when writing and when resolving a request path.
                           ▼
    update ─────►  ┌──────────────┐   set_visibility(public) + gate approved   ┌──────────────┐
   (new version)   │   PRIVATE    │ ─────────────────────────────────────────► │    PUBLIC    │ ◄── update
+                                                                                                + gate approved
    revoke_links   │ /s/{sig} only│ ◄───────────────────────────────────────── │ /a/{id} + /s │
    (epoch + 1)    └──────┬───────┘        set_visibility(private), epoch + 1  └──────┬───────┘
                          │ expires_at passes                                         │
@@ -154,6 +155,12 @@ The same rule **MUST** apply when writing and when resolving a request path.
 
 Every arrow is one audit event (§ 11.3). Every visibility change increments the link epoch, so no
 private link survives a round trip through public.
+
+New content on a public artifact is public the moment it lands, so a version **MUST NOT** be added
+to a public artifact without the gate (§ 6). Over MCP, `artifact_update` asks the human when the
+token holds `drop:publish`; without that scope, and on every HTTP route, the write is refused
+(`publish_refused`, `gate` = `unsupported`). The check runs under the same lock as the write, so a
+publish that lands concurrently cannot slip a version past it.
 
 ### 4.5 Idempotent create
 
@@ -199,7 +206,7 @@ The HTTP API applies the same scopes: `/api` writes need `drop:write`, and listi
 | Tool | Parameters | Result | Scope |
 |---|---|---|---|
 | `artifact_create` | `title`; `files: {path: text}` (UTF-8, total ≤ `max_mcp_body`); `entry?`; `expires_in?`; `tags?`; `note?`; `client_ref?` (§ 4.5) | `{id, url, version, expires_at, created}`. Always **private**; `url` is a fresh private link. `created` is false when `client_ref` matched. | `drop:write` |
-| `artifact_update` | `id`; `files?`; `merge=false`; `entry?`; `title?`; `expires_in?` (`"never"` clears); `tags?`; `note?` | `{id, url, version}`. The id is unchanged. With `merge`, files overlay the current version; without it they replace it. Without `files`, the current files carry over, so a metadata-only change is still a new version. | `drop:write` |
+| `artifact_update` | `id`; `files?`; `merge=false`; `entry?`; `title?`; `expires_in?` (`"never"` clears); `tags?`; `note?` | `{id, url, version}`. The id is unchanged. With `merge`, files overlay the current version; without it they replace it. Without `files`, the current files carry over, so a metadata-only change is still a new version. On a **public** artifact the human is asked first (§ 6.1) and `url` is the public URL; a token without `drop:publish` is refused without asking (§ 4.4). | `drop:write` (+ `drop:publish` for a public artifact) |
 | `artifact_get` | `id`; `version?` | Metadata plus `files: [{path, bytes}]` | `drop:read` |
 | `artifact_list` | `query?` (title or tag substring); `tag?`; `visibility?`; `source?`; `limit=20` (max 100); `cursor?` | `{items: [{id, title, visibility, version, updated_at, source, tags}], next_cursor}`, newest first. **No URLs**: links are minted on purpose with `artifact_link`. | `drop:read` |
 | `artifact_link` | `id`; `ttl?` | `{url, expires_at}`. A fresh private link, or the public URL if public. | `drop:share` |
@@ -278,7 +285,9 @@ tools and scopes don't already allow.
 ### 6.1 Confirmation
 
 The confirmation message **MUST** name the artifact title and its file count, and say that
-anyone with the link can view it.
+anyone with the link can view it. When `artifact_update` asks before adding a version to a public
+artifact, the message names the title, says it is public and that the new version is visible
+immediately.
 
 | Negotiated MCP protocol | Mechanism | Approved when |
 |---|---|---|
@@ -287,6 +296,16 @@ anyone with the link can view it.
 
 The default on `confirm` lets approve/deny-only clients approve: they answer `accept` with empty
 content.
+
+**Binding the answer to the question.** An approval counts only for the question that was asked:
+
+- On `2026-07-28`, the `InputRequiredResult` carries a `requestState` that the server signs over
+  the artifact id, the version shown, the calling client, a digest of the call's arguments and a
+  15-minute expiry. A retry whose answer comes without that state, or with state minted for
+  another artifact, client, version or set of arguments, is `declined`.
+- On both eras, the write **MUST** find the version the human was shown. A version that landed
+  while they decided makes the call fail with `conflict` ("changed while waiting"), and nothing
+  becomes public.
 
 The gate **MUST** fail closed. Decline, cancel, timeout, transport error and a client without
 elicitation support all leave the artifact private and return a tool error saying so. A client that
@@ -307,19 +326,21 @@ cover them.
 | `GET /a/{id}/[{path}]` | none | Public artifact, current version. A missing, private or malformed id returns 404. |
 | `GET /a/{id}@{n}/[{path}]` | none | Pinned version `n` of a public artifact. A version that is not retained returns 404. |
 | `GET /s/{sig}/[{path}]`, `GET /s/{sig}@{n}/[{path}]` | view signature | The same for any artifact the signature names |
-| `PUT /u/{sig}?filename=[&title=]` | upload signature | Raw body. Creates the pre-allocated private artifact (`201`), or adds a version that overlays the file on the current ones (`200`). Single use. Returns `{id, url, version, expires_at}`. |
+| `PUT /u/{sig}?filename=[&title=]` | upload signature, from a client still configured with `drop:write` | Raw body. Creates the pre-allocated private artifact (`201`), or adds a version that overlays the file on the current ones (`200`). Single use. Returns `{id, url, version, expires_at}`. A public target returns 403 (§ 4.4). An URL whose client was removed from `DROP_TOKENS`, or lost `drop:write`, returns 404. |
 | `POST /api/artifacts` | bearer, `drop:write` | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?` (repeatable, or comma-separated), `note?`, `client_ref?`. Any other field is refused with 400, so there is no way to send a visibility. Returns `201 {id, url, version, expires_at}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
-| `PUT /api/artifacts/{id}` | bearer, `drop:write` | Same body, without `client_ref`. Adds a version; `merge=true` overlays; `expires_in=never` clears the expiry. |
+| `PUT /api/artifacts/{id}` | bearer, `drop:write` | Same body, without `client_ref`. Adds a version; `merge=true` overlays; `expires_in=never` clears the expiry. A public target returns 403 (§ 4.4). |
 | `GET /api/artifacts` | bearer, `drop:read` | Same query parameters and page as `artifact_list` |
-| `GET /healthz` | none | `200 {"ok": true}` when `data_dir` is writable, else 503 |
+| `GET /healthz` | none | `200 {"ok": true}` when `data_dir` is writable (probed through `data_dir/tmp`, where every write starts), else 503 |
 | `GET /metrics` on `metrics_port` | none | Prometheus text format, on a separate listener (§ 11) |
 
 The `@{n}` suffix keeps version pinning inside one path segment, so relative asset URLs in
 multi-file HTML keep working under every prefix.
 
 Every `GET` route also answers `HEAD`. A view URL without its trailing slash redirects to it.
-An empty `{path}` serves the entry; an entry in a subdirectory is redirected to (`307`), so its
-relative links resolve beside it. A token without the route's scope gets 403, and the refusal is
+An empty `{path}` serves the entry; an entry in a subdirectory is redirected to (`307`, a
+`./`-relative, percent-encoded `Location`), so its relative links resolve beside it. A pinned
+older version opens its own entry: the current one while that version has it, otherwise the one
+§ 4.3 would choose for it. A token without the route's scope gets 403, and the refusal is
 audited (§ 11.3).
 
 ### 7.2 Viewing
@@ -432,14 +453,16 @@ client name, and writing a line per refused request would turn a flood into disk
 
 **Secrets** (`secret`, `tokens`) are accepted **only** from the environment. A config file that
 sets them **MUST** be rejected at startup, so config files can be committed safely. Unknown keys
-**MUST** be rejected, which catches typos.
+**MUST** be rejected, which catches typos, in the file and among `DROP_*` variables alike. The
+client-side `DROP_URL` and `DROP_TOKEN` (what MCP clients and the Hermes plugin read) are not
+settings and are ignored, so one shell can run the server and a client.
 
 **Formats**
 
 | Kind | Accepted forms |
 |---|---|
 | Sizes | `512KB`, `100MB`, `10GB` or bytes (binary units) |
-| Durations | `30s`, `15m`, `1h`, `7d` or seconds |
+| Durations | `30s`, `15m`, `1h`, `7d` or seconds; at most 12 digits, and positive |
 | Lists in env vars | Comma-separated; native arrays in TOML |
 | Rates | `<int>/<s\|m\|h>`, for example `60/m`, or `off` |
 
@@ -556,16 +579,19 @@ they need `DROP_SECRET` and `DROP_TOKENS` too.
 | Token without the scope | tool not listed; calling it fails as unknown | 403 |
 | Unknown or malformed id; private id on `/a/`; invalid link | tool error `not found` | 404 |
 | Expired artifact | tool error `expired` | 410 |
-| Unsafe path; bad entry; empty artifact | tool error naming the problem | 400 |
-| Upload URL reused; `client_ref` reused with different content | tool error `conflict` | 409 |
+| Unsafe path; bad entry; empty artifact; a duration that is zero or over 36500 days | tool error naming the problem | 400 |
+| Upload URL reused; `client_ref` reused with different content; the artifact changed while the human decided | tool error `conflict` | 409 |
 | Rate limit exceeded | tool error `rate limited: retry after <n>s` | 429 + `Retry-After` |
 | Over a size or file-count limit | tool error | 413 |
 | Over quota | tool error | 507 |
 | Public refused (§ 6) | tool error stating it stays private | — |
+| A new version for a public artifact without the gate (§ 4.4) | tool error saying the artifact is public | 403 |
 | Host not allowed / foreign Origin | — | 421 / 403 |
 
 Error messages **MUST NOT** reveal whether a private artifact exists. A 5xx answers
-`internal error` and never the underlying message, which can carry filesystem details.
+`internal error` and never the underlying message, which can carry filesystem details. MCP does
+the same: only the errors in this table reach a client in their own words; any other failure is a
+tool error `internal error`.
 
 ## 11. Observability and audit
 
@@ -585,7 +611,7 @@ Error messages **MUST NOT** reveal whether a private artifact exists. A 5xx answ
 | `drop_storage_bytes` | gauge | — |
 | `drop_versions_created_total` | counter | `client` |
 | `drop_views_total` | counter | `route` = `a` \| `s` |
-| `drop_public_gate_total` | counter | `outcome` = `approved` \| `declined` \| `unsupported` \| `disabled` \| `not_required` (one per attempt to make an artifact public) |
+| `drop_public_gate_total` | counter | `outcome` = `approved` \| `declined` \| `unsupported` \| `disabled` \| `not_required` (one per gate decision: making an artifact public, or adding a version to a public one) |
 | `drop_rejected_total` | counter | `reason` = `rate_limited` \| `scope` |
 
 Metrics **MUST NOT** carry artifact ids or titles.
@@ -597,13 +623,13 @@ state change is acknowledged.
 
 ```json
 {"ts":"2026-10-15T10:21:04Z","event":"visibility_changed","artifact":"k7m2q9x4tz3wbn6r",
- "client":"hermes","from":"private","to":"public","gate":"approved","version":2}
+ "client":"hermes","from":"private","to":"public","gate":"approved"}
 ```
 
 | Event | Extra fields |
 |---|---|
 | `created` | `version`, `files`, `bytes`, `client_ref` (when given) |
-| `version_added` | `version`, `files`, `bytes`, `merge` |
+| `version_added` | `version`, `files`, `bytes`, `merge` (on a public artifact, only after the gate approved) |
 | `visibility_changed` | `from`, `to`, `gate` = `approved` \| `not_required` |
 | `publish_refused` | `gate` = `declined` \| `unsupported` \| `disabled` |
 | `links_revoked` | `link_epoch` |
@@ -621,6 +647,8 @@ Rules:
 - Files are never rewritten. Retention deletes whole months older than `audit_retention`.
 - Audit write failures fail the operation (fail closed): a change that cannot be audited does not
   happen.
+- A line that is not an event (a write torn by a crash) is skipped and logged when the log is
+  read, and the next append starts on a fresh line.
 
 ## 12. Compatibility
 

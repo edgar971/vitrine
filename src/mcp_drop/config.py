@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import tomllib
@@ -27,17 +28,22 @@ from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings, NoDecode, PydanticBaseSettingsSource, SettingsConfigDict
 
 from mcp_drop.domain import layout
-from mcp_drop.domain.errors import ConfigError
+from mcp_drop.domain.errors import ConfigError, Invalid
 from mcp_drop.domain.models import PublicMode, Scope
 
 SECRET_KEYS = ("secret", "tokens")
 CONFIG_TABLE = "drop"
 ENV_PREFIX = "DROP_"
+# What MCP clients and the Hermes plugin read (README): a shell that runs both sets them.
+CLIENT_ENV_KEYS = frozenset({"DROP_URL", "DROP_TOKEN"})
 MIN_SECRET_BYTES = 32
 RENDERERS = frozenset({"md", "csv", "tsv", "json"})
+# The longest lifetime a caller may ask for; past it a date stops being representable.
+MAX_REQUESTED_DURATION = timedelta(days=36500)
 
 _SIZE = re.compile(r"^(\d+)([KMGT]?B?)$", re.IGNORECASE)
-_DURATION = re.compile(r"^(\d+)([smhd]?)$", re.IGNORECASE)
+# Twelve digits is longer than any lifetime; past ~4300, int() itself refuses the string.
+_DURATION = re.compile(r"^(\d{1,12})([smhd]?)$", re.IGNORECASE)
 _RATE = re.compile(r"^(\d+)/([smh])$", re.IGNORECASE)
 _TOKEN_NAME = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -126,6 +132,17 @@ def parse_duration(value: object) -> timedelta:
     return _positive_seconds(int(number) * _SECONDS[unit.lower()])
 
 
+def requested_duration(value: str) -> timedelta:
+    """A duration a caller sent: a bad one is the caller's mistake (400), not the operator's."""
+    try:
+        duration = parse_duration(value)
+    except ConfigError as failure:
+        raise Invalid(str(failure)) from None
+    if duration > MAX_REQUESTED_DURATION:
+        raise Invalid(f"a duration cannot exceed {MAX_REQUESTED_DURATION.days}d")
+    return duration
+
+
 def parse_rate(value: object) -> TickRate | None:
     """Parse ``60/m``, ``1200/h`` or ``off``, which disables the bucket (spec § 7.5)."""
     if value is None or value == "off":
@@ -172,6 +189,26 @@ def parse_tokens(value: object) -> dict[str, TokenEntry]:
     return entries
 
 
+def plain_http_warning(settings: Settings) -> str | None:
+    """The warning for tokens and links crossing a network in clear text (security R1)."""
+    if urlsplit(settings.public_base_url).scheme != "http" or _is_loopback(settings.host):
+        return None
+    return (
+        f"public_base_url is http:// while drop listens on {settings.host}: tokens and private "
+        "links cross the network in clear text; serve it over https"
+    )
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether a bind address only accepts connections from this machine."""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def unscoped_tokens(value: str) -> list[str]:
     """The names of ``DROP_TOKENS`` entries that omit their scopes, and so get all four (§ 8.2)."""
     entries = [chunk.split(":") for chunk in parse_list(value)]
@@ -189,7 +226,10 @@ def _positive_seconds(value: int) -> timedelta:
     """Wrap a second count, refusing the zero and negative forms a duration cannot have."""
     if value <= 0:
         raise ConfigError("a duration must be positive")
-    return timedelta(seconds=value)
+    try:
+        return timedelta(seconds=value)
+    except OverflowError:
+        raise ConfigError("a duration is too long") from None
 
 
 class MappingSource(PydanticBaseSettingsSource):
@@ -419,7 +459,9 @@ def _unknown_env_keys() -> list[str]:
     return sorted(
         key
         for key in os.environ
-        if key.upper().startswith(ENV_PREFIX) and key[len(ENV_PREFIX) :].lower() not in fields
+        if key.upper().startswith(ENV_PREFIX)
+        and key[len(ENV_PREFIX) :].lower() not in fields
+        and key.upper() not in CLIENT_ENV_KEYS
     )
 
 

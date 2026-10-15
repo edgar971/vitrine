@@ -15,6 +15,7 @@ from datetime import datetime
 from enum import StrEnum
 from functools import partial
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from anyio import to_thread
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -24,7 +25,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 from starlette.routing import Route
 
-from mcp_drop.config import Settings, parse_duration
+from mcp_drop.config import Settings, requested_duration
 from mcp_drop.domain import layout
 from mcp_drop.domain.errors import DropError, Invalid, NotFound, TooLarge
 from mcp_drop.domain.ids import CLIENT_REF_MAX, is_valid_id
@@ -59,6 +60,8 @@ BEARER = re.compile(r"^bearer\s+(\S+)$", re.IGNORECASE)
 PARSER_MAX_FILES = 10_000
 PARSER_MAX_FIELDS = 64
 VERSION_MARK = "@"
+# More digits than any real version number needs.
+MAX_PIN_DIGITS = 9
 TITLE_MAX = 200
 
 
@@ -142,9 +145,11 @@ class WebRoutes:
         service = self._services.artifacts
         try:
             claims = service.upload_claims(request.path_params["sig"])
-            if claims.client is None:
+            client = claims.client
+            # A removed client, or one no longer allowed to write, has revoked its own URLs.
+            if client is None or not self._services.tokens.allows(client, Scope.WRITE):
                 raise NotFound()
-            await self._spend(Bucket.WRITES, claims.client, route="upload", artifact=claims.id)
+            await self._spend(Bucket.WRITES, client, route="upload", artifact=claims.id)
             filename = request.query_params.get("filename")
             if not filename:
                 raise Invalid("name the file: PUT /u/<sig>?filename=report.pdf")
@@ -249,12 +254,12 @@ class WebRoutes:
             artifact = await _run(partial(open_artifact, key, version=version))
             path = request.path_params["path"]
             if not path:
-                if "/" in artifact.entry:
+                path = await _run(partial(service.entry_of, artifact, version=version))
+                if "/" in path:
                     # A nested entry is redirected to, so its relative links resolve beside it.
                     return RedirectResponse(
-                        artifact.entry, status_code=307, headers=security_headers()
+                        _relative(path), status_code=307, headers=security_headers()
                     )
-                path = artifact.entry
             raw = request.query_params.get("raw") == "1"
             download = request.query_params.get("download") == "1"
             file = await _run(partial(service.locate, artifact, path, version=version))
@@ -337,7 +342,7 @@ class WebRoutes:
         """The instant ``expires_in`` lands on, on the service's clock."""
         if expires_in is None:
             return None
-        return self._services.artifacts.expiry(parse_duration(expires_in))
+        return self._services.artifacts.expiry(requested_duration(expires_in))
 
 
 def build_routes(settings: Settings, services: Services) -> list[Route]:
@@ -350,12 +355,20 @@ async def _run[T](call: Callable[[], T]) -> T:
     return await to_thread.run_sync(call)
 
 
+def _relative(path: str) -> str:
+    """A ``Location`` that stays a path: ``./`` and escaping keep ``a:b`` from being a scheme."""
+    return "./" + "/".join(quote(segment, safe="") for segment in path.split("/"))
+
+
 def _pinned(reference: str) -> tuple[str, int | None]:
     """Split ``<id-or-sig>@<n>``; a malformed pin is as unknown as a malformed id (§ 7.1)."""
     key, mark, number = reference.rpartition(VERSION_MARK)
     if not mark:
         return reference, None
-    if not (number.isascii() and number.isdigit()) or int(number) < 1:
+    # The length cap comes first: int() refuses a string of thousands of digits with ValueError.
+    if not (number.isascii() and number.isdigit() and len(number) <= MAX_PIN_DIGITS):
+        raise NotFound()
+    if int(number) < 1:
         raise NotFound()
     return key, int(number)
 

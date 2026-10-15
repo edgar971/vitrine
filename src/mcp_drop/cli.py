@@ -28,6 +28,7 @@ from mcp_drop.config import (
     load_settings,
     parse_duration,
     parse_tokens,
+    plain_http_warning,
     unscoped_tokens,
 )
 from mcp_drop.domain.clock import SystemClock
@@ -51,6 +52,8 @@ SECRET_BYTES = 32
 MISSING_EXTRA = "metrics_port needs the metrics extra: install mcp-drop[metrics]"
 TEXT_LOG = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
+logger = logging.getLogger(__name__)
+
 type Command = Callable[[argparse.Namespace], int]
 
 
@@ -73,6 +76,8 @@ def _serve(args: argparse.Namespace) -> int:
     flags = {key: value for key in ("host", "port") if (value := getattr(args, key)) is not None}
     settings = load_settings(config_path=args.config, flags=flags)
     _configure_logging(settings)
+    if (warning := plain_http_warning(settings)) is not None:
+        logger.warning(warning)
     # Refuse before anything is written: a build must never serve data it would misread.
     schema.require_current(settings.data_dir)
     metrics = _metrics(settings)
@@ -121,6 +126,8 @@ def _config_check(args: argparse.Namespace) -> int:
             "name them (e.g. :read+write)",
             file=sys.stderr,
         )
+    if (warning := plain_http_warning(settings)) is not None:
+        print(f"warning: {warning}", file=sys.stderr)
     print("configuration ok", file=sys.stderr)
     return OK
 

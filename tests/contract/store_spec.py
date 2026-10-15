@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -9,7 +10,7 @@ from datetime import timedelta
 import pytest
 
 from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import Conflict, Invalid, NotFound, OverQuota, TooLarge
+from mcp_drop.domain.errors import Conflict, Invalid, NotFound, OverQuota, Refused, TooLarge
 from mcp_drop.domain.ids import new_id
 from mcp_drop.domain.models import ArtifactDraft, ArtifactQuery, VersionDraft, Visibility
 from mcp_drop.storage.base import Store
@@ -235,6 +236,35 @@ class DescribeAddingAVersion:
             assert updated.expires_at is None
 
 
+class DescribeTheWritePreconditions:
+    class WhenOnlyAPrivateArtifactMayBeUpdated:
+        def it_refuses_a_public_one(self, store: Store) -> None:
+            artifact_id = _create(store)
+            store.set_visibility(artifact_id, Visibility.PUBLIC)
+            with pytest.raises(Refused):
+                store.add_version(artifact_id, VersionDraft(title="x"), if_private=True)
+
+        def it_writes_a_private_one(self, store: Store) -> None:
+            artifact_id = _create(store)
+            assert (
+                store.add_version(artifact_id, VersionDraft(title="x"), if_private=True).version
+                == 2
+            )
+
+    class WhenTheExpectedVersionIsNoLongerCurrent:
+        def it_refuses_the_version(self, store: Store) -> None:
+            artifact_id = _create(store)
+            store.add_version(artifact_id, VersionDraft(title="x"))
+            with pytest.raises(Conflict):
+                store.add_version(artifact_id, VersionDraft(title="y"), if_version=1)
+
+        def it_refuses_the_visibility_change(self, store: Store) -> None:
+            artifact_id = _create(store)
+            store.add_version(artifact_id, VersionDraft(title="x"))
+            with pytest.raises(Conflict):
+                store.set_visibility(artifact_id, Visibility.PUBLIC, if_version=1)
+
+
 class DescribePruning:
     class WhenMoreVersionsThanTheRetentionAreKept:
         def it_keeps_the_newest_ones(self, two_version_store: Store) -> None:
@@ -375,6 +405,13 @@ class DescribeListing:
         def it_is_a_bad_request(self, store: Store) -> None:
             with pytest.raises(Invalid):
                 store.list(ArtifactQuery(cursor="not-a-cursor"))
+
+    class WhenTheCursorCarriesATimeWithoutAZone:
+        def it_is_a_bad_request(self, store: Store) -> None:
+            _create(store)
+            cursor = base64.urlsafe_b64encode(b"2020-01-01T00:00:00|x").decode().rstrip("=")
+            with pytest.raises(Invalid):
+                store.list(ArtifactQuery(cursor=cursor))
 
 
 class DescribeTheQuotaOfAMerge:
@@ -535,6 +572,27 @@ class DescribeClaimingAClientRef:
             with ThreadPoolExecutor(max_workers=8) as pool:
                 outcomes = list(pool.map(lambda _: claim(), range(8)))
             assert outcomes.count(False) == 1
+
+
+class DescribeReleasingAClientRef:
+    class WhenTheRefStillNamesTheArtifact:
+        def it_frees_the_key(self, store: Store) -> None:
+            store.claim_ref(client=CLIENT, ref="weekly", request_hash="a", artifact_id="first")
+            store.release_ref(client=CLIENT, ref="weekly", artifact_id="first")
+            claim = store.claim_ref(
+                client=CLIENT, ref="weekly", request_hash="b", artifact_id="next"
+            )
+            assert (claim.id, claim.reused) == ("next", False)
+
+    class WhenTheRefNamesAnotherArtifact:
+        def it_keeps_the_key(self, store: Store) -> None:
+            artifact_id = _create(store)
+            store.claim_ref(client=CLIENT, ref="weekly", request_hash="a", artifact_id=artifact_id)
+            store.release_ref(client=CLIENT, ref="weekly", artifact_id=new_id())
+            claim = store.claim_ref(
+                client=CLIENT, ref="weekly", request_hash="a", artifact_id=new_id()
+            )
+            assert claim.reused
 
 
 class DescribeSweeping:

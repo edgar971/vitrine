@@ -15,7 +15,24 @@ from typing import cast
 
 from fastmcp.exceptions import ResourceError, ToolError
 
-from mcp_drop.domain.errors import DropError
+from mcp_drop.domain.errors import (
+    Conflict,
+    DropError,
+    Expired,
+    Invalid,
+    NotFound,
+    OverQuota,
+    RateLimited,
+    Refused,
+    TooLarge,
+)
+
+INTERNAL = "internal error"
+# The errors worded for the caller, the same set HTTP gives a 4xx. Anything else is a failure of
+# drop itself whose text can carry filesystem or parser detail, so it is masked (spec § 10).
+_CALLER_ERRORS = (NotFound, Expired, Invalid, Conflict, TooLarge, RateLimited, OverQuota, Refused)
+
+logger = logging.getLogger(__name__)
 
 
 def domain_errors[**P, R](
@@ -32,7 +49,7 @@ def domain_errors[**P, R](
                 try:
                     return await coroutine(*args, **kwargs)
                 except DropError as failure:
-                    raise error(str(failure), log_level=logging.INFO) from None
+                    raise _translated(error, failure) from None
 
             return cast(Callable[P, R], awaited)
 
@@ -41,8 +58,18 @@ def domain_errors[**P, R](
             try:
                 return function(*args, **kwargs)
             except DropError as failure:
-                raise error(str(failure), log_level=logging.INFO) from None
+                raise _translated(error, failure) from None
 
         return called
 
     return decorate
+
+
+def _translated(
+    error: type[ToolError] | type[ResourceError], failure: DropError
+) -> ToolError | ResourceError:
+    """The client-facing error for ``failure``; an internal one is logged here and masked."""
+    if not isinstance(failure, _CALLER_ERRORS):
+        logger.error("internal error: %s", failure)
+        return error(INTERNAL)
+    return error(str(failure), log_level=logging.INFO)

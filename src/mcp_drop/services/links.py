@@ -92,6 +92,39 @@ class LinkService:
         """Return the claims of a valid upload link, or ``NotFound``."""
         return self._verify(signature, LinkKind.UPLOAD)
 
+    def gate_state(
+        self, artifact_id: str, *, version: int, client: str, digest: str, ttl: timedelta
+    ) -> str:
+        """Sign what a gate question was about, for the answer to prove (security T20).
+
+        The answer comes back on a later call, so the state names the artifact, the version
+        the human was shown, the client that asked and a digest of the request.
+        """
+        expires_at = self._clock.now() + ttl
+        return self._sign(
+            self._body(LinkKind.GATE, artifact_id, expires_at, str(version), client, digest)
+        )
+
+    def verify_gate_state(self, state: str, *, artifact_id: str, client: str, digest: str) -> int:
+        """The version a valid state was minted for; ``NotFound`` for any other state."""
+        body = self._proven(state)
+        try:
+            kind, claimed_id, expires, version, claimed_client, claimed_digest = (
+                body.decode().split(SEPARATOR)
+            )
+            expires_at = datetime.fromtimestamp(int(expires), tz=UTC)
+        except UnicodeDecodeError, ValueError:
+            raise NotFound() from None
+        matches = (kind, claimed_id, claimed_client, claimed_digest) == (
+            LinkKind.GATE,
+            artifact_id,
+            client,
+            digest,
+        )
+        if not matches or expires_at <= self._clock.now() or not version.isdigit():
+            raise NotFound()
+        return int(version)
+
     def accepts(self, claims: LinkClaims, artifact: Artifact) -> bool:
         """Whether a verified link still names this artifact at its current epoch (spec § 3)."""
         return claims.id == artifact.id and claims.epoch == artifact.link_epoch
@@ -103,6 +136,10 @@ class LinkService:
 
     def _verify(self, signature: str, kind: LinkKind) -> LinkClaims:
         """Check the MAC, the kind and the expiry, in that order, before believing anything."""
+        return self._claims(self._proven(signature), kind)
+
+    def _proven(self, signature: str) -> bytes:
+        """The body a signature carries, once its MAC checks out; ``NotFound`` otherwise."""
         parts = signature.split(".")
         if len(parts) != SIGNATURE_PARTS:
             raise NotFound()
@@ -113,7 +150,7 @@ class LinkService:
         expected = hmac.new(self._secret, body, hashlib.sha256).digest()[:MAC_BYTES]
         if not hmac.compare_digest(supplied, expected):
             raise NotFound()
-        return self._claims(body, kind)
+        return body
 
     def _claims(self, body: bytes, kind: LinkKind) -> LinkClaims:
         """Turn a proven body into claims, refusing anything the spec does not allow."""

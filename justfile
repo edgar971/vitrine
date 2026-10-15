@@ -56,7 +56,8 @@ image tag="drop:dev":
     set -euo pipefail
     ca=()
     if [ -n "${CA:-}" ]; then ca=(--secret "id=ca_bundle,src=$CA"); fi
-    docker build "${ca[@]}" --tag "{{tag}}" .
+    # The ${ca[@]+…} form: macOS bash 3.2 calls an empty array unbound under set -u.
+    docker build ${ca[@]+"${ca[@]}"} --tag "{{tag}}" .
 
 # Build the image, then run it read-only, without capabilities, and probe /healthz
 image-test tag="drop:dev": (image tag)

@@ -1,0 +1,20 @@
+name: Feature request
+description: Something drop should do.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Effect on privacy
+      description: Could this make anything public, or reveal that a private artifact exists?

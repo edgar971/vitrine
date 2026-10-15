@@ -45,12 +45,16 @@ src/mcp_drop/
   domain/
     models.py            Artifact, Version, Visibility, LinkClaims (pydantic, frozen)
     errors.py            DropError → NotFound, Expired, TooLarge, OverQuota, Conflict, Refused
+    ids.py               artifact ids (80-bit Crockford base32), client refs, upload nonces
+    paths.py             the one path rule, and the entry rule that goes with it
+    layout.py            the data_dir layout (spec § 4.1) and its same-filesystem check
+    clock.py             the clock seam, so a service never reads the wall clock
   storage/
     base.py              Store protocol
     filesystem.py        FileStore: write protocol, retention, quota, path resolution, sweeps
   services/
     artifacts.py         ArtifactService: create, update, get, list, delete, set_visibility
-    links.py             LinkService: ids, sign/verify view and upload links
+    links.py             LinkService: sign/verify view and upload links
     gate.py              PublicGate: public_mode + era-aware confirmation
     audit.py             AuditLog: append (fsync) and query; retention sweep
     limits.py            RateLimiter: token buckets per client and per IP
@@ -69,7 +73,7 @@ src/mcp_drop/
     middleware.py        body limit, redacting access log
 ```
 
-**Dependency direction:** `mcp`/`web` → `services` → `storage`/`domain`, and every layer may use
+**Dependency direction:** `mcp`/`web` → `services` → `storage` → `domain`, and every layer may use
 `config`.
 
 - `services`, `storage` and `domain` never import FastMCP or Starlette.
@@ -145,12 +149,13 @@ system.
 Each step runs under the artifact's lock.
 
 ```
-1  stream each file into tmp/<uuid>/ (open "xb"), enforcing path, size and count limits
+1  stream each file into tmp/<uuid>/, enforcing the path, size and count limits
    merge=true: hard-link the current version's files into the stage first (immutable, safe)
-2  choose entry; check quota against cached usage + staged bytes
+2  choose the entry (spec § 4.3); refuse a version over max_artifact, and one that would push
+   the bytes on disk (hard links counted once) past quota
 3  rename tmp/<uuid> → artifacts/<id>/v<n>                         atomic, same filesystem
 4  write tmp/<uuid>.json, os.replace → artifacts/<id>/meta.json      atomic
-5  prune versions beyond retain_versions
+5  ArtifactService prunes versions beyond retain_versions, once the audit landed
 ```
 
 **Crash outcomes**
@@ -181,6 +186,8 @@ Every mutating flow follows the same pipeline inside `ArtifactService`:
 scope check (FastMCP) ─► rate limit ─► validate ─► idempotency (create only) ─► store write
                                                                    ─► audit append (fsync) ─► result
 a failure at any step: nothing written, nothing audited except access_denied (scope, rate limit)
+a change that landed but cannot be audited is undone, so a mutation is only acknowledged once it
+is recorded; a deletion audits first, because a deleted artifact cannot be brought back
 ```
 
 **Idempotent create**

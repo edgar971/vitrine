@@ -13,6 +13,11 @@ from collections.abc import Mapping
 from mcp_drop.config import TokenEntry
 
 
+def token_hash(token: str) -> str:
+    """The SHA-256 a ``DROP_TOKENS`` entry holds for ``token`` (spec § 8.2)."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 class TokenBook:
     """Knows tokens only by their hashes, so the server's configuration holds no usable token."""
 
@@ -22,7 +27,7 @@ class TokenBook:
 
     def identify(self, token: str) -> TokenEntry | None:
         """The entry whose hash matches ``token``, or ``None``."""
-        digest = hashlib.sha256(token.encode()).hexdigest()
+        digest = token_hash(token)
         match: TokenEntry | None = None
         # Every entry is compared, so the time taken does not say which entry, if any, matched.
         for entry in self._entries:

@@ -261,9 +261,11 @@ class WebRoutes:
             render = None if raw or download else renderer_for(path, self._settings.renderers)
             if render is not None and (await _run(file.stat)).st_size <= RENDER_LIMIT:
                 data = await _run(file.read_bytes)
+                self._services.metrics.viewed(prefix.value)
                 return rendered(await _run(partial(render, data, path)), prefix=prefix)
         except DropError as error:
             return problem(error, view=True)
+        self._services.metrics.viewed(prefix.value)
         return artifact_file(file, path, prefix=prefix, download=download)
 
     async def _authenticate(

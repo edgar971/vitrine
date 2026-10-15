@@ -53,6 +53,6 @@ audit:
 one name:
     uv run pytest -k "{{name}}" --no-cov
 
-# Serve with reload (the server arrives with M4; M0 ships the command)
+# Serve locally with the environment's DROP_* settings
 dev:
     uv run mcp-drop serve

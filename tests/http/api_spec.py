@@ -163,6 +163,18 @@ class DescribeCreatingOverTheApi:
         def it_answers_400(self, create: Create) -> None:
             assert create(expires_in="soon").status_code == 400
 
+    class WhenTheDurationIsZero:
+        def it_answers_400(self, create: Create) -> None:
+            assert create(expires_in="0m").status_code == 400
+
+    class WhenTheDurationIsTooLong:
+        def it_answers_400(self, create: Create) -> None:
+            assert create(expires_in="99999999999d").status_code == 400
+
+    class WhenTheDurationHasThousandsOfDigits:
+        def it_answers_400(self, create: Create) -> None:
+            assert create(expires_in="9" * 5000).status_code == 400
+
     class WhenTheClientIsOverItsWriteRate:
         @pytest.fixture
         def overrides(self) -> dict[str, str]:

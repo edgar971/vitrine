@@ -39,24 +39,27 @@ control is specified and must ship with the tests listed in § 6.
 
 | # | Threat | Control | Status |
 |---|---|---|---|
-| T1 | A prompt-injected or careless agent publishes private data | Clients that never need public links get no `drop:publish` scope. Everything is created private. `artifact_set_visibility` is the only path to public, behind the human gate (`public_mode = confirm`). The gate fails closed on decline, timeout, unattended runs and clients without elicitation. No upload route takes a visibility. | Validated (both protocol eras, approve-only clients, decline, no support) |
+| T1 | A prompt-injected or careless agent publishes private data | Clients that never need public links get no `drop:publish` scope. Everything is created private. `artifact_set_visibility` is the only path to public, behind the human gate (`public_mode = confirm`), and adding content to an artifact that is already public goes through the same gate (T19). The gate fails closed on decline, timeout, unattended runs and clients without elicitation. No upload route takes a visibility. | Validated (both protocol eras, approve-only clients, decline, no support) |
 | T2 | Unauthenticated MCP calls | Hashed tokens, constant-time comparison, 401 | Validated |
 | T3 | Custom HTTP routes missing auth (the MCP auth layer covers only `/mcp`) | Each route authenticates itself, and a route-table test fails on any unclassified route | Validated (bypass demonstrated, then closed); route-table test in `tests/http/routes_spec.py` |
 | T4 | Guessing ids, or learning that a private artifact exists | 80-bit ids. One indistinguishable 404 for missing, malformed and private ids and for bad links. No listing without a token. | Validated |
-| T5 | Forging, transplanting or replaying links | HMAC with the kind, id, expiry and epoch inside the MAC. Epoch revocation. Single-use upload nonces, spent in the same write as the version. An upload never re-creates a deleted or expired id, whose old links would otherwise open the new content. | Validated; upload replay and re-creation tested (`tests/http/uploads_spec.py`) |
+| T5 | Forging, transplanting or replaying links | HMAC with the kind, id, expiry and epoch inside the MAC. Epoch revocation. Single-use upload nonces, spent in the same write as the version. An upload never re-creates a deleted or expired id, whose old links would otherwise open the new content. | Validated; upload replay in `tests/http/uploads_spec.py`, re-creation in `tests/unit/services/artifacts_spec.py` |
 | T6 | Path traversal or symlink escape | One path rule for writing and reading; `resolve()` must stay inside the version root; symlinks refused | Validated (encoded and plain `..` variants) |
 | T7 | Malicious HTML/SVG reads cookies, storage or acts as the viewer | CSP `sandbox` without `allow-same-origin` gives an opaque origin. `frame-ancestors 'none'`, `nosniff`, an extension allowlist, and unknown types forced to download. | Validated in Chromium |
 | T8 | DNS rebinding from a browser on the same network | Host allowlist (421) and Origin check on `/mcp` (403) | Validated against uvicorn bound to `0.0.0.0` |
 | T9 | Disk or memory exhaustion | Body limits enforced while streaming, per-version and total quotas, file-count limit | Validated (header and chunked) |
 | T10 | Links leaking through `Referer`, caches or logs | `no-referrer`, `no-store` on private views, signed segments redacted in access logs (drop writes the access log; uvicorn's own is off) | Validated (`tests/http/logs_spec.py`) |
 | T11 | A compromised drop process attacks its surroundings | drop never makes outbound requests (there is no fetch-from-URL feature). Runs non-root with a read-only root filesystem. The Kubernetes example denies all egress and mounts no service-account token. | Spec and example |
-| T12 | A token leaks, or a client is over-privileged | One token per client, revoked by removing one hash; 256-bit tokens. **Scopes** (`drop:read`, `write`, `share`, `publish`): a tool outside the token's scopes is not even listed, and calling it fails as an unknown tool. | Validated (scoped token cannot see or call a write tool) |
+| T12 | A token leaks, or a client is over-privileged | One token per client, revoked by removing one hash; 256-bit tokens. **Scopes** (`drop:read`, `write`, `share`, `publish`): a tool outside the token's scopes is not even listed, and calling it fails as an unknown tool. What a revoked client already handed out is covered by T21. | Validated (scoped token cannot see or call a write tool) |
 | T13 | The signing secret leaks | Rotating it revokes every private link. Accepted from the environment only, never from config files. | Spec |
-| T14 | Supply chain | `uv.lock` with `--frozen` installs, `pip-audit` in CI, PyPI trusted publishing, a cosign-signed image with an SBOM, the image pinned by digest in deployments | `release.yml`; verification in [operations](operations.md) § 9 |
+| T14 | Supply chain | `uv.lock` with `--frozen` installs, `pip-audit` in CI, PyPI trusted publishing, a cosign-signed image with an SBOM and provenance. Every GitHub Action and both base images are pinned by digest; the release build uses no shared cache. Deployments should pin the image by digest. | `release.yml`; verification in [operations](operations.md) § 9. The examples pin a version tag until the first release has a digest. |
 | T15 | Phishing pages hosted on the drop domain | Treat drop's hostname as untrusted content: a dedicated hostname with no other app's cookies, and `noindex` | Operator guidance |
 | T16 | A looping or hijacked agent floods writes, links or views | Per-client token buckets for writes, links and reads; a per-IP bucket for views; rejected calls do no work. Quotas cap the damage that does get through. | Spec |
 | T17 | Nobody can tell who published something, or when | An append-only audit log (fsync before acknowledging), with one event per state change, including refused publishes and denied calls. If the audit write fails, the change does not happen. | Spec |
-| T18 | Retries create duplicate artifacts, or a reused key swaps content | `client_ref` is scoped per client and claimed with an exclusive file create. The same key with a different request is a conflict. | Spec |
+| T18 | Retries create duplicate artifacts, or a reused key swaps content | `client_ref` is scoped per client and claimed with an exclusive file create. The same key with a different request is a conflict. A create that fails releases its key, so the retry is not locked out. | Spec |
+| T19 | New content on an already public artifact goes live without the gate: a `write`-only token, `PUT /api/artifacts/{id}` or an upload URL adds a version, and the caller is told it is private | Adding a version to a public artifact needs an approving gate decision. Over MCP, `artifact_update` asks the human when the token holds `drop:publish`; otherwise, and on every HTTP route, it is refused (403) and audited as `publish_refused`. The store checks visibility under the artifact's lock, so a concurrent publish cannot slip a version past it. | Validated (`tests/mcp/public_updates_spec.py`, `tests/http/public_updates_spec.py`) |
+| T20 | A gate answer is forged, replayed onto another question, or approves content the human never saw | On `2026-07-28` the question's `requestState` is signed over the artifact, the version shown, the client and the call's arguments; an answer without it, or with another request's, is declined (the SDK also seals the state to its request). On both eras the write must find the version the human was shown, else `conflict`. | Validated on both eras (`tests/mcp/public_updates_spec.py`) |
+| T21 | A client's token is removed, but what it minted still works | Upload URLs carry their client and are refused once that client is gone or lost `drop:write`. Private view links are bearer capabilities: they last until they expire (`link_ttl_max`), `artifact_revoke_links` or a visibility change bumps the epoch, or the secret is rotated. | Upload refusal in `tests/http/public_updates_spec.py`; view links are a documented limit |
 
 ## 4. Secrets
 
@@ -72,10 +75,10 @@ control is specified and must ship with the tests listed in § 6.
 
 | # | Risk | Mitigation and guidance |
 |---|---|---|
-| R1 | **Plain HTTP deployments** expose tokens and links to the network path | Use TLS everywhere except `127.0.0.1`. `config check` warns when `public_base_url` is `http://` and the bind address is not loopback. |
-| R2 | An agent with shell access can read its own token and call the HTTP API directly | No HTTP route can make anything public, so the human gate still holds. An agent with shell and network access can exfiltrate data by other means anyway; drop is not the control for that. |
+| R1 | **Plain HTTP deployments** expose tokens and links to the network path | Use TLS everywhere except `127.0.0.1`. `config check` and `serve` warn when `public_base_url` is `http://` and the bind address is not loopback. |
+| R2 | An agent with shell access can read its own token and call drop directly | No HTTP route can make anything public or change public content, so a `write` token is no path to public. But elicitation is answered by the MCP client, and the server cannot tell a human's answer from the client's: an agent that holds a `drop:publish` token *and* can speak MCP itself can approve its own publish. Give `drop:publish` only to clients whose host shows the question to a person and keeps the token out of the agent's reach. An out-of-band approval link (roadmap) removes this. |
 | R3 | The human approves without reading | The prompt names the title, the file count and the consequence. A future option can add a short content preview. |
-| R4 | Public URLs last until revoked: the id is the secret | That is the meaning of "anyone with the link". `artifact_set_visibility(private)` or `artifact_delete` removes access immediately. |
+| R4 | Public URLs last until revoked: the id is the secret | That is the meaning of "anyone with the link". `artifact_set_visibility(private)` or `artifact_delete` removes access at the origin immediately; public views are `max-age=60`, so a shared cache or CDN may serve them for up to a minute longer. |
 | R5 | A single replica means downtime on restart | Acceptable for the target scale; the `Store` seam is the path to more replicas |
 | R6 | Protocol-era detection uses a private FastMCP method | Minor-version pin plus per-era tests (design § 10) |
 
@@ -101,7 +104,9 @@ control is specified and must ship with the tests listed in § 6.
     - a failing audit write aborts the change.
 12. **Idempotency:** concurrent creates with one `client_ref` produce one artifact; a different
     request with the same key conflicts.
-13. **Client plugins:** a plugin's upload tool has no visibility parameter, and what it publishes
+13. **Public content:** no route or token without the gate adds a version to a public artifact;
+    a forged, replayed or stale gate answer is declined (T19, T20).
+14. **Client plugins:** a plugin's upload tool has no visibility parameter, and what it publishes
     is private (`tests/integrations/hermes_spec.py`).
 
 ### Invariants and the specs that hold them
@@ -121,6 +126,12 @@ fails when a listed spec is renamed or removed, so this table cannot point at no
 | One path to public | `tests/mcp/gate_spec.py::DescribeTheHandshakeEraGate::WhenTheHumanNeverAnswers::it_leaves_the_artifact_private` |
 | One path to public | `tests/mcp/gate_spec.py::DescribeTheHandshakeEraGate::WhenTheClientFailsWhileAnswering::it_leaves_the_artifact_private` |
 | One path to public | `tests/http/api_spec.py::DescribeCreatingOverTheApi::WhenAVisibilityIsSent::it_refuses_the_request` |
+| One path to public | `tests/mcp/public_updates_spec.py::DescribeUpdatingAPublicArtifact::WhenTheTokenCannotPublish::it_writes_nothing` |
+| One path to public | `tests/mcp/public_updates_spec.py::DescribeUpdatingAPublicArtifact::WhenTheHumanDeclines::it_writes_nothing` |
+| One path to public | `tests/mcp/public_updates_spec.py::DescribeMakingPublicWhileTheContentChanges::WhenAVersionLandsWhileTheHumanDecides::it_leaves_the_artifact_private` |
+| One path to public | `tests/mcp/public_updates_spec.py::DescribeAnAnswerTheServerNeverAskedFor::WhenItCarriesNoState::it_leaves_the_artifact_private` |
+| One path to public | `tests/http/public_updates_spec.py::DescribeUpdatingAPublicArtifactOverTheApi::it_writes_nothing` |
+| One path to public | `tests/http/public_updates_spec.py::DescribeUploadingToAPublicArtifact::it_writes_nothing` |
 | One path to public | `tests/integrations/hermes_spec.py::DescribeRegistering::it_offers_no_way_to_ask_for_visibility` |
 | Every HTTP route authenticates itself | `tests/http/routes_spec.py::DescribeTheRouteTable::WhenTheAppIsAssembled::it_classifies_every_route` |
 | Every HTTP route authenticates itself | `tests/http/routes_spec.py::DescribeTheRouteTable::it_refuses_a_caller_without_credentials` |

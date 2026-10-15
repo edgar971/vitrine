@@ -6,11 +6,17 @@ because it needs the client; everything that decides lives here, where it is tes
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import timedelta
 
 from mcp_drop.domain.models import ArtifactDetail, GateDecision, PublicMode
+from mcp_drop.services.links import LinkService
 
 ACCEPT = "accept"
+# How long a question's state stays answerable: past the MCP layer's own wait for the human.
+GATE_STATE_TTL = timedelta(minutes=15)
 CONFIRM_FIELD = "confirm"
 
 # One boolean that defaults to true: approve/deny-only clients answer ``accept`` with ``{}``, and
@@ -54,9 +60,51 @@ class PublicGate:
             "Anyone with the link will be able to view it, and existing private links stop working."
         )
 
+    def update_question(self, detail: ArtifactDetail, *, files: int | None) -> str:
+        """What the human reads before new content lands on a public artifact (security T19)."""
+        change = "its metadata" if files is None else ("1 file" if files == 1 else f"{files} files")
+        return (
+            f'"{detail.artifact.title}" is PUBLIC. Publish a new version with {change}? '
+            "Anyone with the link will see it immediately."
+        )
+
     @staticmethod
     def verdict(action: str, content: Mapping[str, object] | None) -> GateDecision:
         """Decide on the action; only an explicit ``confirm: false`` turns an accept down."""
         if action == ACCEPT and (content or {}).get(CONFIRM_FIELD) is not False:
             return GateDecision.APPROVED
         return GateDecision.DECLINED
+
+
+@dataclass(frozen=True, slots=True)
+class GateBinding:
+    """Ties a gate question to its answer: the artifact, the client and the exact request.
+
+    A modern-era answer arrives on a later call, so without this a client could approve a
+    question it was never asked, or answer one and send different content (security T20).
+    """
+
+    links: LinkService
+    artifact_id: str
+    client: str
+    request: str
+
+    def mint(self, version: int) -> str:
+        """The state the question about ``version`` carries."""
+        return self.links.gate_state(
+            self.artifact_id,
+            version=version,
+            client=self.client,
+            digest=self._digest(),
+            ttl=GATE_STATE_TTL,
+        )
+
+    def version_of(self, state: str) -> int:
+        """The version ``state`` was minted for, or ``NotFound`` when it is not this request's."""
+        return self.links.verify_gate_state(
+            state, artifact_id=self.artifact_id, client=self.client, digest=self._digest()
+        )
+
+    def _digest(self) -> str:
+        """A fixed-length stand-in for the request, which may be large."""
+        return hashlib.sha256(self.request.encode()).hexdigest()

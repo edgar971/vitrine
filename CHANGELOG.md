@@ -88,12 +88,29 @@ Nothing has been released yet: `0.1.0` is the first release, and
 - `TokenBook`: the hashed-token check, shared by `/mcp` and `/api`.
 - `Store.locate`, so a view streams a file instead of reading it into memory.
 
+### Security
+
+- Adding a version to a **public** artifact now goes through the public gate (ADR 0005, security
+  T19). `artifact_update` asks the human when the token holds `drop:publish` and is refused
+  without it; `PUT /api/artifacts/{id}` and upload URLs answer 403. Before, a `write` token could
+  put new content live on a public artifact.
+- A gate answer is bound to its question (security T20): on `2026-07-28` the question's
+  `requestState` is signed over the artifact, the version shown, the client and the arguments,
+  and on both eras the write must find the version the human saw, else `conflict`.
+- An upload URL stops working once its client is removed from `DROP_TOKENS` or loses
+  `drop:write` (security T21).
+- MCP tool errors mask every failure that is not worded for the caller as `internal error`, as
+  HTTP already did; filesystem and parser detail no longer reach the client.
+- `config check` and `serve` warn when `public_base_url` is `http://` and the bind address is not
+  loopback (security R1).
+- Every GitHub Action and both Docker base images are pinned by digest, and the release image is
+  built without the shared CI cache. The Chromium sandbox specs run in CI.
+
 ### Changed
 
 - The staging sweep takes a grace period: a sweep beside a running server (the periodic one and
   `mcp-drop sweep`) spares staging and unreferenced versions younger than 10 minutes, which a live
   write is still placing. Only the startup sweep clears everything.
-
 - An upload URL now signs the client that asked for it (`"upload"|id|expires|nonce|client`), so
   an upload is attributed to, and rate-limited as, that client.
 - An upload's nonce is spent in the same write as its version, so two `PUT`s of one URL land at
@@ -107,3 +124,16 @@ Nothing has been released yet: `0.1.0` is the first release, and
 - An `access_denied` audit event could not be built, because `tool` and `route` were not among the
   fields the event allows.
 - An update without files failed as an empty version; the current files now carry over (spec § 5.1).
+- A create whose `client_ref` was claimed but whose write failed left the key bound for
+  `ref_ttl`, so the retry answered `not found` or `conflict`; the key is now released.
+- `expires_in`/`ttl` of `0`, too large to represent, or thousands of digits long returned 500;
+  it is now 400 (or a tool error), and a duration is capped at 36500 days.
+- A view pinned with thousands of digits (`/a/<id>@999…/`) returned 500; it is now 404.
+- A pinned older version opened the current entry, which it may not have; it opens its own.
+- A nested entry's `307` sent the raw path as `Location`, so `a:b/index.html` read as a URL
+  scheme; it is now `./`-relative and percent-encoded.
+- A list cursor with a time without a zone returned 500; it is now 400.
+- One torn line in the audit log made every read of it fail, which stopped new uploads and every
+  sweep. Unreadable lines are now skipped and logged, and the next append starts a fresh line.
+- `serve` refused to start in a shell that also sets the client-side `DROP_URL`/`DROP_TOKEN`.
+- `just image` failed on macOS's bash 3.2 when `CA` was not set.

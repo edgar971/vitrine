@@ -47,7 +47,9 @@ src/mcp_drop/
   reference.py           docs/configuration.md, rendered from Settings (`just docs`)
   domain/
     models.py            Artifact, Version, Visibility, LinkClaims (pydantic, frozen)
-    errors.py            DropError → NotFound, Expired, TooLarge, OverQuota, Conflict, Refused
+    errors.py            DropError → NotFound, Expired, Invalid, Conflict, TooLarge, OverQuota,
+                         RateLimited, Refused; and drop's own: ConfigError, SchemaMismatch,
+                         StorageUnavailable, AuditUnavailable (masked as `internal error`)
     ids.py               artifact ids (80-bit Crockford base32), client refs, upload nonces
     media.py             the extension allowlist (spec § 7.2) and which types read back as text
     paths.py             the one path rule, and the entry rule that goes with it
@@ -119,7 +121,9 @@ def artifact_create(
     caller: AccessToken = CurrentAccessToken(),
 ) -> PublishedArtifact:
     """Publish text files as a PRIVATE artifact. Reuse the id with artifact_update to revise."""
-    return service.create(title=title, files=files, entry=entry, source=caller.client_id)
+    draft = ArtifactDraft(title=title, files={path: text.encode() for path, text in files.items()},
+                          entry=entry)
+    return service.create(draft, client=caller.client_id)
 
 server = FastMCP("drop", instructions=INSTRUCTIONS, providers=[tools, resources, prompts],
                  auth=verifier)
@@ -353,7 +357,9 @@ tests/
   contract/    store_spec.py   one suite parametrised over every Store implementation
   mcp/         *_spec.py       tool behaviour via FastMCP's in-memory Client (schemas, annotations, gate)
   http/        *_spec.py       real uvicorn on a free port: auth and scopes, headers, guard, limits
-  browser/     *_spec.py       Playwright Chromium, marker "browser" (sandbox isolation)
+  cli/         *_spec.py       the mcp-drop commands, run in-process against a temporary data_dir
+  integrations/*_spec.py       client plugins (Hermes) driving a real server
+  browser/     *_spec.py       Playwright Chromium, marker "browser" (sandbox isolation); own CI job
 ```
 
 ## 10. Repository and tooling
@@ -405,12 +411,14 @@ Commits follow Conventional Commits.
 
 **Container image**
 
-- Built with `uv sync --frozen --no-dev`, from a `python:3.15-slim` base.
-- Runs as user 10001 with a read-only root filesystem; writes only to `/data` and `/tmp`.
-- `ENTRYPOINT ["mcp-drop", "serve"]`.
+- CPython 3.15 installed by uv in a `ghcr.io/astral-sh/uv` build stage, copied onto
+  `debian:trixie-slim`; both bases pinned by digest. Dependencies from `uv sync --no-dev`.
+- Runs as user 10001 with a read-only root filesystem; writes only to `/data`.
+- `ENTRYPOINT ["mcp-drop"]` with `CMD ["serve"]`, so the same image runs every CLI command.
 
 **ADRs:** `docs/adr/` records the decisions that are expensive to reverse. The first four are:
-the filesystem store, one gate to public, self-contained auth, and the protocol-era handling.
+the filesystem store, one gate to public, self-contained auth, and the protocol-era handling;
+0005 extends the gate to new content on a public artifact.
 
 ## 11. Agent guidance files
 
@@ -444,7 +452,8 @@ Claude Code specifics, so the two cannot drift.
 
 ## Claude Code
 - Hooks (.claude/settings.json): ruff format + ruff check on edited .py files.
-- Rules (.claude/rules/): mcp.md loads for src/mcp_drop/mcp/**; tests.md for tests/**.
+- Rules (.claude/rules/): mcp.md loads for src/mcp_drop/mcp/**; web.md for src/mcp_drop/web/**
+  and app.py; tests.md for tests/**.
 ```
 
 `.claude/rules/` holds only path-scoped gotchas, such as tool annotations and the protocol-era

@@ -14,6 +14,7 @@ from mcp_drop.config import (
     parse_duration,
     parse_rate,
     parse_size,
+    plain_http_warning,
 )
 from mcp_drop.domain import layout
 from mcp_drop.domain.errors import ConfigError
@@ -298,6 +299,32 @@ class DescribeTheEnvironmentItself:
             monkeypatch.setenv("DROP_MAX_UPLAOD", "1MB")
             with pytest.raises(ConfigError, match="DROP_MAX_UPLAOD"):
                 load_settings()
+
+    class WhenTheShellAlsoConfiguresAClient:
+        def it_starts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setenv("DROP_URL", "https://drop.example.com")
+            monkeypatch.setenv("DROP_TOKEN", "a-client-token")
+            assert isinstance(load_settings(), Settings)
+
+
+class DescribeThePlainHttpWarning:
+    class WhenTheBaseUrlIsHttpAndTheBindIsPublic:
+        def it_warns(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setenv("DROP_PUBLIC_BASE_URL", "http://drop.example.com")
+            monkeypatch.setenv("DROP_HOST", "0.0.0.0")
+            assert "clear text" in (plain_http_warning(load_settings()) or "")
+
+    class WhenTheBindIsLoopback:
+        def it_stays_quiet(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setenv("DROP_PUBLIC_BASE_URL", "http://127.0.0.1:8080")
+            monkeypatch.setenv("DROP_HOST", "127.0.0.1")
+            assert plain_http_warning(load_settings()) is None
+
+    class WhenTheBaseUrlIsHttps:
+        def it_stays_quiet(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setenv("DROP_PUBLIC_BASE_URL", "https://drop.example.com")
+            monkeypatch.setenv("DROP_HOST", "0.0.0.0")
+            assert plain_http_warning(load_settings()) is None
 
 
 class DescribeTheDataDirectoryCheck:

@@ -3,6 +3,11 @@
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+# `just` alone lists the recipes
+[private]
+default:
+    @just --list
+
 # Refresh the environment from uv.lock
 sync:
     uv sync
@@ -39,8 +44,9 @@ test:
 # The browser specs (needs `uv run playwright install chromium`)
 test-browser:
     uv run pytest -m browser --no-cov
-# Known vulnerabilities in the locked dependencies (uv.lock has no pip-audit reader,
-# so the lock is exported to a pinned requirements list first)
+
+# uv.lock has no pip-audit reader, so the lock is exported to a pinned requirements list first.
+# Known vulnerabilities in the locked dependencies
 audit:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -49,8 +55,9 @@ audit:
     uv export --frozen --no-emit-project --no-hashes --quiet --output-file "$requirements"
     uvx pip-audit --requirement "$requirements" --no-deps --disable-pip --progress-spinner off
 
-# Build the image for this machine. Behind a TLS-intercepting proxy, CA=<bundle.pem> passes
-# its CA to the build as a secret (it never lands in a layer).
+# Behind a TLS-intercepting proxy, CA=<bundle.pem> passes its CA to the build as a secret
+# (it never lands in a layer).
+# Build the image for this machine
 image tag="drop:dev":
     #!/usr/bin/env bash
     set -euo pipefail

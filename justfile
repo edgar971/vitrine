@@ -103,8 +103,8 @@ changelog range="":
 # Prepare a release commit: bump every version copy, re-lock, write the changelog, run the gates
 release version:
     uv run python scripts/release.py "{{version}}"
-    # uv.lock is resolved against PyPI, whatever index this machine's uv is pointed at.
-    UV_DEFAULT_INDEX=https://pypi.org/simple UV_INDEX_URL=https://pypi.org/simple uv lock
+    # pyproject.toml names the PyPI index, so this stays on PyPI whatever index uv is pointed at.
+    uv lock
     uv sync
     just check
     @echo "release: review the diff, commit it as 'chore(release): {{version}}', merge, then:"

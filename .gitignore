@@ -1,3 +1,16 @@
+*.egg-info/
+*.py[cod]
+.coverage
+.coverage.*
+.import_linter_cache/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
 CLAUDE.local.md
 __pycache__/
-.venv/
+build/
+coverage.xml
+dist/
+htmlcov/
+venv/

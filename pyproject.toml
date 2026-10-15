@@ -1,0 +1,151 @@
+[build-system]
+requires = ["uv_build>=0.13,<0.14"]
+build-backend = "uv_build"
+
+[project]
+name = "mcp-drop"
+version = "0.1.0"
+description = "Self-hosted MCP server that turns agent output into private (signed, expiring, revocable) or public links."
+readme = "README.md"
+requires-python = ">=3.15"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Edgar Pino" }]
+keywords = ["mcp", "artifacts", "sharing", "self-hosted", "fastmcp", "agents"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Web Environment",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.15",
+  "Typing :: Typed",
+]
+dependencies = [
+  "fastmcp>=4.1,<4.2",
+  "pydantic>=2.14",
+  "pydantic-settings>=2.16",
+  "starlette>=1.8,<2",
+  "uvicorn>=0.54",
+]
+
+[project.scripts]
+mcp-drop = "mcp_drop.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/edgar971/drop"
+Documentation = "https://github.com/edgar971/drop/tree/main/docs"
+Changelog = "https://github.com/edgar971/drop/blob/main/CHANGELOG.md"
+Security = "https://github.com/edgar971/drop/blob/main/SECURITY.md"
+
+# Same gates as CI (docs/design.md § 10). The browser group is only needed for the
+# `browser` marker, which the default run deselects.
+[dependency-groups]
+dev = [
+  "import-linter>=2.15",
+  "mypy>=2.4",
+  "playwright>=1.64",
+  "pre-commit>=4.7",
+  "pytest>=9.1",
+  "pytest-asyncio>=1.4",
+  "pytest-cov>=7.1",
+  "pytest-playwright>=0.10",
+  "ruff>=0.17",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py315"
+src = ["src", "tests"]
+# The docs are the spec, not code: their examples are hand-wrapped, and the spike is throwaway.
+extend-exclude = ["docs/spike", "**/*.md"]
+
+[tool.ruff.lint]
+select = [
+  "E",     # pycodestyle
+  "F",     # pyflakes
+  "I",     # isort
+  "UP",    # pyupgrade
+  "B",     # flake8-bugbear
+  "SIM",   # flake8-simplify
+  "RUF",   # ruff-specific
+  "ANN",   # flake8-annotations
+  "ASYNC", # flake8-async
+  "C4",    # flake8-comprehensions
+  "PTH",   # flake8-use-pathlib
+  "RET",   # flake8-return
+  "TID",   # flake8-tidy-imports
+  "S",     # flake8-bandit
+  "D",     # pydocstyle
+  "PL",    # pylint
+  "PT",    # flake8-pytest-style
+  "N",     # pep8-naming
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.per-file-ignores]
+# Specs are named for the behaviour they describe; the name is the documentation.
+"tests/**" = ["D101", "D102", "D103", "D106", "S101", "PLR2004"]
+
+[tool.mypy]
+python_version = "3.15"
+strict = true
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+minversion = "9.1"
+testpaths = ["tests"]
+python_files = ["*_spec.py"]
+python_classes = ["Describe*", "When*"]
+python_functions = ["it_*"]
+asyncio_mode = "auto"
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+  "--cov",
+  "--cov-report=term-missing",
+  "--cov-report=xml",
+  "-m",
+  "not browser",
+]
+markers = ["browser: drives a real Chromium (Playwright); run with `-m browser`"]
+
+[tool.coverage.run]
+branch = true
+source = ["mcp_drop"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+
+# Dependencies point one way (docs/design.md § 3): mcp/web -> services -> storage/domain.
+[tool.importlinter]
+root_package = "mcp_drop"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "layers"
+type = "layers"
+layers = [
+  "mcp_drop.mcp | mcp_drop.web",
+  "mcp_drop.services",
+  "mcp_drop.storage | mcp_drop.domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "core is framework-free"
+type = "forbidden"
+source_modules = ["mcp_drop.domain", "mcp_drop.storage", "mcp_drop.services"]
+forbidden_modules = ["fastmcp", "starlette", "uvicorn"]

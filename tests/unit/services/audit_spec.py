@@ -130,6 +130,45 @@ class DescribeTheEventModel:
                     reason=DenialReason.RATE_LIMITED,
                 )
 
+    class WhenADeniedCallNamesTheTool:
+        def it_accepts_it(self) -> None:
+            event = AuditEvent(
+                ts=NOW,
+                event=AuditEventName.ACCESS_DENIED,
+                artifact=ARTIFACT,
+                client=CLIENT,
+                reason=DenialReason.SCOPE,
+                tool="artifact_create",
+            )
+            assert event.tool == "artifact_create"
+
+    class WhenADeniedCallNamesTheRoute:
+        def it_accepts_it(self) -> None:
+            event = AuditEvent(
+                ts=NOW,
+                event=AuditEventName.ACCESS_DENIED,
+                client=CLIENT,
+                reason=DenialReason.RATE_LIMITED,
+                route="api_create",
+            )
+            assert event.route == "api_create"
+
+    class WhenADeniedCallNamesNoArtifact:
+        def it_accepts_it(self) -> None:
+            event = AuditEvent(
+                ts=NOW,
+                event=AuditEventName.ACCESS_DENIED,
+                client=CLIENT,
+                reason=DenialReason.SCOPE,
+                tool="artifact_create",
+            )
+            assert event.artifact is None
+
+    class WhenAStateChangeNamesNoArtifact:
+        def it_refuses_it(self) -> None:
+            with pytest.raises(ValidationError):
+                AuditEvent(ts=NOW, event=AuditEventName.DELETED, client=CLIENT)
+
     class WhenADeniedCallNamesBoth:
         def it_refuses_it(self) -> None:
             with pytest.raises(ValidationError):

@@ -65,7 +65,9 @@ REQUIRED_EXTRAS: dict[AuditEventName, frozenset[str]] = {
 }
 
 OPTIONAL_EXTRAS: dict[AuditEventName, frozenset[str]] = {
-    AuditEventName.CREATED: frozenset({"client_ref"})
+    AuditEventName.CREATED: frozenset({"client_ref"}),
+    # Exactly one of the two, which the validator checks.
+    AuditEventName.ACCESS_DENIED: frozenset({"tool", "route"}),
 }
 
 
@@ -80,7 +82,7 @@ class AuditEvent(BaseModel):
 
     ts: AwareDatetime
     event: AuditEventName
-    artifact: str
+    artifact: str | None = None
     client: str
     version: int | None = None
     files: int | None = None
@@ -106,10 +108,12 @@ class AuditEvent(BaseModel):
         unexpected = carried - required - OPTIONAL_EXTRAS.get(self.event, frozenset())
         if unexpected:
             raise ValueError(f"{self.event} does not carry {sorted(unexpected)}")
-        if self.event is AuditEventName.ACCESS_DENIED and (self.tool is None) == (
-            self.route is None
-        ):
-            raise ValueError("access_denied names exactly one of tool or route")
+        if self.event is AuditEventName.ACCESS_DENIED:
+            if (self.tool is None) == (self.route is None):
+                raise ValueError("access_denied names exactly one of tool or route")
+        elif self.artifact is None:
+            # Only a refused call can name no artifact: a create denied before an id was drawn.
+            raise ValueError(f"{self.event} names its artifact")
         return self
 
 
@@ -137,6 +141,28 @@ class AuditLog:
             raise AuditUnavailable(
                 f"cannot audit {event.event}: {error.strerror or error}"
             ) from error
+
+    def deny(
+        self,
+        *,
+        client: str,
+        reason: DenialReason,
+        tool: str | None = None,
+        route: str | None = None,
+        artifact: str | None = None,
+    ) -> None:
+        """Record a call refused before it did anything; only the edges know the tool or route."""
+        self.append(
+            AuditEvent(
+                ts=self._clock.now(),
+                event=AuditEventName.ACCESS_DENIED,
+                artifact=artifact,
+                client=client,
+                reason=reason,
+                tool=tool,
+                route=route,
+            )
+        )
 
     def query(
         self,

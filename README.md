@@ -5,8 +5,8 @@ an HTML report, a chart, a PDF or a folder of files, and gets back a link that o
 browser. Links are **private** (signed, expiring, revocable) by default. They become **public**
 only after a human confirms.
 
-> **Status: designed, not built.** This repository holds the spec, design and security model.
-> Nothing is implemented yet apart from the validation spike in [`docs/spike/`](docs/spike/).
+> **Status: in progress, not released.** The core, the MCP layer and the web layer are built
+> (M1–M3); the `mcp-drop` CLI that serves them arrives with M4, so there is nothing to run yet.
 > The build follows [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Why

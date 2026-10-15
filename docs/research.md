@@ -1,4 +1,4 @@
-# drop research and validation
+# drop research
 
 The evidence behind the [spec](spec.md) and [design](design.md), gathered on 2026-10-15. Platform
 facts were checked against installed source (`fastmcp==4.1.0`, `mcp==2.3.0`) and the Hermes Agent
@@ -53,7 +53,7 @@ client-agnostic equivalent.
 
 ### Hermes Agent
 
-Hermes is the first integration target, and representative of agent frameworks with chat
+Hermes was the first integration target, and is representative of agent frameworks with chat
 gateways.
 
 | Fact | Source | Consequence |
@@ -61,143 +61,38 @@ gateways.
 | Remote MCP servers are configured with `url` and `headers`; `${VAR}` is interpolated from `~/.hermes/.env` | `tools/mcp_tool_config.py` | Tokens stay out of config files |
 | It negotiates the handshake-era protocol (`2025-11-25` against FastMCP 4.1) | `tools/mcp_tool.py`, measured | The `ctx.elicit()` branch is the one Hermes uses today |
 | Elicitation is shown as **approve/deny**, accepting with empty content. It fails closed on timeout (default 300 s, `elicitation.timeout`), on errors and in unattended contexts (cron, single-query runs). | `tools/mcp_tool_sampling.py`, `tools/approval_prompt.py` | The human gate works across Hermes's CLI and chat gateways without extra code |
-| Plugin API: `register_tool(name, toolset, schema, handler, …)`, `register_skill(name, path, …)`, `register_command(name, handler, …, args_hint)`, hooks; `call_mcp` is default-deny per server | `hermes_cli/plugins.py`, `plugins_content.py` | The plugin's shape (design § 7.2) |
-| `hermes plugins validate` runs manifest checks, an isolated `register()` probe, a collision check and a security scan | `hermes_cli/plugin_validate.py` | Used as the plugin's admission test |
+| Plugin API: `register_tool(name, toolset, schema, handler, …)`, `register_skill(name, path, …)`, `register_command(name, handler, …, args_hint)`, hooks; `call_mcp` is default-deny per server | `hermes_cli/plugins.py`, `plugins_content.py` | The plugin's shape (design § 8) |
+| `hermes plugins validate` runs manifest checks, an isolated `register()` probe, a collision check and a security scan | `hermes_cli/plugin_validate.py` | The plugin's admission test, run in CI |
 
 ## 4. Findings that shaped the design
 
 | # | Finding | Where it is handled |
 |---|---|---|
-| F1 | MCP `2026-07-28` removed server-initiated elicitation, while popular clients still negotiate `2025-11-25` | Spec § 6.1 (both mechanisms), design § 10 |
+| F1 | MCP `2026-07-28` removed server-initiated elicitation, while popular clients still negotiate `2025-11-25` | Spec § 6.1 (both mechanisms), design § 6 |
 | F2 | An approve-only client accepting with `{}` fails a `bool` elicitation, so the gate would never open | A consent model with a defaulted field; decide on `action` |
 | F3 | The Host guard returns 421 to health probes that send the pod IP as `Host` | Spec § 7.4; the Kubernetes example sets the probe `Host` header |
 | F4 | Custom routes bypass MCP auth by default | Security T3 |
 | F5 | Signed links are credentials and end up in access logs | Spec § 11 redaction |
-| F6 | Self-hosters run on mixed arm64 and amd64 hardware | Multi-arch image (design § 8) |
+| F6 | Self-hosters run on mixed arm64 and amd64 hardware | Multi-arch image (design § 10) |
 | F7 | Small deployments often serve plain HTTP on a "trusted" network | Security R1 and the `config check` warning |
 
-## 5. Validation record
+## 5. The design spike
 
-The throwaway spike in [`spike/`](spike/) implements the load-bearing mechanisms and checks them
-from the outside. All 59 checks passed on Python 3.13, and again on 3.15.0 (2026-10-15) when the
-project moved to 3.15.
+Before any of drop was written, a throwaway spike implemented the load-bearing mechanisms —
+`/mcp` auth, the views with their headers and 404s, signed links and their failure modes, path
+traversal, upload limits, DNS rebinding, the Chromium sandbox, and both elicitation eras — and
+checked them from the outside: 59 checks, all passing on Python 3.13 and on 3.15.0.
 
-```bash
-cd spike
-uv run --no-project --python 3.15 --with fastmcp==4.1.0 --with uvicorn --with httpx \
-  --with playwright python run.py          # exit 0 when every check passes
-```
+The spike itself is gone. Every check it made is a spec under `tests/` that runs in CI, and the
+[threat model](security.md) § 3 names the spec holding each control. What the spike discovered
+about a *platform*, rather than about drop, is in the tables above.
 
-### `test_spike.py` (42 checks, FastMCP client, protocol `2026-07-28`)
+Two of its findings are still load-bearing for CI:
 
-- **Auth:** no token gets 401; a wrong token gets 401; a raw POST gets 401; a valid token lists
-  the tools; the client name is recorded as the source.
-- **Single gate:**
-  - `artifact_create` rejects a `visibility` argument;
-  - a new artifact is private with a signed link;
-  - public is reachable only through `artifact_set_visibility` after confirmation.
-- **Views:**
-  - a public artifact gets 200;
-  - HTML and SVG carry the sandbox CSP without `allow-same-origin`;
-  - `nosniff`, `no-referrer` and `noindex` are set;
-  - a private id on `/a/` gets 404.
-- **Links:**
-  - a signed link gets 200, and so do relative assets under it;
-  - these all get 404: a tampered tag, a signature moved to another id, an expired link, an
-    upload signature used to view, and a link after revocation.
-- **Versions:** an update keeps the id and URL and serves the new version.
-- **Traversal:** `../` is rejected on create, and four encoded and plain `..` URL variants get 404
-  without leaking metadata.
-- **Resources:** `artifact://{id}` reads back.
-- **Chromium:** the script runs; `document.cookie` and `localStorage` throw even with a host cookie
-  set; `window.origin` is `"null"`; a relative image loads under a signed path.
-- **Gate:** decline keeps it private; a client without elicitation cannot go public; accept makes
-  it public.
-- **Custom routes:** `/healthz` answers without a token (the bypass); the upload route returns 401
-  without one.
-- **Uploads:** oversize by `Content-Length` gets 413; oversize chunked with no length gets 413; a
-  traversal filename gets 400; a valid upload gets 201 with a private link; an unknown type is
-  served as `octet-stream` with `attachment`.
-
-### `test_handshake.py` (4 checks, raw `mcp` SDK `ClientSession`, as Hermes connects)
-
-- `2025-11-25` is negotiated.
-- The elicitation callback is invoked.
-- An accept with `{}` makes the artifact public.
-- A decline leaves it private.
-
-### `test_origin.py` (6 checks, uvicorn bound to `0.0.0.0`)
-
-- An allowed Host gets 200.
-- A foreign Host gets 421, and so does a foreign Host with a matching Origin (DNS rebinding).
-- A foreign Origin on an allowed Host gets 403.
-- A probe with the pod IP as Host gets 421; with an allowed Host it gets 200.
-
-### `test_patterns.py` (7 checks, the design § 4 conventions)
-
-- Injected parameters are hidden from the schema.
-- The `Annotated` description and constraint appear in the schema.
-- `ToolAnnotations` are exposed.
-- The caller identity is injected.
-- A token without `drop:write` neither sees nor can call the write tool.
-
-The BDD test layout (nested `Describe*`/`When*` classes with `it_*` functions, fixtures shared
-from outer classes) was checked with plain pytest and needs no plugin.
-
-### Last run (2026-10-15)
-
-```
-42/42 passed · PASS × 4 · PASS × 6 · PASS × 7 · exit 0   (59 checks)
-```
-
-### Other checks
-
-| Check | Result |
-|---|---|
-| Hermes plugin draft ([`spike/hermes-plugin-drop/`](spike/hermes-plugin-drop/)) through Hermes's `validate_plugin_dir` | All 14 admission checks pass, including the isolated `register()` probe, no built-in collisions and the security scan |
-| Kubernetes example ([`spike/kubernetes-example.yaml`](spike/kubernetes-example.yaml)): `kubeconform -strict`, Kubernetes 1.35 | 9 valid, 1 skipped (ServiceMonitor CRD) |
-| `hermes plugins validate` headless, with a pristine `HOME` and no gateway attached | 14 checks pass, "Validation passed.", exit 0 |
-
-### `hermes plugins validate` on a CI runner
-
-The M0 spike check (M5 depends on it). `python -I -m hermes_cli.main plugins validate <plugin-dir>`
-runs with no configuration, no gateway and an empty `HOME`: the command is self-contained.
-
-Two install paths do **not** work and should not be attempted in CI:
-
-- PyPI `hermes-agent` (0.19.0) predates the subcommand — its `hermes plugins` offers only
-  install, update, remove, list, enable and disable;
-- `uv tool install git+https://github.com/NousResearch/hermes-agent` fails by design: the build
-  backend refuses to build a wheel or an sdist ("Hermes is distributed via the shell installer,
-  Docker image, or Nix").
-
-What works is Hermes's own reusable composite action,
-`NousResearch/hermes-agent/.github/actions/plugin-validate@<ref>`: shallow-clone the repo at that
-ref, run `python3 -S scripts/ci/setup_toolchain.py prepare|install`, build the isolated validator
-runtime with `pm.build_environment`, then run the command above against the plugin directory. Its
-`hermes-ref` input pins the Hermes version the plugin is validated against, and Hermes's own catalog
-CI uses the same machinery on `ubuntu-latest` (`hermes plugins validate --install-deps`).
-
-Two constraints the action's machinery carries: the bootstrap `python3` must be 3.11 or newer (the
-toolchain scripts use `datetime.UTC` and `X | Y` unions — `ubuntu-latest` satisfies this), and
-`setup_toolchain.py` writes to `$GITHUB_OUTPUT`, `$GITHUB_ENV` and `$GITHUB_PATH`, so it runs only
-inside a GitHub Actions job, not on a bare shell. Both are satisfied by the runner the action
-targets; neither costs anything to depend on.
-
-The action's step sequence was reproduced end to end before M0 closed, with those three files
-supplied as a runner supplies them: a fresh shallow clone of `main` (`3bdb82d6`), the prepared
-toolchain (`python 3.14.7`, `uv 0.12.3`), the isolated validator runtime built by
-`pm.build_environment`, then the plugin validated with a pristine `HOME` — 14 checks, "Validation
-passed.", exit 0.
-
-## 6. Not yet proven
-
-These must be covered by the implementation's tests or by a first deployment.
-
-- Log redaction, single-use upload URLs, quota, renderers, the expiry sweep and the config loader
-  are specified but not in the spike.
-- The plugin's multipart client has not been run against a real `/api/artifacts`, because the
-  spike implements a simpler raw-body upload to prove auth and limits.
-- Pod Security `restricted` admission and NetworkPolicy enforcement, which depend on the target
-  cluster.
-- The container image with a read-only root filesystem, and the multi-arch build.
+- `hermes plugins validate` runs headless (`python -I -m hermes_cli.main plugins validate`) with
+  no configuration, no gateway and an empty `HOME`. PyPI's `hermes-agent` predates the subcommand,
+  and `uv tool install git+…/hermes-agent` refuses to build, so CI uses Hermes's own composite
+  action, `NousResearch/hermes-agent/.github/actions/plugin-validate@<ref>`.
+- That action's bootstrap `python3` must be 3.11 or newer, and its `setup_toolchain.py` writes to
+  `$GITHUB_OUTPUT`, `$GITHUB_ENV` and `$GITHUB_PATH` — so it runs inside a GitHub Actions job,
+  never on a bare shell. `ubuntu-latest` satisfies both.

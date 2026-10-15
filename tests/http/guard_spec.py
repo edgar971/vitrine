@@ -1,7 +1,7 @@
 """The edge in front of every route: Host/Origin (spec § 7.4) and streaming body limits (§ 7.3).
 
-These port the spike's ``test_origin.py`` (DNS rebinding) and its body-limit checks, against the
-whole app rather than ``/mcp`` alone.
+DNS rebinding (security T8) and the streaming body limits (T9), against the whole app rather
+than ``/mcp`` alone.
 """
 
 from __future__ import annotations

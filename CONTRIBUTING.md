@@ -1,8 +1,8 @@
 # Contributing to drop
 
-Thanks for looking. drop is designed, not built: the contract is
-[`docs/spec.md`](docs/spec.md), the build plan is [`docs/roadmap.md`](docs/roadmap.md), and
-[`AGENTS.md`](AGENTS.md) is the short version of both for humans and coding agents.
+Thanks for looking. The contract is [`docs/spec.md`](docs/spec.md), what is left to do is
+[`docs/roadmap.md`](docs/roadmap.md), and [`AGENTS.md`](AGENTS.md) is the short version of both
+for humans and coding agents.
 
 ## Setup
 
@@ -20,7 +20,7 @@ just check              # every gate CI runs
 
 ## The rules that are not negotiable
 
-They come from [`docs/design.md`](docs/design.md) § 9 and [`docs/security.md`](docs/security.md) § 6:
+They come from [`AGENTS.md`](AGENTS.md) and [`docs/security.md`](docs/security.md) § 6:
 
 - **Private by default.** Nothing becomes public except through `PublicGate`, which fails closed.
 - **One path to public.** Do not add a second one, and do not add a `visibility` argument to a

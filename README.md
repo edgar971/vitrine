@@ -5,8 +5,9 @@ an HTML report, a chart, a PDF or a folder of files, and gets back a link that o
 browser. Links are **private** (signed, expiring, revocable) by default. They become **public**
 only after a human confirms.
 
-> **Status: in progress, not released.** The core, the MCP layer and the web layer are built
-> (M1–M3); the `mcp-drop` CLI that serves them arrives with M4, so there is nothing to run yet.
+> **Status: in progress, not released.** The core, the MCP layer, the web layer, the
+> `mcp-drop` CLI, the container image and the deployment examples are built (M1–M4); the client
+> integrations are next (M5).
 > The build follows [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Why
@@ -43,7 +44,9 @@ can view.
 | [`docs/spec.md`](docs/spec.md) | The contract: concepts, data model, MCP tools and resources, HTTP routes, configuration reference, CLI, limits, errors |
 | [`docs/design.md`](docs/design.md) | Architecture, modules, storage protocol, request flows, extension points, project tooling and release, deployment options, client integrations |
 | [`docs/security.md`](docs/security.md) | Threat model, trust boundaries, controls, residual risks, required security tests |
-| [`docs/operations.md`](docs/operations.md) | Backup, restore, upgrades and migrations, rotation, monitoring, incident playbooks |
+| [`docs/operations.md`](docs/operations.md) | Backup, restore, upgrades and migrations, rotation, monitoring, incident playbooks, deployments |
+| [`docs/configuration.md`](docs/configuration.md) | Every configuration key with its environment variable and default (generated) |
+| [`examples/`](examples/) | A config file, Compose with Caddy, and Kubernetes manifests |
 | [`docs/roadmap.md`](docs/roadmap.md) | Milestones M0–M5 to `v0.1.0`, each with deliverables and testable exit criteria |
 | [`docs/research.md`](docs/research.md) | Prior art, options considered, platform facts checked against source, validation findings and the record of what the spike proved |
 | [`docs/spike/`](docs/spike/) | The throwaway prototype and checks the design was validated against |

@@ -39,9 +39,12 @@ easy to extend.**
 ```
 src/mcp_drop/
   __main__.py            python -m mcp_drop → cli
-  cli.py                 serve · config check · token new|hash · secret new · sweep
+  cli.py                 serve · config check · token new|hash · secret new · sweep · audit · backup · migrate
   config.py              Settings (pydantic-settings): env + TOML, validation
-  app.py                 build_app(settings) → one Starlette app: web routes + /mcp, one middleware stack
+  app.py                 build_app(settings) → one Starlette app: web routes + /mcp, one middleware stack,
+                         and the lifespan that sweeps at startup and every sweep_interval
+  metrics.py             PrometheusMetrics: the metrics_port exporter (the optional `metrics` extra)
+  reference.py           docs/configuration.md, rendered from Settings (`just docs`)
   domain/
     models.py            Artifact, Version, Visibility, LinkClaims (pydantic, frozen)
     errors.py            DropError → NotFound, Expired, TooLarge, OverQuota, Conflict, Refused
@@ -53,6 +56,8 @@ src/mcp_drop/
   storage/
     base.py              Store protocol
     filesystem.py        FileStore: write protocol, retention, quota, path resolution, sweeps
+    schema.py            meta.json schema_version: the startup check and the migration steps
+    backup.py            the online, lock-free copy of a data_dir
   services/
     artifacts.py         ArtifactService: create, update, get, list, delete, set_visibility
     links.py             LinkService: sign/verify view and upload links
@@ -60,6 +65,8 @@ src/mcp_drop/
     audit.py             AuditLog: append (fsync) and query; retention sweep
     limits.py            RateLimiter: token buckets per client and per IP
     tokens.py            TokenBook: the hashed-token check both /mcp and /api use
+    metrics.py           Metrics: the counting seam (no-op unless metrics_port is set)
+    maintenance.py       migrate: the audited schema upgrade of a whole data_dir
     container.py         Services: the composition root both edges are built from
   mcp/
     server.py            build_mcp(settings, services) → FastMCP(providers=[…], auth=…)

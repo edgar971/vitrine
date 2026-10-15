@@ -1,0 +1,25 @@
+# drop on Kubernetes: one replica on an RWO volume, Pod Security `restricted`, no egress.
+#
+#   kubectl create namespace drop   # or apply namespace.yaml first
+#   kubectl -n drop create secret generic drop-secrets \
+#     --from-literal=DROP_SECRET="$(mcp-drop secret new)" \
+#     --from-literal=DROP_TOKENS="<entries from mcp-drop token new>"
+#   kubectl apply -k .
+#
+# Replace drop.example.com (configmap, deployment probes, ingress), the ingress class and the
+# namespace labels the network policy matches, to fit your cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: drop
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - networkpolicy.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/name: drop
+    includeSelectors: true

@@ -49,6 +49,39 @@ audit:
     uv export --frozen --no-emit-project --no-hashes --quiet --output-file "$requirements"
     uvx pip-audit --requirement "$requirements" --no-deps --disable-pip --progress-spinner off
 
+# Build the image for this machine. Behind a TLS-intercepting proxy, CA=<bundle.pem> passes
+# its CA to the build as a secret (it never lands in a layer).
+image tag="drop:dev":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ca=()
+    if [ -n "${CA:-}" ]; then ca=(--secret "id=ca_bundle,src=$CA"); fi
+    docker build "${ca[@]}" --tag "{{tag}}" .
+
+# Build the image, then run it read-only, without capabilities, and probe /healthz
+image-test tag="drop:dev": (image tag)
+    docker/smoke.sh "{{tag}}"
+
+# Validate examples/: kubeconform on the Kubernetes manifests, Compose and the Caddyfile
+examples:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if command -v kubeconform >/dev/null; then
+        kubeconform -strict -summary -skip Kustomization examples/kubernetes
+    else
+        docker run --rm -v "$PWD/examples/kubernetes:/k:ro" ghcr.io/yannh/kubeconform:v0.8.0 \
+            -strict -summary -skip Kustomization /k
+    fi
+    DROP_SECRET=x DROP_TOKENS=x DROP_DOMAIN=drop.example.com \
+        docker compose -f examples/compose.yaml config --quiet
+    docker run --rm -e DROP_DOMAIN=drop.example.com -v "$PWD/examples/Caddyfile:/etc/caddy/Caddyfile:ro" \
+        caddy:2.10 caddy adapt --config /etc/caddy/Caddyfile >/dev/null
+    echo "examples: kubernetes, compose and Caddyfile are valid"
+
+# Regenerate docs/configuration.md from Settings (a spec fails while it is stale)
+docs:
+    uv run python -m mcp_drop.reference > docs/configuration.md
+
 # One spec: just one DescribeThePackage
 one name:
     uv run pytest -k "{{name}}" --no-cov

@@ -1,0 +1,21 @@
+# TLS ends at the ingress. Use a hostname that carries no other application's cookies.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: drop
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [drop.example.com]
+      secretName: drop-tls
+  rules:
+    - host: drop.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: drop
+                port:
+                  name: http

@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from datetime import timedelta
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import urlsplit
 
 from pydantic import (
@@ -23,6 +23,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic.fields import FieldInfo
+from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings, NoDecode, PydanticBaseSettingsSource, SettingsConfigDict
 
 from mcp_drop.domain import layout
@@ -208,6 +209,33 @@ class MappingSource(PydanticBaseSettingsSource):
         return dict(self._values)
 
 
+SERVING, SECRETS, POLICY, LIMITS, LINKS, OPERATIONS = (
+    "Serving",
+    "Secrets (environment only)",
+    "Policy",
+    "Limits",
+    "Links",
+    "Operations",
+)
+GROUP = "group"
+
+
+def setting(
+    default: object = PydanticUndefined,
+    *,
+    group: str,
+    description: str,
+    ge: int | None = None,
+    le: int | None = None,
+) -> Any:  # noqa: ANN401 - a pydantic Field, typed as whatever the annotation says
+    """A settings field carrying the group and description ``docs/configuration.md`` shows.
+
+    Defaults are written the way an operator would (``"100MB"``, ``"7d"``) and parsed like any
+    other value, so the reference prints exactly what the code uses.
+    """
+    return Field(default, description=description, json_schema_extra={GROUP: group}, ge=ge, le=le)
+
+
 class Settings(BaseSettings):
     """The effective configuration, keyed exactly as spec § 8.2 documents it."""
 
@@ -215,41 +243,94 @@ class Settings(BaseSettings):
         env_prefix=ENV_PREFIX, extra="forbid", frozen=True, validate_default=True
     )
 
-    data_dir: Path = Path("./data")
-    public_base_url: str = "http://localhost:8080"
-    host: str = "127.0.0.1"
-    port: int = Field(default=8080, ge=1, le=65535)
-    allowed_hosts: CommaSeparated = []
-    forwarded_allow_ips: CommaSeparated = ["127.0.0.1"]
+    data_dir: Path = setting("./data", group=SERVING, description="Storage root (spec § 4.1)")
+    public_base_url: str = setting(
+        "http://localhost:8080",
+        group=SERVING,
+        description="Origin used to build every URL; an origin, with no path",
+    )
+    host: str = setting("127.0.0.1", group=SERVING, description="Listen address")
+    port: int = setting(8080, group=SERVING, description="Listen port", ge=1, le=65535)
+    allowed_hosts: CommaSeparated = setting(
+        [], group=SERVING, description="Extra `Host` values accepted besides the base URL's"
+    )
+    forwarded_allow_ips: CommaSeparated = setting(
+        ["127.0.0.1"],
+        group=SERVING,
+        description="Proxies whose `X-Forwarded-*` headers are trusted",
+    )
 
-    secret: SecretStr
-    tokens: Tokens
+    secret: SecretStr = setting(
+        group=SECRETS,
+        description=(
+            "HMAC key for links, at least 32 bytes. Rotating it revokes every private link."
+        ),
+    )
+    tokens: Tokens = setting(
+        group=SECRETS,
+        description=(
+            "Client tokens as `name:sha256hex[:scope+scope…]`, comma-separated; at least one. "
+            "Omitted scopes mean all four."
+        ),
+    )
 
-    public_mode: PublicMode = PublicMode.CONFIRM
-    renderers: CommaSeparated = ["md", "csv", "tsv", "json"]
+    public_mode: PublicMode = setting(
+        PublicMode.CONFIRM,
+        group=POLICY,
+        description="`confirm`, `disabled` or `unrestricted` (spec § 6)",
+    )
+    renderers: CommaSeparated = setting(
+        ["md", "csv", "tsv", "json"],
+        group=POLICY,
+        description="Renderers to enable; `[]` serves everything raw",
+    )
 
-    max_upload: ByteSize = parse_size("100MB")
-    max_mcp_body: ByteSize = parse_size("4MB")
-    max_artifact: ByteSize = parse_size("100MB")
-    max_files: int = Field(default=200, ge=1)
-    quota: ByteSize = parse_size("10GB")
-    retain_versions: int = Field(default=10, ge=1)
-    ref_ttl: Duration = parse_duration("24h")
-    rate_writes: Rate = parse_rate("60/m")
-    rate_links: Rate = parse_rate("120/m")
-    rate_reads: Rate = parse_rate("600/m")
-    rate_views: Rate = parse_rate("1200/m")
+    max_upload: ByteSize = setting(
+        "100MB", group=LIMITS, description="Request body limit on `/api` and `/u`"
+    )
+    max_mcp_body: ByteSize = setting(
+        "4MB", group=LIMITS, description="Request body limit on `/mcp`"
+    )
+    max_artifact: ByteSize = setting("100MB", group=LIMITS, description="Largest single version")
+    max_files: int = setting(200, group=LIMITS, description="Files per version", ge=1)
+    quota: ByteSize = setting(
+        "10GB", group=LIMITS, description="Total storage; writes beyond it fail with 507"
+    )
+    retain_versions: int = setting(10, group=LIMITS, description="Versions kept per artifact", ge=1)
+    ref_ttl: Duration = setting(
+        "24h", group=LIMITS, description="How long a `client_ref` stays bound (spec § 4.5)"
+    )
+    rate_writes: Rate = setting("60/m", group=LIMITS, description="Per-client write bucket")
+    rate_links: Rate = setting("120/m", group=LIMITS, description="Per-client link bucket")
+    rate_reads: Rate = setting("600/m", group=LIMITS, description="Per-client read bucket")
+    rate_views: Rate = setting("1200/m", group=LIMITS, description="Per-IP view bucket")
 
-    link_ttl: Duration = parse_duration("7d")
-    link_ttl_max: Duration = parse_duration("90d")
-    upload_ttl: Duration = parse_duration("15m")
-    upload_ttl_max: Duration = parse_duration("1h")
+    link_ttl: Duration = setting("7d", group=LINKS, description="Default private link lifetime")
+    link_ttl_max: Duration = setting(
+        "90d", group=LINKS, description="Longest private link lifetime"
+    )
+    upload_ttl: Duration = setting("15m", group=LINKS, description="Default upload URL lifetime")
+    upload_ttl_max: Duration = setting("1h", group=LINKS, description="Longest upload URL lifetime")
 
-    sweep_interval: Duration = parse_duration("1h")
-    audit_retention: Duration = parse_duration("365d")
-    metrics_port: int = Field(default=0, ge=0, le=65535)
-    log_level: LogLevel = LogLevel.INFO
-    log_format: LogFormat = LogFormat.TEXT
+    sweep_interval: Duration = setting(
+        "1h",
+        group=OPERATIONS,
+        description="Period of the expiry, staging, idempotency-record and audit-retention sweep",
+    )
+    audit_retention: Duration = setting(
+        "365d", group=OPERATIONS, description="Audit months older than this are deleted"
+    )
+    metrics_port: int = setting(
+        0,
+        group=OPERATIONS,
+        description="Prometheus listener, `0` for off; needs the `metrics` extra",
+        ge=0,
+        le=65535,
+    )
+    log_level: LogLevel = setting(LogLevel.INFO, group=OPERATIONS, description="Log level")
+    log_format: LogFormat = setting(
+        LogFormat.TEXT, group=OPERATIONS, description="`text` or `json`"
+    )
 
     @field_validator("secret")
     @classmethod

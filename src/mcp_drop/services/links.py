@@ -110,12 +110,13 @@ class LinkService:
         try:
             claimed_kind, artifact_id, expires, payload = body.decode().split(SEPARATOR)
             expires_at = datetime.fromtimestamp(int(expires), tz=UTC)
+            epoch = int(payload) if kind is LinkKind.VIEW else None
         except UnicodeDecodeError, ValueError:
             raise NotFound() from None
         if claimed_kind != kind or not is_valid_id(artifact_id) or expires_at <= self._clock.now():
             raise NotFound()
         if kind is LinkKind.VIEW:
-            return LinkClaims(kind=kind, id=artifact_id, expires_at=expires_at, epoch=int(payload))
+            return LinkClaims(kind=kind, id=artifact_id, expires_at=expires_at, epoch=epoch)
         return LinkClaims(kind=kind, id=artifact_id, expires_at=expires_at, nonce=payload)
 
     def _body(self, kind: LinkKind, artifact_id: str, expires_at: datetime, payload: str) -> str:

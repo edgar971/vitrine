@@ -1,7 +1,7 @@
 """``/s/{sig}`` and ``/a/{id}`` over real HTTP: links, versions, traversal and headers (§ 7.1-7.2).
 
-These port the spike's view checks (research § 5): headers, the indistinguishable 404, links
-that were tampered, expired, revoked or of the wrong kind, versions and path traversal.
+The view checks (security T4-T7, T10): headers, the indistinguishable 404, links that were
+tampered, expired, revoked or of the wrong kind, versions and path traversal.
 """
 
 from __future__ import annotations

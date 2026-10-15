@@ -1,8 +1,8 @@
 """Agent-written HTML in Chromium (security T7): it runs, but in an opaque origin.
 
-Ports the spike's Chromium checks: the script runs; ``document.cookie`` and ``localStorage``
-throw even with a cookie set for drop's host; ``window.origin`` is ``"null"``; and a relative
-image still loads under a signed path.
+The script runs; ``document.cookie`` and ``localStorage`` throw even with a cookie set for
+drop's host; ``window.origin`` is ``"null"``; and a relative image still loads under a signed
+path.
 """
 
 from __future__ import annotations

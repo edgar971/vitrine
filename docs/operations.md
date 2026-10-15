@@ -23,12 +23,16 @@ Without snapshots, use the built-in command:
 
 ```
 mcp-drop backup <dest>
-  for each artifact:   take its write lock → copy meta.json → copy the versions it lists → release
-  then:                copy refs/ and the closed audit months; copy the open month last
+  for each artifact:   read meta.json → copy the versions it lists → read meta.json again
+                       → unchanged: write that meta.json into <dest>; changed: copy it again
+  then:                copy refs/, then the audit months oldest first, each up to its last whole line
   result:              <dest>/ is a valid data_dir; prints artifacts, versions, bytes copied
 ```
 
-It runs online. Writers to one artifact wait only while that artifact is being copied.
+It runs online and takes no lock, so writers never wait for it. Versions are immutable once
+placed and `meta.json` changes only by rename, so a `meta.json` read before and after its versions
+were copied describes exactly what was copied. An artifact that keeps changing for 50 attempts in a
+row fails the backup; run it again. `<dest>` must be a new or empty directory.
 
 **Plain `cp -r` or `rsync` of a live `data_dir` is not supported.** It can copy a `meta.json`
 that references a version folder it has not copied yet.
@@ -59,7 +63,8 @@ release that changes the on-disk format bumps `schema_version` and says so in th
 
 - Forward-only and idempotent; safe to re-run after an interruption.
 - Each file is migrated with the same staging plus `os.replace` as a normal write.
-- The audit log records one `migrated` event per run.
+- The audit log records one `migrated` event per run that changes anything, written before the
+  first file changes; a dry run, or a run with nothing to do, records nothing.
 
 **Startup refuses** to run against:
 

@@ -534,15 +534,19 @@ mcp-drop serve --config drop.toml
 
 | Command | Purpose |
 |---|---|
-| `mcp-drop serve [--config FILE] [--host H] [--port P]` | Run the server |
+| `mcp-drop serve [--config FILE] [--host H] [--port P]` | Run the server. It refuses to start on data with another `schema_version` ([operations](operations.md) § 4), sweeps once before the first request, then every `sweep_interval`. |
 | `mcp-drop config check [--config FILE]` | Validate the configuration and print the effective values, with secrets redacted. Exits non-zero on error. |
 | `mcp-drop token new <name> [--scopes read,write,share,publish]` | Print a new random token, plus its `DROP_TOKENS` entry. Writes nothing to disk. |
 | `mcp-drop token hash <token>` | Print the hash of an existing token |
 | `mcp-drop secret new` | Print a new random 32-byte hex secret |
-| `mcp-drop sweep [--config FILE]` | Run the expiry and staging sweep once, then exit (for cron-style setups) |
-| `mcp-drop audit [--id ID] [--client NAME] [--since 7d] [--json]` | Print audit events |
+| `mcp-drop sweep [--config FILE]` | Run the expiry and staging sweep once, then exit (for cron-style setups). Safe beside a running server: staging younger than 10 minutes is left alone. |
+| `mcp-drop audit [--id ID] [--client NAME] [--since 7d] [--json] [--config FILE]` | Print audit events, newest first; `--json` prints the stored lines |
 | `mcp-drop backup <dest> [--config FILE]` | Write a consistent, restorable copy of `data_dir` ([operations](operations.md) § 2) |
 | `mcp-drop migrate [--dry-run] [--config FILE]` | Upgrade `meta.json` files to the current `schema_version` ([operations](operations.md) § 4) |
+
+Every command exits `0` on success, `1` when it failed, and `2` when the arguments or the
+configuration are wrong. Commands that read `data_dir` load the same configuration as `serve`, so
+they need `DROP_SECRET` and `DROP_TOKENS` too.
 
 ## 10. Errors
 
@@ -581,8 +585,8 @@ Error messages **MUST NOT** reveal whether a private artifact exists. A 5xx answ
 | `drop_storage_bytes` | gauge | — |
 | `drop_versions_created_total` | counter | `client` |
 | `drop_views_total` | counter | `route` = `a` \| `s` |
-| `drop_public_gate_total` | counter | `outcome` = `approved` \| `declined` \| `unsupported` |
-| `drop_rejected_total` | counter | `reason` |
+| `drop_public_gate_total` | counter | `outcome` = `approved` \| `declined` \| `unsupported` \| `disabled` \| `not_required` (one per attempt to make an artifact public) |
+| `drop_rejected_total` | counter | `reason` = `rate_limited` \| `scope` |
 
 Metrics **MUST NOT** carry artifact ids or titles.
 
@@ -606,6 +610,7 @@ state change is acknowledged.
 | `upload_url_issued` | `expires_at` |
 | `deleted` | — |
 | `expired` | — (written by the sweep) |
+| `migrated` | `version` (the `schema_version` reached), `files` (how many `meta.json` files); no `artifact`; `client` = `@operator`. Written once per `mcp-drop migrate` run that changes anything, before the first file changes. |
 | `access_denied` | `reason` = `scope` \| `rate_limited`; `tool`, or `route` as a route **name** (`upload`, `api_create`, …), never a path. A refused resource read is `tool` = `resources/read`. `artifact` is present only when the call named a well-formed id. |
 
 Rules:

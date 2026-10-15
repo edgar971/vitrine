@@ -20,3 +20,13 @@ Nothing has been released yet: `0.1.0` is the first release, and
   in [`docs/adr/`](docs/adr/).
 - The package skeleton `src/mcp_drop/` (a version and an entry point that reports the build has not
   started) and the spec that covers it.
+- M1 — `domain`: the models that mirror `meta.json`, the typed errors, 80-bit Crockford ids, the
+  one path rule and the `data_dir` layout.
+- M1 — `storage`: the `Store` protocol and `FileStore` (write protocol, retention, quota, path
+  rules, sweeps), plus the contract suite every `Store` implementation must pass.
+- M1 — `config`: flags, `DROP_*` variables and a TOML file, with secrets accepted from the
+  environment only and unknown keys refused.
+- M1 — `services`: `LinkService` (view and upload links), `ArtifactService` (including idempotent
+  create), `AuditLog` (appended and fsync'd before a change is acknowledged) and `RateLimiter`.
+- M1 — the layering contract now names `domain` below `storage`, which is what it has to be:
+  storage cannot be written without the models it stores.

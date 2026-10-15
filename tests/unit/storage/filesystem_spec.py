@@ -99,6 +99,25 @@ class DescribeTheLayout:
                 store.get("not-an-id")
 
 
+class DescribeTheRoot:
+    class WhenTheDataDirIsReachedThroughASymlink:
+        def it_writes_a_nested_file(self, tmp_path: Path, clock: Clock) -> None:
+            (tmp_path / "real").mkdir()
+            (tmp_path / "link").symlink_to(tmp_path / "real")
+            store = FileStore(StoreConfig(root=tmp_path / "link" / "data"), clock)
+            artifact_id = _create(store, files={ENTRY: b"<p>hi</p>", "a/b.md": b"# hi"})
+            assert store.read(artifact_id, "a/b.md") == b"# hi"
+
+    class WhenTheDataDirIsRelative:
+        def it_writes_a_nested_file(
+            self, tmp_path: Path, clock: Clock, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            monkeypatch.chdir(tmp_path)
+            store = FileStore(StoreConfig(root=Path("data")), clock)
+            artifact_id = _create(store, files={ENTRY: b"<p>hi</p>", "a/b.md": b"# hi"})
+            assert store.read(artifact_id, "a/b.md") == b"# hi"
+
+
 class DescribeTheCrashWindows:
     class WhenTheProcessDiesBetweenTheTwoRenames:
         def it_leaves_no_visible_partial_version(

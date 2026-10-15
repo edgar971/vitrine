@@ -7,22 +7,21 @@ is `docs/security.md`. When this file and the spec disagree, the spec wins: fix 
 ## What drop is
 
 A self-hosted MCP server that turns agent output into **private** (signed, expiring, revocable)
-or **public** links. Status: M3 done (the core, the MCP layer, and the web layer: views, uploads,
-the API and the middleware, assembled with `/mcp` by `mcp_drop.app.build_app`); the CLI and
-operations follow `docs/roadmap.md` (M4 → M5).
+or **public** links. Status: M1–M3 done (the core, the MCP layer, and the web layer, assembled
+with `/mcp` by `mcp_drop.app.build_app`), and the M4 CLI (`mcp-drop serve`, `backup`, `migrate`, …)
+with optional metrics; the container image and deployment examples follow `docs/roadmap.md`
+(rest of M4 → M5).
 
 ## Commands
 
-Only `uv` and `just` are required. `just check` runs every gate CI runs, and it is green: the
-core (M1), the MCP layer (M2) and the web layer (M3) exist, while `mcp-drop serve` still reports
-that there is nothing to serve until the CLI lands (M4).
+Only `uv` and `just` are required. `just check` runs every gate CI runs, and it is green.
 
 | Task | Command |
 |---|---|
 | Install | `uv sync` |
 | Every gate CI runs (**before every commit**) | `just check` |
 | One test | `uv run pytest -k <name> --no-cov` |
-| Serve locally (M1+) | `uv run mcp-drop serve` |
+| Serve locally | `uv run mcp-drop serve` |
 
 `just` alone lists the recipes (`just lint`, `just types`, `just layers`, `just test`,
 `just test-browser`, `just audit`). CI runs the same recipes, so the two cannot drift.

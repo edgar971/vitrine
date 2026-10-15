@@ -47,6 +47,7 @@ can view.
 | [`docs/roadmap.md`](docs/roadmap.md) | Milestones M0–M5 to `v0.1.0`, each with deliverables and testable exit criteria |
 | [`docs/research.md`](docs/research.md) | Prior art, options considered, platform facts checked against source, validation findings and the record of what the spike proved |
 | [`docs/spike/`](docs/spike/) | The throwaway prototype and checks the design was validated against |
+| [`docs/adr/`](docs/adr/) | The accepted decisions that are expensive to reverse |
 
 ## Example
 

@@ -58,6 +58,12 @@ dev = [
   "ruff>=0.17",
 ]
 
+# A named index outranks the default one, so a machine-wide UV_INDEX_URL or UV_DEFAULT_INDEX
+# (a private mirror) cannot re-resolve uv.lock away from PyPI, which CI and contributors use.
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+
 [tool.ruff]
 line-length = 100
 target-version = "py315"

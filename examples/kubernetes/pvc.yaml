@@ -1,0 +1,10 @@
+# One writer: drop's per-artifact locks live in the process, so it runs as a single replica.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: drop-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 25Gi

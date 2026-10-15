@@ -1,0 +1,20 @@
+# Non-secret settings (docs/configuration.md). DROP_SECRET and DROP_TOKENS come from the
+# drop-secrets Secret, never from here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drop
+data:
+  drop.toml: |
+    [drop]
+    data_dir        = "/data"
+    public_base_url = "https://drop.example.com"
+    host            = "0.0.0.0"
+    port            = 8080
+    # The ingress controller's pods; the network policy lets nothing else reach port 8080.
+    # Narrow it to your cluster's pod CIDR.
+    forwarded_allow_ips = ["10.0.0.0/8"]
+    public_mode     = "confirm"
+    quota           = "20GB"
+    metrics_port    = 9090
+    log_format      = "json"

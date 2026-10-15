@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
+from typing import Protocol
 
 import anyio
 import mcp.types as mt
 from fastmcp import Context
 from fastmcp.exceptions import McpError
 
+from mcp_drop.domain.errors import NotFound
 from mcp_drop.domain.models import ArtifactDetail, GateDecision
 from mcp_drop.services.gate import CONSENT_SCHEMA, PublicGate
 
@@ -26,22 +29,49 @@ GATE_TIMEOUT = 600.0
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class Approval:
+    """The gate's verdict and the version it was given for, which the write must still find."""
+
+    decision: GateDecision
+    version: int
+
+
+class Binding(Protocol):
+    """Signs what a modern-era question was about, so only its own answer can approve it."""
+
+    def mint(self, version: int) -> str:
+        """The state carried by the question about ``version``."""
+        ...
+
+    def version_of(self, state: str) -> int:
+        """The version a state was minted for; ``NotFound`` when it is not this request's."""
+        ...
+
+
 async def confirm(
-    ctx: Context, gate: PublicGate, detail: ArtifactDetail
-) -> GateDecision | mt.InputRequiredResult:
+    ctx: Context, gate: PublicGate, detail: ArtifactDetail, *, question: str, binding: Binding
+) -> Approval | mt.InputRequiredResult:
     """Ask the human, or return the ``InputRequiredResult`` a ``2026-07-28`` client answers."""
+    shown = detail.artifact.version
     if not gate.asks_a_human():
-        return gate.without_asking()
+        return Approval(gate.without_asking(), shown)
     if not _can_elicit(ctx):
-        return GateDecision.UNSUPPORTED
-    question = gate.question(detail)
+        return Approval(GateDecision.UNSUPPORTED, shown)
     if ctx._is_modern_protocol():
-        return _modern(ctx, gate, question)
-    return await _handshake(ctx, gate, question)
+        return _modern(ctx, question, binding, shown)
+    return Approval(await _handshake(ctx, question), shown)
 
 
-def _modern(ctx: Context, gate: PublicGate, question: str) -> GateDecision | mt.InputRequiredResult:
-    """``2026-07-28``: ask by returning, read the answer from the retried call."""
+def _modern(
+    ctx: Context, question: str, binding: Binding, shown: int
+) -> Approval | mt.InputRequiredResult:
+    """``2026-07-28``: ask by returning, read the answer from the retried call.
+
+    An answer is believed only alongside the state this server minted for this request: a
+    client that sends an approval it was never asked for, or one asked about another artifact,
+    another request or an older version, is declined (security T20).
+    """
     answers = ctx.input_responses
     if answers is None:
         return mt.InputRequiredResult(
@@ -51,15 +81,21 @@ def _modern(ctx: Context, gate: PublicGate, question: str) -> GateDecision | mt.
                         message=question, requested_schema=CONSENT_SCHEMA
                     )
                 )
-            }
+            },
+            request_state=binding.mint(shown),
         )
+    state = ctx.request_state
     answer = answers.get(CONFIRM_REQUEST)
-    if not isinstance(answer, mt.ElicitResult):
-        return GateDecision.DECLINED
-    return gate.verdict(answer.action, answer.content)
+    if state is None or not isinstance(answer, mt.ElicitResult):
+        return Approval(GateDecision.DECLINED, shown)
+    try:
+        version = binding.version_of(state)
+    except NotFound:
+        return Approval(GateDecision.DECLINED, shown)
+    return Approval(PublicGate.verdict(answer.action, answer.content), version)
 
 
-async def _handshake(ctx: Context, gate: PublicGate, question: str) -> GateDecision:
+async def _handshake(ctx: Context, question: str) -> GateDecision:
     """``2025-11-25`` and earlier: a server-initiated ``elicitation/create``."""
     try:
         async with asyncio.timeout(GATE_TIMEOUT):
@@ -73,7 +109,7 @@ async def _handshake(ctx: Context, gate: PublicGate, question: str) -> GateDecis
     except (McpError, anyio.ClosedResourceError, anyio.BrokenResourceError) as error:
         logger.warning("public gate: the client could not answer (%s)", type(error).__name__)
         return GateDecision.UNSUPPORTED
-    return gate.verdict(answer.action, answer.content)
+    return PublicGate.verdict(answer.action, answer.content)
 
 
 def _can_elicit(ctx: Context) -> bool:

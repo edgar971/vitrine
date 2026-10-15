@@ -5,6 +5,7 @@ A docstring here is the description the model reads, so it carries the policy of
 
 from __future__ import annotations
 
+import json
 import logging
 import shlex
 from functools import partial
@@ -19,7 +20,7 @@ from fastmcp.server.auth import AccessToken, require_scopes
 from fastmcp.server.providers import LocalProvider
 from pydantic import Field
 
-from mcp_drop.config import parse_duration
+from mcp_drop.config import requested_duration
 from mcp_drop.domain.ids import ALPHABET, CLIENT_REF_MAX, ID_LENGTH
 from mcp_drop.domain.models import (
     TAG_LIMIT,
@@ -96,6 +97,18 @@ Ttl = Annotated[
 ]
 
 
+def _request(*arguments: object) -> str:
+    """One canonical string for a call's arguments, which a gate answer is bound to."""
+    return json.dumps(arguments, sort_keys=True, default=str)
+
+
+def _log_gate(artifact_id: str, client: str, decision: GateDecision) -> None:
+    """Log a gate verdict; the audit log has the durable record."""
+    logger.info(
+        "public gate: artifact=%s client=%s outcome=%s", artifact_id, client, decision.value
+    )
+
+
 def _caller(token: AccessToken) -> str:
     """The client name a token stands for, recorded as the artifact's source."""
     return token.client_id
@@ -149,7 +162,7 @@ def artifact_create(
         entry=entry,
         tags=tuple(tags or ()),
         note=note,
-        expires_at=None if expires_in is None else service.expiry(parse_duration(expires_in)),
+        expires_at=None if expires_in is None else service.expiry(requested_duration(expires_in)),
         client_ref=client_ref,
     )
     return service.create(draft, client=_caller(caller))
@@ -162,10 +175,10 @@ def artifact_create(
     ),
     tags=tags(Scope.WRITE, Bucket.WRITES),
     auth=require_scopes(Scope.WRITE),
-    timeout=DISK_TIMEOUT,
+    timeout=public_gate_flow.GATE_TIMEOUT + DISK_TIMEOUT,
 )
 @domain_errors(ToolError)
-def artifact_update(
+async def artifact_update(
     id: ArtifactId,
     files: Annotated[
         dict[str, str] | None,
@@ -190,12 +203,16 @@ def artifact_update(
     ] = None,
     tags: Tags = None,
     note: Note = "",
+    ctx: Context = CurrentContext(),
     service: ArtifactService = Depends(artifact_service),
+    gate: PublicGate = Depends(public_gate),
     caller: AccessToken = CurrentAccessToken(),
-) -> UpdatedArtifact:
+) -> UpdatedArtifact | mt.InputRequiredResult:
     """Revise a PRIVATE artifact in place: a new version under the same id and the same link.
 
     Always reuse the id of an artifact you published before rather than creating a new one.
+    If the user made it public, they are asked to confirm first, because the new version is
+    public at once; if they decline, nothing changes.
     """
     draft = VersionDraft(
         files=None if files is None else {path: text.encode() for path, text in files.items()},
@@ -206,10 +223,36 @@ def artifact_update(
         note=note,
         expires_at=None
         if expires_in in (None, NEVER)
-        else service.expiry(parse_duration(expires_in)),
+        else service.expiry(requested_duration(expires_in)),
         clear_expiry=expires_in == NEVER,
     )
-    published = service.update(id, draft, client=_caller(caller))
+    client = _caller(caller)
+    detail = await to_thread.run_sync(partial(service.get, id))
+    approval = None
+    # Only a token that may publish is asked; any other is refused by the service, unasked.
+    if detail.artifact.visibility is Visibility.PUBLIC and Scope.PUBLISH in caller.scopes:
+        request = _request("update", files, merge, entry, title, expires_in, tags, note)
+        answer = await public_gate_flow.confirm(
+            ctx,
+            gate,
+            detail,
+            question=gate.update_question(detail, files=None if files is None else len(files)),
+            binding=service.gate_binding(id, client=client, request=request),
+        )
+        if isinstance(answer, mt.InputRequiredResult):
+            return answer
+        approval = answer
+        _log_gate(id, client, approval.decision)
+    published = await to_thread.run_sync(
+        partial(
+            service.update,
+            id,
+            draft,
+            client=client,
+            gate=None if approval is None else approval.decision,
+            seen_version=None if approval is None else approval.version,
+        )
+    )
     return UpdatedArtifact(id=published.id, url=published.url, version=published.version)
 
 
@@ -287,7 +330,7 @@ def artifact_link(
     service: ArtifactService = Depends(artifact_service),
 ) -> ArtifactLink:
     """Mint a fresh signed private link that expires, or return the URL of a public artifact."""
-    return service.link(id, ttl=None if ttl is None else parse_duration(ttl))
+    return service.link(id, ttl=None if ttl is None else requested_duration(ttl))
 
 
 @tools.tool(
@@ -315,18 +358,31 @@ async def artifact_set_visibility(
     The user is asked to confirm before anything becomes public; if they decline, it stays private.
     When a link is public, tell the user clearly. Every change revokes the existing private links.
     """
+    client = _caller(caller)
     detail = await to_thread.run_sync(partial(service.get, id))
     decision = GateDecision.NOT_REQUIRED
+    seen_version = None
     if visibility is Visibility.PUBLIC and detail.artifact.visibility is not Visibility.PUBLIC:
-        answer = await public_gate_flow.confirm(ctx, gate, detail)
+        answer = await public_gate_flow.confirm(
+            ctx,
+            gate,
+            detail,
+            question=gate.question(detail),
+            binding=service.gate_binding(id, client=client, request=_request(visibility)),
+        )
         if isinstance(answer, mt.InputRequiredResult):
             return answer
-        decision = answer
-        logger.info(
-            "public gate: artifact=%s client=%s outcome=%s", id, _caller(caller), decision.value
-        )
+        decision, seen_version = answer.decision, answer.version
+        _log_gate(id, client, decision)
     artifact = await to_thread.run_sync(
-        partial(service.set_visibility, id, visibility, client=_caller(caller), gate=decision)
+        partial(
+            service.set_visibility,
+            id,
+            visibility,
+            client=client,
+            gate=decision,
+            seen_version=seen_version,
+        )
     )
     link = service.url_for(artifact)
     return VisibilityChange(id=artifact.id, visibility=artifact.visibility, url=link.url)
@@ -397,7 +453,7 @@ def artifact_upload_url(
         client=_caller(caller),
         artifact_id=id,
         title=title,
-        ttl=None if ttl is None else parse_duration(ttl),
+        ttl=None if ttl is None else requested_duration(ttl),
     )
     command = f"curl --fail -T {shlex.quote(filename)} {shlex.quote(grant.put_url)}"
     return UploadUrl(id=grant.id, put_url=grant.put_url, expires_at=grant.expires_at, curl=command)

@@ -1,6 +1,6 @@
 # drop specification
 
-Version: draft 1 (targets `mcp-drop` 0.1). The keywords **MUST**, **MUST NOT**, **SHOULD** and
+Version: 0.1 (the contract `mcp-drop` 0.1 implements). The keywords **MUST**, **MUST NOT**, **SHOULD** and
 **MAY** are used as in RFC 2119. Everything marked *configurable* has a key in § 8.
 
 ## 1. Scope

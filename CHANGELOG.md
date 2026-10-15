@@ -4,8 +4,8 @@ All notable changes to this project are documented here. The format is
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Nothing has been released yet: `0.1.0` is the first release, and
-[`docs/roadmap.md`](docs/roadmap.md) is the plan that gets there.
+Each version's section is generated from its Conventional Commits by git-cliff
+([CONTRIBUTING.md](CONTRIBUTING.md#changelog)); `0.1.0`'s was written by hand, before that.
 
 ## [Unreleased]
 

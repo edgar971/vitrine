@@ -1,0 +1,223 @@
+---
+# drop: example Kubernetes deployment (validated with kubeconform). See ../design.md § 12.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: drop
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: drop-data
+  namespace: drop
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: drop
+  namespace: drop
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: drop
+  namespace: drop
+  labels:
+    app: drop
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: drop
+  template:
+    metadata:
+      labels:
+        app: drop
+    spec:
+      serviceAccountName: drop
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: drop
+          # Pin by digest once the first image is published (multi-arch: amd64 + arm64).
+          image: ghcr.io/edgar971/drop:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics          # separate port: never routed by the Ingress
+              containerPort: 9090
+          env:
+            - name: DROP_DATA
+              value: /data
+            - name: DROP_PUBLIC_BASE
+              value: http://drop.example.com
+          envFrom:
+            - secretRef:
+                name: drop-secrets
+          # The Host/Origin guard (DNS-rebinding defence) covers every route, and kubelet
+          # probes send Host: <pod-ip>, so the probes must name an allowed host.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: drop.example.com
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: drop.example.com
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: drop-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: drop
+  namespace: drop
+  labels:
+    app: drop
+spec:
+  selector:
+    app: drop
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: drop
+  namespace: drop
+spec:
+  ingressClassName: traefik   # your ingress controller
+  rules:
+    - host: drop.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: drop
+                port:
+                  number: 8080
+---
+# Default deny: no egress at all (drop needs none); ingress only from the ingress controller.
+# The example assumes Traefik in kube-system: match your controller's namespace and pod labels.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: drop-default-deny
+  namespace: drop
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: drop-allow-traefik
+  namespace: drop
+spec:
+  podSelector:
+    matchLabels:
+      app: drop
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: 8080
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: drop-allow-prometheus
+  namespace: drop
+spec:
+  podSelector:
+    matchLabels:
+      app: drop
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring   # your Prometheus namespace
+      ports:
+        - port: 9090
+          protocol: TCP
+---
+# Optional, for the Prometheus Operator. Some installs only pick up ServiceMonitors that
+# carry a specific label or live in a specific namespace: adjust to your Prometheus selectors.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: drop
+  namespace: drop
+spec:
+  selector:
+    matchLabels:
+      app: drop
+  endpoints:
+    - port: metrics
+      interval: 60s

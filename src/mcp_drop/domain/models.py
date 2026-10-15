@@ -284,6 +284,25 @@ class SignedLink(BaseModel):
     expires_at: AwareDatetime
 
 
+class ArtifactLink(BaseModel):
+    """What ``artifact_link`` hands out: a private link, or the public URL, which never expires."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    url: str
+    expires_at: AwareDatetime | None = None
+
+
+class UploadGrant(BaseModel):
+    """An issued upload URL; the id is pre-allocated when the caller named none (spec § 7.3)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    put_url: str
+    expires_at: AwareDatetime
+
+
 class UploadLink(BaseModel):
     """A single-use upload URL, with the nonce the store records (spec § 7.3)."""
 

@@ -19,6 +19,7 @@ from mcp_drop.domain.errors import (
     NotFound,
     Refused,
     StorageUnavailable,
+    TooLarge,
 )
 from mcp_drop.domain.ids import new_id
 from mcp_drop.domain.models import (
@@ -29,7 +30,7 @@ from mcp_drop.domain.models import (
     Visibility,
 )
 from mcp_drop.services.artifacts import ArtifactService, SweepReport, request_hash
-from mcp_drop.services.audit import AuditEvent, AuditEventName, AuditLog
+from mcp_drop.services.audit import AuditEvent, AuditEventName, AuditLog, DenialReason
 from mcp_drop.services.links import LinkPolicy, LinkService
 from mcp_drop.storage.base import StoreConfig
 from mcp_drop.storage.filesystem import FileStore
@@ -620,3 +621,134 @@ class DescribeTheRequestHash:
             assert request_hash(_draft()) != request_hash(
                 _draft(files={"other.html": b"<h1>hi</h1>"})
             )
+
+
+class DescribeLink:
+    class WhenTheArtifactIsPrivate:
+        def it_mints_a_signed_link(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            assert service.link(published.id).url.startswith(f"{BASE}/s/")
+
+        def it_honours_the_ttl(self, service: ArtifactService, clock: Clock) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            link = service.link(published.id, ttl=timedelta(hours=1))
+            assert link.expires_at == clock.now() + timedelta(hours=1)
+
+    class WhenTheArtifactIsPublic:
+        def it_returns_the_public_url_without_expiry(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            service.set_visibility(
+                published.id, Visibility.PUBLIC, client=CLIENT, gate=GateDecision.APPROVED
+            )
+            link = service.link(published.id)
+            assert (link.url, link.expires_at) == (f"{BASE}/a/{published.id}/", None)
+
+    class WhenTheArtifactHasExpired:
+        def it_answers_expired(
+            self, service: ArtifactService, clock: Clock, advance: Callable[[timedelta], None]
+        ) -> None:
+            published = service.create(
+                _draft(expires_at=clock.now() + timedelta(minutes=1)), client=CLIENT
+            )
+            advance(timedelta(minutes=2))
+            with pytest.raises(Expired):
+                service.link(published.id)
+
+
+class DescribeUploadUrl:
+    class WhenNoIdIsGiven:
+        def it_pre_allocates_one(self, service: ArtifactService, audit: AuditLog) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            assert _events(audit, grant.id)[0].event is AuditEventName.UPLOAD_URL_ISSUED
+
+        def it_creates_nothing_yet(self, service: ArtifactService) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            with pytest.raises(NotFound):
+                service.get(grant.id)
+
+        def it_puts_the_filename_in_the_query(self, service: ArtifactService) -> None:
+            grant = service.upload_url("report.pdf", client=CLIENT)
+            assert grant.put_url.endswith("?filename=report.pdf")
+
+    class WhenATitleIsGiven:
+        def it_rides_in_the_query(self, service: ArtifactService) -> None:
+            grant = service.upload_url("a.pdf", client=CLIENT, title="Q3 report")
+            assert grant.put_url.endswith("?filename=a.pdf&title=Q3+report")
+
+    class WhenTheIdNamesAnArtifact:
+        def it_keeps_the_id(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            assert service.upload_url("a.pdf", client=CLIENT, artifact_id=published.id).id == (
+                published.id
+            )
+
+    class WhenTheIdIsUnknown:
+        def it_answers_not_found(self, service: ArtifactService) -> None:
+            with pytest.raises(NotFound):
+                service.upload_url("a.pdf", client=CLIENT, artifact_id=new_id())
+
+    class WhenTheFilenameEscapes:
+        def it_refuses_it(self, service: ArtifactService) -> None:
+            with pytest.raises(Invalid):
+                service.upload_url("../a.pdf", client=CLIENT)
+
+    class WhenTheAuditCannotBeWritten:
+        def it_issues_no_url(self, broken: ArtifactService) -> None:
+            with pytest.raises(AuditUnavailable):
+                broken.upload_url("a.pdf", client=CLIENT)
+
+
+class DescribeReadText:
+    class WhenTheFileIsText:
+        def it_returns_it(self, service: ArtifactService) -> None:
+            published = service.create(_draft(files={"a.md": b"# hi"}), client=CLIENT)
+            assert service.read_text(published.id, "a.md") == "# hi"
+
+    class WhenTheFileIsNotATextType:
+        def it_refuses_it(self, service: ArtifactService) -> None:
+            published = service.create(_draft(files={"a.png": b"png"}), client=CLIENT)
+            with pytest.raises(Invalid, match=r"image/png \(3 bytes\)"):
+                service.read_text(published.id, "a.png")
+
+    class WhenTheFileIsOverTheLimit:
+        def it_refuses_it(self, service: ArtifactService) -> None:
+            published = service.create(
+                _draft(files={"a.txt": b"x" * (1024 * 1024 + 1)}), client=CLIENT
+            )
+            with pytest.raises(TooLarge):
+                service.read_text(published.id, "a.txt")
+
+    class WhenTheFileIsNotUtf8:
+        def it_refuses_it(self, service: ArtifactService) -> None:
+            published = service.create(_draft(files={"a.txt": b"\xff\xfe"}), client=CLIENT)
+            with pytest.raises(Invalid, match="not UTF-8"):
+                service.read_text(published.id, "a.txt")
+
+    class WhenTheFileIsMissing:
+        def it_answers_not_found(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            with pytest.raises(NotFound):
+                service.read_text(published.id, "missing.md")
+
+
+class DescribeHistory:
+    class WhenTheArtifactExists:
+        def it_returns_its_events_newest_first(self, service: ArtifactService) -> None:
+            published = service.create(_draft(), client=CLIENT)
+            service.revoke_links(published.id, client=CLIENT)
+            assert [event.event for event in service.history(published.id)] == [
+                AuditEventName.LINKS_REVOKED,
+                AuditEventName.CREATED,
+            ]
+
+    class WhenTheArtifactIsUnknown:
+        def it_answers_not_found(self, service: ArtifactService) -> None:
+            with pytest.raises(NotFound):
+                service.history(new_id())
+
+
+class DescribeDenials:
+    class WhenACallIsRefused:
+        def it_records_access_denied(self, audit: AuditLog) -> None:
+            audit.deny(client=CLIENT, reason=DenialReason.SCOPE, tool="artifact_create")
+            assert audit.query()[0].event is AuditEventName.ACCESS_DENIED

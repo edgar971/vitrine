@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from mcp_drop.config import Settings, load_settings
 from mcp_drop.storage.base import StoreConfig
 
 SECRET = "0123456789abcdef0123456789abcdef"
@@ -35,6 +36,12 @@ class FrozenClock:
 def clock() -> FrozenClock:
     """A clock the spec controls."""
     return FrozenClock(datetime(2026, 10, 15, 10, 0, tzinfo=UTC))
+
+
+@pytest.fixture
+def settings(environment: None) -> Settings:
+    """The effective settings of a valid environment."""
+    return load_settings()
 
 
 @pytest.fixture

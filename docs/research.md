@@ -176,9 +176,13 @@ What works is Hermes's own reusable composite action,
 ref, run `python3 -S scripts/ci/setup_toolchain.py prepare|install`, build the isolated validator
 runtime with `pm.build_environment`, then run the command above against the plugin directory. Its
 `hermes-ref` input pins the Hermes version the plugin is validated against, and Hermes's own catalog
-CI uses the same machinery on `ubuntu-latest` (`hermes plugins validate --install-deps`). The
-bootstrap `python3` must be 3.11 or newer — the toolchain scripts use `datetime.UTC` and `X | Y`
-unions — which `ubuntu-latest` satisfies.
+CI uses the same machinery on `ubuntu-latest` (`hermes plugins validate --install-deps`).
+
+Two constraints the action's machinery carries: the bootstrap `python3` must be 3.11 or newer (the
+toolchain scripts use `datetime.UTC` and `X | Y` unions — `ubuntu-latest` satisfies this), and
+`setup_toolchain.py` writes to `$GITHUB_OUTPUT`, `$GITHUB_ENV` and `$GITHUB_PATH`, so it runs only
+inside a GitHub Actions job, not on a bare shell. Both are satisfied by the runner the action
+targets; neither costs anything to depend on.
 
 ## 6. Not yet proven
 

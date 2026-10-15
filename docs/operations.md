@@ -127,6 +127,16 @@ Every key is in the generated [configuration reference](configuration.md). The r
 header. The image includes the `metrics` extra. The CLI runs inside it with the server's
 environment, for example `docker exec drop mcp-drop audit --since 24h`.
 
+**Verifying a release image.** Each image is signed keylessly by the release workflow, and
+carries an SBOM. Pin the digest, then check the signature before deploying:
+
+```bash
+cosign verify ghcr.io/edgar971/drop@sha256:<digest> \
+  --certificate-identity-regexp '^https://github.com/edgar971/drop/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+docker buildx imagetools inspect ghcr.io/edgar971/drop@sha256:<digest> --format '{{ json .SBOM }}'
+```
+
 Behind a TLS-intercepting proxy, build with that proxy's CA as a secret:
 `CA=ca.pem just image` (or `docker build --secret id=ca_bundle,src=ca.pem .`). The bundle is
 used while the build steps run and never lands in a layer.

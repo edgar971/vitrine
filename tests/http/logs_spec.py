@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import httpx2
 import pytest
@@ -14,7 +15,17 @@ from tests.http.conftest import CLIENT, FULL_TOKEN, signature
 
 
 def _server_log(caplog: pytest.LogCaptureFixture) -> str:
-    """Everything the server logged; the HTTP client's own request log is not the server's."""
+    """Everything the server logged, once its access line is in.
+
+    The access line is written after the response is sent, on uvicorn's thread, so the client
+    can hold the response before the line exists. Waiting for it also keeps the "never logs"
+    specs from passing on an empty log. The HTTP client's own request log is not the server's.
+    """
+    deadline = time.monotonic() + 5
+    while not any(record.name == ACCESS_LOGGER for record in caplog.records):
+        if time.monotonic() > deadline:
+            pytest.fail("the server wrote no access line")
+        time.sleep(0.01)
     return "\n".join(
         record.getMessage()
         for record in caplog.records
@@ -67,7 +78,4 @@ class DescribeTheAccessLog:
     class WhenARequestIsRefusedAtTheEdge:
         def it_is_still_logged(self, http: httpx2.Client, logged: pytest.LogCaptureFixture) -> None:
             http.get("/healthz", headers={"Host": "evil.example"})
-            assert any(
-                record.name == ACCESS_LOGGER and "421" in record.getMessage()
-                for record in logged.records
-            )
+            assert '"GET /healthz" 421' in _server_log(logged)

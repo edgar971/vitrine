@@ -7,9 +7,9 @@ is `docs/security.md`. When this file and the spec disagree, the spec wins: fix 
 ## What drop is
 
 A self-hosted MCP server that turns agent output into **private** (signed, expiring, revocable)
-or **public** links. Status: M1–M4 done (the core, the MCP layer, the web layer assembled with
-`/mcp` by `mcp_drop.app.build_app`, the `mcp-drop` CLI, metrics, the image and `examples/`); the
-client integrations follow `docs/roadmap.md` (M5).
+or **public** links. Status: M1–M5 done (the core, the MCP layer, the web layer assembled with
+`/mcp` by `mcp_drop.app.build_app`, the `mcp-drop` CLI, metrics, the image, `examples/` and the
+Hermes plugin); `v0.1.0` is released by pushing a `v*` tag (`.github/workflows/release.yml`).
 
 ## Commands
 
@@ -34,6 +34,11 @@ need Docker; CI runs them as their own jobs. After changing a `Settings` field, 
 way: `mcp`/`web` → `services` → `storage`/`domain`. `services`, `storage` and `domain` never
 import FastMCP or Starlette, so the behaviour is testable without a server; import-linter
 enforces it.
+
+`integrations/hermes/drop/` is the Hermes plugin. It is not part of the package: it runs on
+Hermes's interpreter (Python 3.11+), so it uses the standard library only, imports itself
+relatively, and has its own ruff target (`integrations/hermes/ruff.toml`). The specs import it as
+`drop` and drive a real server through it.
 
 ## Conventions
 

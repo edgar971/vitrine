@@ -11,6 +11,9 @@ from enum import StrEnum
 
 from mcp_drop.config import Settings, TickRate
 from mcp_drop.domain.errors import RateLimited
+from mcp_drop.services.metrics import Metrics, NoMetrics
+
+REJECTED_RATE = "rate_limited"
 
 
 class Bucket(StrEnum):
@@ -38,15 +41,17 @@ class RateLimiter:
         rates: Mapping[Bucket, TickRate | None],
         *,
         clock: Callable[[], float] = time.monotonic,
+        metrics: Metrics | None = None,
     ) -> None:
         """Take one rate per bucket; ``None`` disables a bucket."""
         self._rates = dict(rates)
         self._clock = clock
+        self._metrics = metrics or NoMetrics()
         self._state: dict[tuple[Bucket, str], _Tokens] = {}
         self._lock = threading.Lock()
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> RateLimiter:
+    def from_settings(cls, settings: Settings, *, metrics: Metrics | None = None) -> RateLimiter:
         """Take the four bucket rates from the effective configuration."""
         return cls(
             {
@@ -54,7 +59,8 @@ class RateLimiter:
                 Bucket.LINKS: settings.rate_links,
                 Bucket.READS: settings.rate_reads,
                 Bucket.VIEWS: settings.rate_views,
-            }
+            },
+            metrics=metrics,
         )
 
     def check(self, bucket: Bucket, key: str) -> None:
@@ -68,6 +74,8 @@ class RateLimiter:
         with self._lock:
             state = self._refill(bucket, key, rate)
             if state.tokens < 1:
+                # Counted here, not where it is audited: a refused view is counted but not audited.
+                self._metrics.rejected(REJECTED_RATE)
                 raise RateLimited(self._retry_after(state, rate))
             state.tokens -= 1
 

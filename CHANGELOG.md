@@ -53,10 +53,35 @@ Nothing has been released yet: `0.1.0` is the first release, and
   limits), plus the per-IP view bucket with `Retry-After`.
 - M3 — specs over real uvicorn for every ported spike check (headers, traversal, limits,
   rebinding), the route-table spec, log redaction, and a Playwright Chromium spec for the sandbox.
+- M4 — the `mcp-drop` CLI (spec § 9): `serve`, `config check`, `token new`/`hash`, `secret new`,
+  `sweep`, `audit`, `backup` and `migrate`, with exit status 0, 1 (failed) or 2 (misconfigured).
+- M4 — `serve` refuses data with an older or newer `schema_version`, sweeps once before the first
+  request and then every `sweep_interval` (a failed sweep is logged and retried, never fatal), and
+  logs in `text` or `json`.
+- M4 — `backup`: an online, lock-free, restorable copy of `data_dir` (operations § 2), with a spec
+  that backs up under concurrent writers and prunes and restores every listed version.
+- M4 — `migrate`: forward-only, idempotent `meta.json` upgrades through a step registry, each file
+  staged and renamed, with `--dry-run` and one `migrated` audit event per run.
+- M4 — optional Prometheus metrics on `metrics_port` (the `metrics` extra): the counters and
+  gauges of spec § 11.2, labelled by client, route, outcome and reason, never by id or title.
+- M4 — the container image: a uv-built CPython 3.15 on `debian:trixie-slim`, uid 10001, data on
+  `/data`, fine with `--read-only` and `--cap-drop ALL`, a `HEALTHCHECK` that sends an allowed
+  `Host`, and an optional `ca_bundle` build secret for builds behind a TLS-intercepting proxy.
+  CI builds amd64 and arm64 and smoke-tests the image read-only against `/healthz`.
+- M4 — `examples/`: `drop.toml`, Compose with Caddy, and Kubernetes manifests (Pod Security
+  `restricted`, one `Recreate` replica, RWO volume, probes with a `Host` header, default-deny
+  network policy without egress), validated in CI with kubeconform, `docker compose config` and
+  `caddy adapt`; a spec loads the example configs with the server's own rules.
+- M4 — `docs/configuration.md`, generated from `Settings` (`just docs`); every setting now
+  carries its group and description, and a spec fails when the committed file is stale.
 - `TokenBook`: the hashed-token check, shared by `/mcp` and `/api`.
 - `Store.locate`, so a view streams a file instead of reading it into memory.
 
 ### Changed
+
+- The staging sweep takes a grace period: a sweep beside a running server (the periodic one and
+  `mcp-drop sweep`) spares staging and unreferenced versions younger than 10 minutes, which a live
+  write is still placing. Only the startup sweep clears everything.
 
 - An upload URL now signs the client that asked for it (`"upload"|id|expires|nonce|client`), so
   an upload is attributed to, and rate-limited as, that client.

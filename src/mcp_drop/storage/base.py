@@ -131,11 +131,15 @@ class Store(Protocol):
         """Bytes on disk under ``artifacts/``, hard links counted once (spec § 8.2)."""
         ...
 
+    def count(self) -> int:
+        """How many artifacts exist, expired ones the sweep has not reached included."""
+        ...
+
     def expired_ids(self) -> tuple[str, ...]:
         """Ids past ``expires_at``; ``ArtifactService`` deletes and audits them (spec § 4.3)."""
         ...
 
-    def sweep_staging(self) -> int:
+    def sweep_staging(self, *, grace: timedelta = timedelta(0)) -> int:
         """Remove ``tmp/`` and every version directory no ``meta.json`` references."""
         ...
 

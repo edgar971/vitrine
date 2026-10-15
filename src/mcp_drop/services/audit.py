@@ -13,6 +13,7 @@ from mcp_drop.domain import layout
 from mcp_drop.domain.clock import Clock
 from mcp_drop.domain.errors import AuditUnavailable, SchemaMismatch
 from mcp_drop.domain.models import GateDecision, Visibility
+from mcp_drop.services.metrics import Metrics, NoMetrics
 
 
 class AuditEventName(StrEnum):
@@ -27,6 +28,12 @@ class AuditEventName(StrEnum):
     DELETED = "deleted"
     EXPIRED = "expired"
     ACCESS_DENIED = "access_denied"
+    MIGRATED = "migrated"
+
+
+# The ``client`` of events an operator causes from the command line. The ``@`` keeps it apart from
+# every client: no ``DROP_TOKENS`` name can start with one.
+OPERATOR = "@operator"
 
 
 class DenialReason(StrEnum):
@@ -62,6 +69,7 @@ REQUIRED_EXTRAS: dict[AuditEventName, frozenset[str]] = {
     AuditEventName.DELETED: frozenset(),
     AuditEventName.EXPIRED: frozenset(),
     AuditEventName.ACCESS_DENIED: frozenset({"reason"}),
+    AuditEventName.MIGRATED: frozenset({"version", "files"}),
 }
 
 OPTIONAL_EXTRAS: dict[AuditEventName, frozenset[str]] = {
@@ -111,8 +119,9 @@ class AuditEvent(BaseModel):
         if self.event is AuditEventName.ACCESS_DENIED:
             if (self.tool is None) == (self.route is None):
                 raise ValueError("access_denied names exactly one of tool or route")
-        elif self.artifact is None:
-            # Only a refused call can name no artifact: a create denied before an id was drawn.
+        elif self.artifact is None and self.event is not AuditEventName.MIGRATED:
+            # Only a refused call (a create denied before an id was drawn) and a migration, which
+            # covers the whole data_dir, name no artifact.
             raise ValueError(f"{self.event} names its artifact")
         return self
 
@@ -120,8 +129,11 @@ class AuditEvent(BaseModel):
 class AuditLog:
     """Appends one JSON object per line, fsync'd before the change is acknowledged."""
 
-    def __init__(self, root: Path, *, retention: timedelta, clock: Clock) -> None:
+    def __init__(
+        self, root: Path, *, retention: timedelta, clock: Clock, metrics: Metrics | None = None
+    ) -> None:
         """Write ``root/audit/<YYYY-MM>.jsonl`` and keep each month for ``retention``."""
+        self._metrics = metrics or NoMetrics()
         self._data_dir = root
         self._root = root / layout.AUDIT_DIR
         self._retention = retention
@@ -152,6 +164,9 @@ class AuditLog:
         artifact: str | None = None,
     ) -> None:
         """Record a call refused before it did anything; only the edges know the tool or route."""
+        if reason is DenialReason.SCOPE:
+            # A rate-limited call is counted by the limiter, which also sees the unaudited views.
+            self._metrics.rejected(reason.value)
         self.append(
             AuditEvent(
                 ts=self._clock.now(),

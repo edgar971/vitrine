@@ -9,11 +9,12 @@ import json
 import os
 import shutil
 import threading
+import time
 import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -302,23 +303,36 @@ class FileStore:
             total += info.st_size
         return total
 
+    def count(self) -> int:
+        """How many artifacts have a ``meta.json``; nothing is parsed, so scraping stays cheap."""
+        return sum(
+            1 for _ in (self._config.root / layout.ARTIFACTS_DIR).glob(f"*/{layout.META_FILE}")
+        )
+
     def expired_ids(self) -> tuple[str, ...]:
         """Ids past ``expires_at``; ``ArtifactService`` deletes and audits them (spec § 4.3)."""
         now = self._clock.now()
         return tuple(sorted(artifact.id for artifact in self._all() if artifact.is_expired(now)))
 
-    def sweep_staging(self) -> int:
-        """Remove ``tmp/`` and every version directory no ``meta.json`` references."""
+    def sweep_staging(self, *, grace: timedelta = timedelta(0)) -> int:
+        """Remove ``tmp/`` and every version directory no ``meta.json`` references.
+
+        Only entries older than ``grace`` go: a live server is staging into ``tmp/``, and a placed
+        version is unreferenced until its ``meta.json`` lands. Both take seconds, so a sweep beside
+        a running server passes a grace; the startup sweep, with no writer yet, passes none.
+        """
+        cutoff = time.time() - grace.total_seconds()
         removed = 0
         for path in (self._config.root / layout.TMP_DIR).iterdir():
-            _remove(path)
-            removed += 1
+            if _modified(path) <= cutoff:
+                _remove(path)
+                removed += 1
         for directory in (self._config.root / layout.ARTIFACTS_DIR).iterdir():
             referenced = self._referenced_versions(directory)
             if referenced is None:
                 continue
             for path in directory.iterdir():
-                if path.is_dir() and path.name not in referenced:
+                if path.is_dir() and path.name not in referenced and _modified(path) <= cutoff:
                     shutil.rmtree(path, ignore_errors=True)
                     removed += 1
         return removed
@@ -523,6 +537,14 @@ def _scan_tree(directory: Path) -> tuple[FileEntry, ...]:
             FileEntry(path=path.relative_to(directory).as_posix(), bytes=path.stat().st_size)
         )
     return tuple(entries)
+
+
+def _modified(path: Path) -> float:
+    """When an entry last changed; one that vanished meanwhile counts as old (it is gone)."""
+    try:
+        return path.lstat().st_mtime
+    except FileNotFoundError:
+        return 0.0
 
 
 def _remove(path: Path) -> None:

@@ -107,3 +107,30 @@ The audit log (`mcp-drop audit --since 24h`) is where an operator answers "who p
 
 Delete `data_dir` and the secrets. Every link stops resolving. Back up the audit directory first
 if it must be kept.
+
+## 9. Deployments
+
+Every key is in the generated [configuration reference](configuration.md). The ready-made setups:
+
+| Setup | Where | Notes |
+|---|---|---|
+| Local | `uvx mcp-drop serve` | Binds `127.0.0.1:8080`; `data_dir` is `./data` |
+| Container | [`Dockerfile`](../Dockerfile) | See below |
+| Compose with Caddy | [`examples/compose.yaml`](../examples/compose.yaml), [`examples/Caddyfile`](../examples/Caddyfile) | Caddy terminates TLS; only Caddy publishes ports; drop trusts `X-Forwarded-For` from the compose subnet only |
+| Kubernetes | [`examples/kubernetes/`](../examples/kubernetes/) | `kubectl apply -k`; Pod Security `restricted`, one `Recreate` replica, RWO volume, no egress |
+| A config file | [`examples/drop.toml`](../examples/drop.toml) | Safe to commit; secrets stay in the environment |
+
+**The image** runs `mcp-drop serve` as uid/gid `10001`, listening on `0.0.0.0:8080`, with
+`data_dir=/data`. Everything it writes is under `/data`, so it runs with `--read-only` and
+`--cap-drop ALL`; mount a volume at `/data`. Its `HEALTHCHECK` sends the `Host` that
+`DROP_PUBLIC_BASE_URL` names, because every route checks `Host`; Kubernetes probes set the same
+header. The image includes the `metrics` extra. The CLI runs inside it with the server's
+environment, for example `docker exec drop mcp-drop audit --since 24h`.
+
+Behind a TLS-intercepting proxy, build with that proxy's CA as a secret:
+`CA=ca.pem just image` (or `docker build --secret id=ca_bundle,src=ca.pem .`). The bundle is
+used while the build steps run and never lands in a layer.
+
+**Kubernetes backups:** a CSI volume snapshot of the PVC is crash-consistent, which is all § 2
+needs. `mcp-drop backup` also works through `kubectl exec`, but the root filesystem is read-only,
+so its destination has to be another mounted volume.

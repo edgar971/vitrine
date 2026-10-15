@@ -64,6 +64,16 @@ Nothing has been released yet: `0.1.0` is the first release, and
   staged and renamed, with `--dry-run` and one `migrated` audit event per run.
 - M4 — optional Prometheus metrics on `metrics_port` (the `metrics` extra): the counters and
   gauges of spec § 11.2, labelled by client, route, outcome and reason, never by id or title.
+- M4 — the container image: a uv-built CPython 3.15 on `debian:trixie-slim`, uid 10001, data on
+  `/data`, fine with `--read-only` and `--cap-drop ALL`, a `HEALTHCHECK` that sends an allowed
+  `Host`, and an optional `ca_bundle` build secret for builds behind a TLS-intercepting proxy.
+  CI builds amd64 and arm64 and smoke-tests the image read-only against `/healthz`.
+- M4 — `examples/`: `drop.toml`, Compose with Caddy, and Kubernetes manifests (Pod Security
+  `restricted`, one `Recreate` replica, RWO volume, probes with a `Host` header, default-deny
+  network policy without egress), validated in CI with kubeconform, `docker compose config` and
+  `caddy adapt`; a spec loads the example configs with the server's own rules.
+- M4 — `docs/configuration.md`, generated from `Settings` (`just docs`); every setting now
+  carries its group and description, and a spec fails when the committed file is stale.
 - `TokenBook`: the hashed-token check, shared by `/mcp` and `/api`.
 - `Store.locate`, so a view streams a file instead of reading it into memory.
 

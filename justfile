@@ -3,6 +3,11 @@
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+# `just` alone lists the recipes
+[private]
+default:
+    @just --list
+
 # Refresh the environment from uv.lock
 sync:
     uv sync
@@ -39,8 +44,9 @@ test:
 # The browser specs (needs `uv run playwright install chromium`)
 test-browser:
     uv run pytest -m browser --no-cov
-# Known vulnerabilities in the locked dependencies (uv.lock has no pip-audit reader,
-# so the lock is exported to a pinned requirements list first)
+
+# uv.lock has no pip-audit reader, so the lock is exported to a pinned requirements list first.
+# Known vulnerabilities in the locked dependencies
 audit:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -49,8 +55,9 @@ audit:
     uv export --frozen --no-emit-project --no-hashes --quiet --output-file "$requirements"
     uvx pip-audit --requirement "$requirements" --no-deps --disable-pip --progress-spinner off
 
-# Build the image for this machine. Behind a TLS-intercepting proxy, CA=<bundle.pem> passes
-# its CA to the build as a secret (it never lands in a layer).
+# Behind a TLS-intercepting proxy, CA=<bundle.pem> passes its CA to the build as a secret
+# (it never lands in a layer).
+# Build the image for this machine
 image tag="drop:dev":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -103,8 +110,8 @@ changelog range="":
 # Prepare a release commit: bump every version copy, re-lock, write the changelog, run the gates
 release version:
     uv run python scripts/release.py "{{version}}"
-    # uv.lock is resolved against PyPI, whatever index this machine's uv is pointed at.
-    UV_DEFAULT_INDEX=https://pypi.org/simple UV_INDEX_URL=https://pypi.org/simple uv lock
+    # pyproject.toml names the PyPI index, so this stays on PyPI whatever index uv is pointed at.
+    uv lock
     uv sync
     just check
     @echo "release: review the diff, commit it as 'chore(release): {{version}}', merge, then:"

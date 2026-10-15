@@ -1,13 +1,14 @@
-"""The ``mcp-drop`` entry point. The commands arrive with M2-M4 (``docs/roadmap.md``)."""
+"""The ``mcp-drop`` entry point. The commands arrive with M3-M4 (``docs/roadmap.md``)."""
 
 from __future__ import annotations
 
 import sys
 
 _NOT_BUILT = (
-    "drop has a core but nothing serves yet: config, storage and the services are built (M1), "
-    "and the MCP and web layers arrive with M2-M4, so there is no CLI command yet. The build "
-    "follows docs/roadmap.md from M2."
+    "drop has a core and an MCP layer but nothing serves yet: config, storage, the services (M1) "
+    "and the MCP tools, resources, prompt and public gate (M2) are built, while the web layer "
+    "and the CLI arrive with M3-M4, so there is no CLI command yet. The build follows "
+    "docs/roadmap.md from M3."
 )
 
 

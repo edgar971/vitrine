@@ -7,10 +7,9 @@ is `docs/security.md`. When this file and the spec disagree, the spec wins: fix 
 ## What vitrine is
 
 A self-hosted MCP server that turns agent output into **private** (signed, expiring, revocable)
-or **public** links. Status: M1–M5 done (the core, the MCP layer, the web layer assembled with
-`/mcp` by `mcp_vitrine.app.build_app`, the `mcp-vitrine` CLI, metrics, the image, `examples/` and the
-Hermes plugin); `v0.1.0` is released (2026-10-16). A release is cut by pushing a `v*` tag
-(`.github/workflows/release.yml`; CONTRIBUTING.md § Releasing).
+or **public** links. Released as `mcp-vitrine` (progress: `docs/roadmap.md`). A release is cut by
+pushing a `v*` tag (`.github/workflows/release.yml`; CONTRIBUTING.md § Releasing). The web layer
+and `/mcp` are assembled by `mcp_vitrine.app.build_app`.
 
 ## Commands
 
@@ -60,6 +59,10 @@ relatively, and has its own ruff target (`integrations/hermes/ruff.toml`). The s
 - Conventional Commits, checked in CI: the message *is* the changelog entry (git-cliff,
   `cliff.toml`), so write it for someone upgrading, and use the `security` scope for a security
   fix. Do not hand-edit `CHANGELOG.md`'s `[Unreleased]` after `0.1.0`.
+- `main` is protected by a ruleset: work on a branch and open a PR (no approvals required, since
+  you cannot approve your own; conversations must be resolved). Never push to `main`.
+- Commit as the repo-local `user.email` (the GitHub noreply address in `.git/config`). Do not pass
+  `--author` or set `GIT_AUTHOR_*`: the global address is a work one and must not land in history.
 
 ## Invariants (never break; each has a test in `docs/security.md` § 6)
 

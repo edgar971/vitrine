@@ -86,11 +86,15 @@ token never lands in the file):
 
 ```yaml
 mcp_servers:
-  drop:
+  drop_mcp:                         # any key but `drop` — the plugin below owns that name
     url: "http://localhost:8080/mcp"
     headers: { Authorization: "Bearer ${DROP_TOKEN}" }
     elicitation: { timeout: 300 }   # how long the approve/deny prompt for public waits
 ```
+
+The key is the tools' prefix (`mcp__drop_mcp__artifact_create`, …), and it has to differ from `drop`:
+with a plugin of that name installed, Hermes registers the server's tools but never exposes them, so
+nothing can call them and `tool_search` does not list them.
 
 The optional plugin publishes files already on disk (PDFs, images, a folder with assets) through
 `artifact_publish_files`, and adds a `drop:drop` skill plus the `/share <path>…` and

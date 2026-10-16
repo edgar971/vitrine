@@ -1,8 +1,8 @@
 # vitrine roadmap
 
-`0.1.0` is built and about to be released: everything below M0–M5 is merged, `just check` is
+`0.1.0` is built and about to be released: milestones M0–M5 below are merged, `just check` is
 green on Python 3.15, and the release procedure lives in
-[CONTRIBUTING.md § Releasing](../CONTRIBUTING.md).
+[CONTRIBUTING.md § Releasing](../CONTRIBUTING.md#releasing).
 
 | Milestone | Delivered |
 |---|---|
@@ -15,9 +15,11 @@ green on Python 3.15, and the release procedure lives in
 
 ## The `0.1.0` release
 
-- [ ] Every invariant in [AGENTS.md](../AGENTS.md) has a named spec (held by
+- [x] Every invariant in [AGENTS.md](../AGENTS.md) has a named spec (held by
       `tests/unit/invariants_spec.py`).
-- [ ] Coverage is at least 90%, `pip-audit` is clean, the image is signed with an SBOM.
+- [x] Coverage is at least 90% (97%), and `pip-audit` is clean.
+- [ ] The release image is signed and carries an SBOM (`release.yml` does both; check it on the
+      rehearsal).
 - [ ] A rehearsal pre-release on TestPyPI, installed and checked (CONTRIBUTING.md § Releasing).
 - [ ] The threat model in [security.md](security.md) reviewed against the shipped code.
 - [ ] The final tag: PyPI, the signed image, and a GitHub release.

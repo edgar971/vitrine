@@ -23,9 +23,9 @@ PUBLISH_SCHEMA: dict[str, Any] = {
     "description": (
         "Upload files already on disk, or a folder, to drop and get back a private link. Use it "
         "for binaries (PNG, PDF), a folder with assets, or files too large to pass inline; for "
-        "text you write yourself, use mcp_drop_artifact_create. Pass `id` to publish a new version "
-        "behind the same link. Always private: going public is mcp_drop_artifact_set_visibility, "
-        "which asks the user."
+        "text you write yourself, use the drop MCP server's artifact_create tool. Pass `id` to "
+        "publish a new version behind the same link. Always private: going public is that "
+        "server's artifact_set_visibility, which asks the user."
     ),
     "parameters": {
         "type": "object",

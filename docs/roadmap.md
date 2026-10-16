@@ -1,8 +1,9 @@
 # vitrine roadmap
 
-`0.1.0` is built and about to be released: milestones M0–M5 below are merged, `just check` is
-green on Python 3.15, and the release procedure lives in
-[CONTRIBUTING.md § Releasing](../CONTRIBUTING.md#releasing).
+`0.1.0` was released on 2026-10-16 ([release](https://github.com/edgar971/vitrine/releases/tag/v0.1.0)):
+milestones M0–M5 below shipped in it. The release procedure lives in
+[CONTRIBUTING.md § Releasing](../CONTRIBUTING.md#releasing), and the hardening planned before the
+next release is tracked in [#15](https://github.com/edgar971/vitrine/issues/15).
 
 | Milestone | Delivered |
 |---|---|
@@ -13,14 +14,14 @@ green on Python 3.15, and the release procedure lives in
 | M4 operations | the `mcp-vitrine` CLI, metrics, the container image, `examples/` |
 | M5 integrations | the Hermes plugin, client snippets, the release workflow |
 
-## The `0.1.0` release
+## The `0.1.0` release (shipped)
 
 - [x] Every invariant in [AGENTS.md](../AGENTS.md) has a named spec (held by
       `tests/unit/invariants_spec.py`).
 - [x] Coverage is at least 90% (97%), and `pip-audit` is clean.
-- [ ] The release image is signed and carries an SBOM (`release.yml` does both).
+- [x] The release image is signed and carries an SBOM (`release.yml` does both).
 - [ ] The threat model in [security.md](security.md) reviewed against the shipped code.
-- [ ] The final tag: PyPI, the signed image, and a GitHub release.
+- [x] The final tag: PyPI, the signed image, and a GitHub release.
 
 ## After 0.1
 

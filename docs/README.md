@@ -48,7 +48,7 @@ The full picture is in [design](design.md).
 | [design](design.md) | Architecture, storage, flows, extension points, test conventions |
 | [adr](adr/) | The decisions that are expensive to reverse |
 | [research](research.md) | The platform facts and alternatives behind the design |
-| [roadmap](roadmap.md) | What is left before `0.1.0`, and what comes after |
+| [roadmap](roadmap.md) | What shipped in `0.1.0`, and what comes after |
 
 ## Contributing
 

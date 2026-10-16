@@ -14,3 +14,6 @@ coverage.xml
 dist/
 htmlcov/
 venv/
+# `mcp-vitrine serve` writes artifacts and audit logs to ./data by default; secrets go in .env.
+/data/
+.env

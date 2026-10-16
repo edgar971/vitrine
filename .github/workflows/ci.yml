@@ -165,7 +165,7 @@ jobs:
       # built-in tools and the install-time security scan (docs/design.md § 8). PyPI's
       # hermes-agent predates the command, so the action builds it from source at the pinned ref.
       - name: hermes plugins validate
-        uses: NousResearch/hermes-agent/.github/actions/plugin-validate@b51e8b850494e0a95a4b410c3d9b9a26df9ae261
+        uses: NousResearch/hermes-agent/.github/actions/plugin-validate@acc3cada0da86c81efc8aa6c5a291989549ca900
         with:
           path: integrations/hermes/vitrine
           # The Hermes the plugin is admitted against; bump it with the action's pin.

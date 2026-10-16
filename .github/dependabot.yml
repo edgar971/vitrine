@@ -2,7 +2,7 @@ version: 2
 
 updates:
   # NOTE: the `uv` updater currently fails with `tool_version_not_supported` for this project:
-  # its Python toolchain supports 3.10.*-3.14.*, and drop requires >=3.15. The run is
+  # its Python toolchain supports 3.10.*-3.14.*, and vitrine requires >=3.15. The run is
   # informational (no PR, no CI gate); the entry stays so updates start landing as soon as
   # Dependabot supports 3.15. Until then, bump `uv.lock` by hand with `uv lock --upgrade`.
   - package-ecosystem: uv

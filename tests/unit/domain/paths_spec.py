@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from mcp_drop.domain.errors import Invalid
-from mcp_drop.domain.paths import INDEX_ENTRY, choose_entry, resolve_path, validate_path
+from mcp_vitrine.domain.errors import Invalid
+from mcp_vitrine.domain.paths import INDEX_ENTRY, choose_entry, resolve_path, validate_path
 
 UNSAFE_PATHS = [
     "",

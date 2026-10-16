@@ -7,10 +7,10 @@ from collections.abc import Callable, Iterator
 import httpx2
 import pytest
 
-from mcp_drop.domain.errors import NotFound
-from mcp_drop.domain.models import PublishedArtifact, UploadGrant, Visibility
-from mcp_drop.services.audit import AuditEvent, AuditEventName
-from mcp_drop.services.container import Services
+from mcp_vitrine.domain.errors import NotFound
+from mcp_vitrine.domain.models import PublishedArtifact, UploadGrant, Visibility
+from mcp_vitrine.services.audit import AuditEvent, AuditEventName
+from mcp_vitrine.services.container import Services
 from tests.http.conftest import CLIENT
 
 
@@ -104,7 +104,7 @@ class DescribeTheUploadRoute:
     class WhenTheBodyIsTooLarge:
         @pytest.fixture
         def overrides(self) -> dict[str, str]:
-            return {"DROP_MAX_UPLOAD": "64KB"}
+            return {"VITRINE_MAX_UPLOAD": "64KB"}
 
         def it_answers_413_from_the_declared_length(
             self, http: httpx2.Client, grant: UploadGrant
@@ -126,7 +126,7 @@ class DescribeTheUploadRoute:
     class WhenTheClientIsOverItsWriteRate:
         @pytest.fixture
         def overrides(self) -> dict[str, str]:
-            return {"DROP_RATE_WRITES": "1/m"}
+            return {"VITRINE_RATE_WRITES": "1/m"}
 
         @pytest.fixture
         def second(self, http: httpx2.Client, services: Services, grant: UploadGrant) -> str:

@@ -15,9 +15,9 @@ import uvicorn
 from fastmcp import Client
 from fastmcp.client.transports import StreamableHttpTransport
 
-from mcp_drop.config import Settings, load_settings
-from mcp_drop.mcp.server import build_mcp
-from mcp_drop.services.container import Services
+from mcp_vitrine.config import Settings, load_settings
+from mcp_vitrine.mcp.server import build_mcp
+from mcp_vitrine.services.container import Services
 from tests.conftest import FrozenClock
 
 FULL_TOKEN = "full-token-for-hermes"
@@ -36,7 +36,7 @@ STARTUP_TIMEOUT = 10.0
 
 
 def _hash(token: str) -> str:
-    """The ``DROP_TOKENS`` form of a token."""
+    """The ``VITRINE_TOKENS`` form of a token."""
     return hashlib.sha256(token.encode()).hexdigest()
 
 
@@ -51,7 +51,9 @@ def _free_port() -> int:
 @pytest.fixture
 def settings(environment: None, monkeypatch: pytest.MonkeyPatch) -> Settings:
     """Two clients: one with every scope, one that only reads."""
-    monkeypatch.setenv("DROP_TOKENS", f"hermes:{_hash(FULL_TOKEN)},viewer:{_hash(READ_TOKEN)}:read")
+    monkeypatch.setenv(
+        "VITRINE_TOKENS", f"hermes:{_hash(FULL_TOKEN)},viewer:{_hash(READ_TOKEN)}:read"
+    )
     return load_settings()
 
 

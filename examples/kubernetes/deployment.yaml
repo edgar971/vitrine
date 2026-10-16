@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: drop
+  name: vitrine
 spec:
   replicas: 1
   # Recreate, not RollingUpdate: two pods must never write one data_dir.
@@ -9,11 +9,11 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app.kubernetes.io/name: drop
+      app.kubernetes.io/name: vitrine
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: drop
+        app.kubernetes.io/name: vitrine
     spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
@@ -26,13 +26,13 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: drop
-          image: ghcr.io/edgar971/drop:0.1.0
+        - name: vitrine
+          image: ghcr.io/edgar971/vitrine:0.1.0
           imagePullPolicy: IfNotPresent
-          args: ["serve", "--config", "/etc/drop/drop.toml"]
+          args: ["serve", "--config", "/etc/vitrine/vitrine.toml"]
           envFrom:
             - secretRef:
-                name: drop-secrets
+                name: vitrine-secrets
           ports:
             - name: http
               containerPort: 8080
@@ -45,7 +45,7 @@ spec:
               port: http
               httpHeaders:
                 - name: Host
-                  value: drop.example.com
+                  value: vitrine.example.com
             periodSeconds: 2
             failureThreshold: 30
           livenessProbe:
@@ -54,7 +54,7 @@ spec:
               port: http
               httpHeaders:
                 - name: Host
-                  value: drop.example.com
+                  value: vitrine.example.com
             periodSeconds: 20
           readinessProbe:
             httpGet:
@@ -62,7 +62,7 @@ spec:
               port: http
               httpHeaders:
                 - name: Host
-                  value: drop.example.com
+                  value: vitrine.example.com
             periodSeconds: 10
           resources:
             requests:
@@ -79,12 +79,12 @@ spec:
             - name: data
               mountPath: /data
             - name: config
-              mountPath: /etc/drop
+              mountPath: /etc/vitrine
               readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: drop-data
+            claimName: vitrine-data
         - name: config
           configMap:
-            name: drop
+            name: vitrine

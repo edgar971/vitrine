@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import ValidationError
 
-from mcp_drop.domain.errors import ConfigError, SchemaMismatch
-from mcp_drop.domain.models import (
+from mcp_vitrine.domain.errors import ConfigError, SchemaMismatch
+from mcp_vitrine.domain.models import (
     TAG_LIMIT,
     Artifact,
     ArtifactDraft,

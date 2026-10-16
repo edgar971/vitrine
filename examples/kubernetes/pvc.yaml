@@ -1,8 +1,8 @@
-# One writer: drop's per-artifact locks live in the process, so it runs as a single replica.
+# One writer: vitrine's per-artifact locks live in the process, so it runs as a single replica.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: drop-data
+  name: vitrine-data
 spec:
   accessModes: [ReadWriteOnce]
   resources:

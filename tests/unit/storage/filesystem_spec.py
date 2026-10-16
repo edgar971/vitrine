@@ -12,13 +12,13 @@ from pathlib import Path
 
 import pytest
 
-from mcp_drop.domain import layout
-from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import NotFound, OverQuota, SchemaMismatch
-from mcp_drop.domain.ids import new_id
-from mcp_drop.domain.models import ArtifactDraft, VersionDraft
-from mcp_drop.storage.base import StoreConfig
-from mcp_drop.storage.filesystem import FileStore
+from mcp_vitrine.domain import layout
+from mcp_vitrine.domain.clock import Clock
+from mcp_vitrine.domain.errors import NotFound, OverQuota, SchemaMismatch
+from mcp_vitrine.domain.ids import new_id
+from mcp_vitrine.domain.models import ArtifactDraft, VersionDraft
+from mcp_vitrine.storage.base import StoreConfig
+from mcp_vitrine.storage.filesystem import FileStore
 
 ENTRY = "index.html"
 CLIENT = "hermes"

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcp_drop.web.middleware import hostname, redact
+from mcp_vitrine.web.middleware import hostname, redact
 
 SIGNATURE = "dmlld3xrN20.MAC"
 
@@ -32,7 +32,7 @@ class DescribeRedact:
 class DescribeHostname:
     class WhenTheHostCarriesAPort:
         def it_drops_the_port(self) -> None:
-            assert hostname("Drop.Example.com:8443") == "drop.example.com"
+            assert hostname("Vitrine.Example.com:8443") == "vitrine.example.com"
 
     class WhenTheHostIsAnIpv6Literal:
         def it_unwraps_it(self) -> None:
@@ -40,4 +40,4 @@ class DescribeHostname:
 
     class WhenTheHostEndsInADot:
         def it_drops_the_dot(self) -> None:
-            assert hostname("drop.example.com.") == "drop.example.com"
+            assert hostname("vitrine.example.com.") == "vitrine.example.com"

@@ -1,4 +1,4 @@
-# drop security model
+# vitrine security model
 
 The threat model, controls and residual risks for the [spec](spec.md) and [design](design.md).
 Report a vulnerability through [`SECURITY.md`](../SECURITY.md), not an issue.
@@ -11,7 +11,7 @@ Report a vulnerability through [`SECURITY.md`](../SECURITY.md), not an issue.
 | Client tokens | Write access and link minting |
 | The signing secret | Anyone holding it can forge a private link to any artifact |
 | Viewers' browsers | Agent-written HTML and SVG run in them |
-| The network around drop | drop must not become a pivot point |
+| The network around vitrine | vitrine must not become a pivot point |
 
 ## 2. Actors and trust boundaries
 
@@ -39,7 +39,7 @@ cell names the closest one. **Spec** rows came after the spike, where the code i
 
 | # | Threat | Control | Status |
 |---|---|---|---|
-| T1 | A prompt-injected or careless agent publishes private data | Clients that never need public links get no `drop:publish` scope. Everything is created private. `artifact_set_visibility` is the only path to public, behind the human gate (`public_mode = confirm`), and adding content to an artifact that is already public goes through the same gate (T19). The gate fails closed on decline, timeout, unattended runs and clients without elicitation. No upload route takes a visibility. | Validated (both protocol eras, approve-only clients, decline, no support) |
+| T1 | A prompt-injected or careless agent publishes private data | Clients that never need public links get no `vitrine:publish` scope. Everything is created private. `artifact_set_visibility` is the only path to public, behind the human gate (`public_mode = confirm`), and adding content to an artifact that is already public goes through the same gate (T19). The gate fails closed on decline, timeout, unattended runs and clients without elicitation. No upload route takes a visibility. | Validated (both protocol eras, approve-only clients, decline, no support) |
 | T2 | Unauthenticated MCP calls | Hashed tokens, constant-time comparison, 401 | Validated |
 | T3 | Custom HTTP routes missing auth (the MCP auth layer covers only `/mcp`) | Each route authenticates itself, and a route-table test fails on any unclassified route | Validated (bypass demonstrated, then closed); route-table test in `tests/http/routes_spec.py` |
 | T4 | Guessing ids, or learning that a private artifact exists | 80-bit ids. One indistinguishable 404 for missing, malformed and private ids and for bad links. No listing without a token. | Validated |
@@ -48,35 +48,35 @@ cell names the closest one. **Spec** rows came after the spike, where the code i
 | T7 | Malicious HTML/SVG reads cookies, storage or acts as the viewer | CSP `sandbox` without `allow-same-origin` gives an opaque origin. `frame-ancestors 'none'`, `nosniff`, an extension allowlist, and unknown types forced to download. | Validated in Chromium |
 | T8 | DNS rebinding from a browser on the same network | Host allowlist (421) and Origin check on `/mcp` (403) | Validated against uvicorn bound to `0.0.0.0` |
 | T9 | Disk or memory exhaustion | Body limits enforced while streaming, per-version and total quotas, file-count limit | Validated (header and chunked) |
-| T10 | Links leaking through `Referer`, caches or logs | `no-referrer`, `no-store` on private views, signed segments redacted in access logs (drop writes the access log; uvicorn's own is off) | Validated (`tests/http/logs_spec.py`) |
-| T11 | A compromised drop process attacks its surroundings | drop never makes outbound requests (there is no fetch-from-URL feature). Runs non-root with a read-only root filesystem. The Kubernetes example denies all egress and mounts no service-account token. | Spec and example |
-| T12 | A token leaks, or a client is over-privileged | One token per client, revoked by removing one hash; 256-bit tokens. **Scopes** (`drop:read`, `write`, `share`, `publish`): a tool outside the token's scopes is not even listed, and calling it fails as an unknown tool. What a revoked client already handed out is covered by T21. | Validated (scoped token cannot see or call a write tool) |
+| T10 | Links leaking through `Referer`, caches or logs | `no-referrer`, `no-store` on private views, signed segments redacted in access logs (vitrine writes the access log; uvicorn's own is off) | Validated (`tests/http/logs_spec.py`) |
+| T11 | A compromised vitrine process attacks its surroundings | vitrine never makes outbound requests (there is no fetch-from-URL feature). Runs non-root with a read-only root filesystem. The Kubernetes example denies all egress and mounts no service-account token. | Spec and example |
+| T12 | A token leaks, or a client is over-privileged | One token per client, revoked by removing one hash; 256-bit tokens. **Scopes** (`vitrine:read`, `write`, `share`, `publish`): a tool outside the token's scopes is not even listed, and calling it fails as an unknown tool. What a revoked client already handed out is covered by T21. | Validated (scoped token cannot see or call a write tool) |
 | T13 | The signing secret leaks | Rotating it revokes every private link. Accepted from the environment only, never from config files. | Spec |
 | T14 | Supply chain | `uv.lock` with `--frozen` installs, `pip-audit` in CI, PyPI trusted publishing, a cosign-signed image with an SBOM and provenance. Every GitHub Action and both base images are pinned by digest; the release build uses no shared cache. Deployments should pin the image by digest. | `release.yml`; verification in [operations](operations.md) § 9. The examples pin a version tag until the first release has a digest. |
-| T15 | Phishing pages hosted on the drop domain | Treat drop's hostname as untrusted content: a dedicated hostname with no other app's cookies, and `noindex` | Operator guidance |
+| T15 | Phishing pages hosted on the vitrine domain | Treat vitrine's hostname as untrusted content: a dedicated hostname with no other app's cookies, and `noindex` | Operator guidance |
 | T16 | A looping or hijacked agent floods writes, links or views | Per-client token buckets for writes, links and reads; a per-IP bucket for views; rejected calls do no work. Quotas cap the damage that does get through. | Spec |
 | T17 | Nobody can tell who published something, or when | An append-only audit log (fsync before acknowledging), with one event per state change, including refused publishes and denied calls. If the audit write fails, the change does not happen. | Spec |
 | T18 | Retries create duplicate artifacts, or a reused key swaps content | `client_ref` is scoped per client and claimed with an exclusive file create. The same key with a different request is a conflict. A create that fails releases its key, so the retry is not locked out. | Spec |
-| T19 | New content on an already public artifact goes live without the gate: a `write`-only token, `PUT /api/artifacts/{id}` or an upload URL adds a version, and the caller is told it is private | Adding a version to a public artifact needs an approving gate decision. Over MCP, `artifact_update` asks the human when the token holds `drop:publish`; otherwise, and on every HTTP route, it is refused (403) and audited as `publish_refused`. The store checks visibility under the artifact's lock, so a concurrent publish cannot slip a version past it. | Validated (`tests/mcp/public_updates_spec.py`, `tests/http/public_updates_spec.py`) |
+| T19 | New content on an already public artifact goes live without the gate: a `write`-only token, `PUT /api/artifacts/{id}` or an upload URL adds a version, and the caller is told it is private | Adding a version to a public artifact needs an approving gate decision. Over MCP, `artifact_update` asks the human when the token holds `vitrine:publish`; otherwise, and on every HTTP route, it is refused (403) and audited as `publish_refused`. The store checks visibility under the artifact's lock, so a concurrent publish cannot slip a version past it. | Validated (`tests/mcp/public_updates_spec.py`, `tests/http/public_updates_spec.py`) |
 | T20 | A gate answer is forged, replayed onto another question, or approves content the human never saw | On `2026-07-28` the question's `requestState` is signed over the artifact, the version shown, the client and the call's arguments; an answer without it, or with another request's, is declined (the SDK also seals the state to its request). On both eras the write must find the version the human was shown, else `conflict`. | Validated on both eras (`tests/mcp/public_updates_spec.py`) |
-| T21 | A client's token is removed, but what it minted still works | Upload URLs carry their client and are refused once that client is gone or lost `drop:write`. Private view links are bearer capabilities: they last until they expire (`link_ttl_max`), `artifact_revoke_links` or a visibility change bumps the epoch, or the secret is rotated. | Upload refusal in `tests/http/public_updates_spec.py`; view links are a documented limit |
+| T21 | A client's token is removed, but what it minted still works | Upload URLs carry their client and are refused once that client is gone or lost `vitrine:write`. Private view links are bearer capabilities: they last until they expire (`link_ttl_max`), `artifact_revoke_links` or a visibility change bumps the epoch, or the secret is rotated. | Upload refusal in `tests/http/public_updates_spec.py`; view links are a documented limit |
 
 ## 4. Secrets
 
 | Secret | Where it lives | Notes |
 |---|---|---|
-| `DROP_SECRET` | Server environment (a Kubernetes Secret, a Docker secret, …) | At least 32 bytes. `mcp-drop secret new` generates one. |
-| `DROP_TOKENS` | Server environment | **Hashes only**, so a leak of the server's configuration reveals no usable token |
-| Plaintext tokens | Each client's own configuration | `mcp-drop token new <name>` prints the token and its hash line, and writes nothing to disk |
+| `VITRINE_SECRET` | Server environment (a Kubernetes Secret, a Docker secret, …) | At least 32 bytes. `mcp-vitrine secret new` generates one. |
+| `VITRINE_TOKENS` | Server environment | **Hashes only**, so a leak of the server's configuration reveals no usable token |
+| Plaintext tokens | Each client's own configuration | `mcp-vitrine token new <name>` prints the token and its hash line, and writes nothing to disk |
 
-`mcp-drop config check` prints the effective configuration with both secrets redacted.
+`mcp-vitrine config check` prints the effective configuration with both secrets redacted.
 
 ## 5. Residual risks
 
 | # | Risk | Mitigation and guidance |
 |---|---|---|
 | R1 | **Plain HTTP deployments** expose tokens and links to the network path | Use TLS everywhere except `127.0.0.1`. `config check` and `serve` warn when `public_base_url` is `http://` and the bind address is not loopback. |
-| R2 | An agent with shell access can read its own token and call drop directly | No HTTP route can make anything public or change public content, so a `write` token is no path to public. But elicitation is answered by the MCP client, and the server cannot tell a human's answer from the client's: an agent that holds a `drop:publish` token *and* can speak MCP itself can approve its own publish. Give `drop:publish` only to clients whose host shows the question to a person and keeps the token out of the agent's reach. An out-of-band approval link (roadmap) removes this. |
+| R2 | An agent with shell access can read its own token and call vitrine directly | No HTTP route can make anything public or change public content, so a `write` token is no path to public. But elicitation is answered by the MCP client, and the server cannot tell a human's answer from the client's: an agent that holds a `vitrine:publish` token *and* can speak MCP itself can approve its own publish. Give `vitrine:publish` only to clients whose host shows the question to a person and keeps the token out of the agent's reach. An out-of-band approval link (roadmap) removes this. |
 | R3 | The human approves without reading | The prompt names the title, the file count and the consequence. A future option can add a short content preview. |
 | R4 | Public URLs last until revoked: the id is the secret | That is the meaning of "anyone with the link". `artifact_set_visibility(private)` or `artifact_delete` removes access at the origin immediately; public views are `max-age=60`, so a shared cache or CDN may serve them for up to a minute longer. |
 | R5 | A single replica means downtime on restart | Acceptable for the target scale; the `Store` seam is the path to more replicas |

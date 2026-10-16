@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: drop
+  name: vitrine
 spec:
   selector:
-    app.kubernetes.io/name: drop
+    app.kubernetes.io/name: vitrine
   ports:
     - name: http
       port: 8080

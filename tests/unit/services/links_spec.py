@@ -10,15 +10,15 @@ from datetime import timedelta
 
 import pytest
 
-from mcp_drop.config import Settings
-from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import NotFound
-from mcp_drop.domain.models import Artifact, LinkKind, Version
-from mcp_drop.domain.paths import choose_entry
-from mcp_drop.services.links import LinkPolicy, LinkService
+from mcp_vitrine.config import Settings
+from mcp_vitrine.domain.clock import Clock
+from mcp_vitrine.domain.errors import NotFound
+from mcp_vitrine.domain.models import Artifact, LinkKind, Version
+from mcp_vitrine.domain.paths import choose_entry
+from mcp_vitrine.services.links import LinkPolicy, LinkService
 from tests.conftest import FrozenClock
 
-BASE = "https://drop.example.com"
+BASE = "https://vitrine.example.com"
 SECRET = b"0123456789abcdef0123456789abcdef"
 ID = "k7m2q9x4tz3wbn6r"
 CLIENT = "hermes"

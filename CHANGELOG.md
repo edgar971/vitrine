@@ -18,13 +18,13 @@ Each version's section is generated from its Conventional Commits by git-cliff
   coverage, `pip-audit`), pre-commit with the same gates, and Dependabot for uv and GitHub Actions.
 - M0 — `LICENSE` (MIT), `CONTRIBUTING.md`, `SECURITY.md`, this changelog, and the first four ADRs
   in [`docs/adr/`](docs/adr/).
-- The package skeleton `src/mcp_drop/` (a version and an entry point that reports the build has not
+- The package skeleton `src/mcp_vitrine/` (a version and an entry point that reports the build has not
   started) and the spec that covers it.
 - M1 — `domain`: the models that mirror `meta.json`, the typed errors, 80-bit Crockford ids, the
   one path rule and the `data_dir` layout.
 - M1 — `storage`: the `Store` protocol and `FileStore` (write protocol, retention, quota, path
   rules, sweeps), plus the contract suite every `Store` implementation must pass.
-- M1 — `config`: flags, `DROP_*` variables and a TOML file, with secrets accepted from the
+- M1 — `config`: flags, `VITRINE_*` variables and a TOML file, with secrets accepted from the
   environment only and unknown keys refused.
 - M1 — `services`: `LinkService` (view and upload links), `ArtifactService` (including idempotent
   create), `AuditLog` (appended and fsync'd before a change is acknowledged) and `RateLimiter`.
@@ -48,12 +48,12 @@ Each version's section is generated from its Conventional Commits by git-cliff
   `noindex`, per-prefix caching), the Markdown, CSV/TSV and JSON renderers, single-use
   `PUT /u/{sig}` uploads, the multipart `/api/artifacts` API with per-scope bearer auth, and
   `/healthz`.
-- M3 — `mcp_drop.app.build_app`: `/mcp` and the web routes in one app behind one middleware stack
+- M3 — `mcp_vitrine.app.build_app`: `/mcp` and the web routes in one app behind one middleware stack
   (trusted proxy headers, a redacting access log, the Host/Origin guard and streaming body
   limits), plus the per-IP view bucket with `Retry-After`.
 - M3 — specs over real uvicorn for every ported spike check (headers, traversal, limits,
   rebinding), the route-table spec, log redaction, and a Playwright Chromium spec for the sandbox.
-- M4 — the `mcp-drop` CLI (spec § 9): `serve`, `config check`, `token new`/`hash`, `secret new`,
+- M4 — the `mcp-vitrine` CLI (spec § 9): `serve`, `config check`, `token new`/`hash`, `secret new`,
   `sweep`, `audit`, `backup` and `migrate`, with exit status 0, 1 (failed) or 2 (misconfigured).
 - M4 — `serve` refuses data with an older or newer `schema_version`, sweeps once before the first
   request and then every `sweep_interval` (a failed sweep is logged and retried, never fatal), and
@@ -68,15 +68,15 @@ Each version's section is generated from its Conventional Commits by git-cliff
   `/data`, fine with `--read-only` and `--cap-drop ALL`, a `HEALTHCHECK` that sends an allowed
   `Host`, and an optional `ca_bundle` build secret for builds behind a TLS-intercepting proxy.
   CI builds amd64 and arm64 and smoke-tests the image read-only against `/healthz`.
-- M4 — `examples/`: `drop.toml`, Compose with Caddy, and Kubernetes manifests (Pod Security
+- M4 — `examples/`: `vitrine.toml`, Compose with Caddy, and Kubernetes manifests (Pod Security
   `restricted`, one `Recreate` replica, RWO volume, probes with a `Host` header, default-deny
   network policy without egress), validated in CI with kubeconform, `docker compose config` and
   `caddy adapt`; a spec loads the example configs with the server's own rules.
 - M4 — `docs/configuration.md`, generated from `Settings` (`just docs`); every setting now
   carries its group and description, and a spec fails when the committed file is stale.
-- M5 — the Hermes Agent plugin (`integrations/hermes/drop/`): `artifact_publish_files` streams
+- M5 — the Hermes Agent plugin (`integrations/hermes/vitrine/`): `artifact_publish_files` streams
   files or a folder to `/api/artifacts` as a private artifact (or a new version, with `merge`),
-  the `drop:drop` skill, and the `/share` and `/artifacts` commands. Standard library only, for
+  the `vitrine:vitrine` skill, and the `/share` and `/artifacts` commands. Standard library only, for
   Python 3.11+; a spec drives a real server through it, and CI runs `hermes plugins validate`.
 - M5 — the README quick start with `uvx`, and connection snippets for Claude Code, Hermes Agent
   and other MCP clients.
@@ -96,14 +96,14 @@ Each version's section is generated from its Conventional Commits by git-cliff
 ### Security
 
 - Adding a version to a **public** artifact now goes through the public gate (ADR 0005, security
-  T19). `artifact_update` asks the human when the token holds `drop:publish` and is refused
+  T19). `artifact_update` asks the human when the token holds `vitrine:publish` and is refused
   without it; `PUT /api/artifacts/{id}` and upload URLs answer 403. Before, a `write` token could
   put new content live on a public artifact.
 - A gate answer is bound to its question (security T20): on `2026-07-28` the question's
   `requestState` is signed over the artifact, the version shown, the client and the arguments,
   and on both eras the write must find the version the human saw, else `conflict`.
-- An upload URL stops working once its client is removed from `DROP_TOKENS` or loses
-  `drop:write` (security T21).
+- An upload URL stops working once its client is removed from `VITRINE_TOKENS` or loses
+  `vitrine:write` (security T21).
 - MCP tool errors mask every failure that is not worded for the caller as `internal error`, as
   HTTP already did; filesystem and parser detail no longer reach the client.
 - `config check` and `serve` warn when `public_base_url` is `http://` and the bind address is not
@@ -115,10 +115,10 @@ Each version's section is generated from its Conventional Commits by git-cliff
 
 - The release workflow pushes, smoke-tests and signs the image before publishing to PyPI, and
   runs `twine check` first, so a failed release no longer spends a PyPI version.
-- `mcp_drop.__version__` reads the installed package's metadata; `pyproject.toml` is the only
+- `mcp_vitrine.__version__` reads the installed package's metadata; `pyproject.toml` is the only
   place the version is written.
 - The staging sweep takes a grace period: a sweep beside a running server (the periodic one and
-  `mcp-drop sweep`) spares staging and unreferenced versions younger than 10 minutes, which a live
+  `mcp-vitrine sweep`) spares staging and unreferenced versions younger than 10 minutes, which a live
   write is still placing. Only the startup sweep clears everything.
 - An upload URL now signs the client that asked for it (`"upload"|id|expires|nonce|client`), so
   an upload is attributed to, and rate-limited as, that client.
@@ -144,8 +144,8 @@ Each version's section is generated from its Conventional Commits by git-cliff
 - A list cursor with a time without a zone returned 500; it is now 400.
 - One torn line in the audit log made every read of it fail, which stopped new uploads and every
   sweep. Unreadable lines are now skipped and logged, and the next append starts a fresh line.
-- `serve` refused to start in a shell that also sets the client-side `DROP_URL`/`DROP_TOKEN`.
+- `serve` refused to start in a shell that also sets the client-side `VITRINE_URL`/`VITRINE_TOKEN`.
 - `just image` failed on macOS's bash 3.2 when `CA` was not set.
 - The Hermes docs asked for an `mcp_servers` key equal to the plugin's own name, which makes Hermes
-  register the server's tools without ever exposing them; the key is now `drop_mcp`, and the plugin
+  register the server's tools without ever exposing them; the key is now `vitrine_mcp`, and the plugin
   names the server's `artifact_*` tools instead of a prefix Hermes never produces.

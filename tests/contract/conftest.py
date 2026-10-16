@@ -6,9 +6,9 @@ from collections.abc import Callable
 
 import pytest
 
-from mcp_drop.domain.clock import Clock
-from mcp_drop.storage.base import Store, StoreConfig
-from mcp_drop.storage.filesystem import FileStore
+from mcp_vitrine.domain.clock import Clock
+from mcp_vitrine.storage.base import Store, StoreConfig
+from mcp_vitrine.storage.filesystem import FileStore
 
 # Adding a Store implementation is one line: the suite then runs against all of them.
 STORE_FACTORIES: dict[str, Callable[[StoreConfig, Clock], Store]] = {"filesystem": FileStore}

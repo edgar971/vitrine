@@ -10,20 +10,20 @@ from typing import Any
 import httpx2
 import pytest
 
-import drop
-from drop.client import EARLY_CLOSE, DropError, Endpoint, collect
-from mcp_drop.domain.models import Visibility
-from mcp_drop.services.container import Services
+import vitrine
+from mcp_vitrine.domain.models import Visibility
+from mcp_vitrine.services.container import Services
 from tests.integrations.conftest import Recorder
+from vitrine.client import EARLY_CLOSE, Endpoint, VitrineError, collect
 
-PLUGIN = Path(drop.__file__).parent
+PLUGIN = Path(vitrine.__file__).parent
 # The oldest Python Hermes runs on (its requires-python); the plugin runs on Hermes's interpreter.
 HERMES_PYTHON = (3, 11)
 
 
 def published(**args: Any) -> dict[str, Any]:  # noqa: ANN401
     """Call the tool as Hermes's registry does, and read back its JSON result."""
-    result: dict[str, Any] = json.loads(drop.publish(args, task_id="t1"))
+    result: dict[str, Any] = json.loads(vitrine.publish(args, task_id="t1"))
     return result
 
 
@@ -31,7 +31,7 @@ def published(**args: Any) -> dict[str, Any]:  # noqa: ANN401
 def registered() -> Recorder:
     """What ``register()`` handed Hermes."""
     recorder = Recorder()
-    drop.register(recorder)
+    vitrine.register(recorder)
     return recorder
 
 
@@ -49,18 +49,20 @@ class DescribeRegistering:
         declared = "".join(f"  - {name}\n" for name in registered.tools)
         assert manifest.endswith(f"provides_tools:\n{declared}")
 
-    def it_puts_the_tool_in_the_drop_toolset(self, registered: Recorder) -> None:
-        assert registered.tools[drop.TOOL]["toolset"] == "drop"
+    def it_puts_the_tool_in_the_vitrine_toolset(self, registered: Recorder) -> None:
+        assert registered.tools[vitrine.TOOL]["toolset"] == "vitrine"
 
     def it_offers_no_way_to_ask_for_visibility(self, registered: Recorder) -> None:
-        properties = registered.tools[drop.TOOL]["schema"]["parameters"]["properties"]
+        properties = registered.tools[vitrine.TOOL]["schema"]["parameters"]["properties"]
         assert not {"visibility", "public"} & set(properties)
 
     def it_refuses_parameters_the_schema_does_not_name(self, registered: Recorder) -> None:
-        assert registered.tools[drop.TOOL]["schema"]["parameters"]["additionalProperties"] is False
+        assert (
+            registered.tools[vitrine.TOOL]["schema"]["parameters"]["additionalProperties"] is False
+        )
 
     def it_registers_the_skill_from_its_file(self, registered: Recorder) -> None:
-        assert registered.skills["drop"].is_file()
+        assert registered.skills["vitrine"].is_file()
 
     def it_registers_the_share_and_artifacts_commands(self, registered: Recorder) -> None:
         assert sorted(registered.commands) == ["artifacts", "share"]
@@ -69,9 +71,9 @@ class DescribeRegistering:
         def it_does_not_offer_the_tool(
             self, registered: Recorder, monkeypatch: pytest.MonkeyPatch
         ) -> None:
-            monkeypatch.delenv("DROP_URL", raising=False)
-            monkeypatch.delenv("DROP_TOKEN", raising=False)
-            assert registered.tools[drop.TOOL]["check_fn"]() is False
+            monkeypatch.delenv("VITRINE_URL", raising=False)
+            monkeypatch.delenv("VITRINE_TOKEN", raising=False)
+            assert registered.tools[vitrine.TOOL]["check_fn"]() is False
 
 
 class DescribePublishingFiles:
@@ -162,37 +164,37 @@ class DescribePublishingFiles:
         def result(
             self, connected: str, site: Path, monkeypatch: pytest.MonkeyPatch
         ) -> dict[str, Any]:
-            monkeypatch.setenv("DROP_TOKEN", "a-guess")
+            monkeypatch.setenv("VITRINE_TOKEN", "a-guess")
             return published(paths=["site/index.html"])
 
         def it_reports_the_server_s_refusal(self, result: dict[str, Any]) -> None:
             assert result == {
                 "success": False,
-                "error": "drop refused the request (401): unauthorized",
+                "error": "vitrine refused the request (401): unauthorized",
             }
 
     class WhenTheServerHangsUpBeforeReadingTheUpload:
-        def it_says_what_drop_refuses_unread(
+        def it_says_what_vitrine_refuses_unread(
             self, site: Path, monkeypatch: pytest.MonkeyPatch, hang_up: str
         ) -> None:
-            monkeypatch.setenv("DROP_URL", hang_up)
-            monkeypatch.setenv("DROP_TOKEN", "t")
+            monkeypatch.setenv("VITRINE_URL", hang_up)
+            monkeypatch.setenv("VITRINE_TOKEN", "t")
             (site / "big.bin").write_bytes(b"x" * 8_000_000)
             assert published(paths=["site/big.bin"])["error"] == EARLY_CLOSE
 
     class WhenTheServerRefusesTheBody:
         def it_passes_the_server_s_reason_on(self, connected: str, site: Path) -> None:
             result = published(paths=["site"], expires_in="soon")
-            assert result["error"].startswith("drop refused the request (400): ")
+            assert result["error"].startswith("vitrine refused the request (400): ")
 
     class WhenTheServerIsUnreachable:
         def it_says_where_it_tried(
             self, site: Path, monkeypatch: pytest.MonkeyPatch, port: int
         ) -> None:
-            monkeypatch.setenv("DROP_URL", f"http://127.0.0.1:{port}")
-            monkeypatch.setenv("DROP_TOKEN", "t")
+            monkeypatch.setenv("VITRINE_URL", f"http://127.0.0.1:{port}")
+            monkeypatch.setenv("VITRINE_TOKEN", "t")
             result = published(paths=["site"])
-            assert result["error"].startswith(f"cannot reach drop at http://127.0.0.1:{port}")
+            assert result["error"].startswith(f"cannot reach vitrine at http://127.0.0.1:{port}")
 
     class WhenAPathDoesNotExist:
         def it_names_the_path(self, connected: str, site: Path) -> None:
@@ -217,39 +219,39 @@ class DescribeCollectingFiles:
 
     def it_refuses_two_files_with_one_name(self, site: Path) -> None:
         (site / "img" / "index.html").write_text("again")
-        with pytest.raises(DropError, match=r"both be stored as index\.html"):
+        with pytest.raises(VitrineError, match=r"both be stored as index\.html"):
             collect(["site/index.html", "site/img/index.html"], site.parent)
 
     def it_refuses_a_name_with_a_quote(self, site: Path) -> None:
         (site / 'say "hi".txt').write_text("hi")
-        with pytest.raises(DropError, match="quote"):
+        with pytest.raises(VitrineError, match="quote"):
             collect([str(site / 'say "hi".txt')], site.parent)
 
     def it_refuses_a_folder_with_nothing_to_upload(self, tmp_path: Path) -> None:
         (tmp_path / "empty").mkdir()
-        with pytest.raises(DropError, match="nothing to upload"):
+        with pytest.raises(VitrineError, match="nothing to upload"):
             collect(["empty"], tmp_path)
 
     def it_refuses_more_files_than_the_guard(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("drop.client.MAX_FILES", 2)
+        monkeypatch.setattr("vitrine.client.MAX_FILES", 2)
         for name in ("a", "b", "c"):
             (tmp_path / name).write_text(name)
-        with pytest.raises(DropError, match="more than 2 files"):
+        with pytest.raises(VitrineError, match="more than 2 files"):
             collect([str(tmp_path)], tmp_path)
 
 
 class DescribeTheEndpoint:
     def it_refuses_a_url_that_is_not_http(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("DROP_URL", "file:///etc/passwd")
-        monkeypatch.setenv("DROP_TOKEN", "t")
-        with pytest.raises(DropError, match="http or https"):
+        monkeypatch.setenv("VITRINE_URL", "file:///etc/passwd")
+        monkeypatch.setenv("VITRINE_TOKEN", "t")
+        with pytest.raises(VitrineError, match="http or https"):
             Endpoint.from_env()
 
     def it_says_which_variables_are_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("DROP_URL", raising=False)
-        with pytest.raises(DropError, match="DROP_URL and DROP_TOKEN"):
+        monkeypatch.delenv("VITRINE_URL", raising=False)
+        with pytest.raises(VitrineError, match="VITRINE_URL and VITRINE_TOKEN"):
             Endpoint.from_env()
 
 
@@ -288,7 +290,7 @@ class DescribeTheArtifactsCommand:
     def it_reports_a_refusal_as_its_answer(
         self, registered: Recorder, connected: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("DROP_TOKEN", "a-guess")
+        monkeypatch.setenv("VITRINE_TOKEN", "a-guess")
         assert registered.commands["artifacts"]("") == (
-            "drop refused the request (401): unauthorized"
+            "vitrine refused the request (401): unauthorized"
         )

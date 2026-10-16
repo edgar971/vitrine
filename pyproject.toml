@@ -3,7 +3,7 @@ requires = ["uv_build>=0.13,<0.14"]
 build-backend = "uv_build"
 
 [project]
-name = "mcp-drop"
+name = "mcp-vitrine"
 version = "0.1.0"
 description = "Self-hosted MCP server that turns agent output into private (signed, expiring, revocable) or public links."
 readme = "README.md"
@@ -34,13 +34,13 @@ dependencies = [
 metrics = ["prometheus-client>=0.26"]
 
 [project.scripts]
-mcp-drop = "mcp_drop.cli:main"
+mcp-vitrine = "mcp_vitrine.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/edgar971/drop"
-Documentation = "https://github.com/edgar971/drop/tree/main/docs"
-Changelog = "https://github.com/edgar971/drop/blob/main/CHANGELOG.md"
-Security = "https://github.com/edgar971/drop/blob/main/SECURITY.md"
+Homepage = "https://github.com/edgar971/vitrine"
+Documentation = "https://github.com/edgar971/vitrine/tree/main/docs"
+Changelog = "https://github.com/edgar971/vitrine/blob/main/CHANGELOG.md"
+Security = "https://github.com/edgar971/vitrine/blob/main/SECURITY.md"
 
 # Same gates as CI (docs/design.md § 10). The browser group is only needed for the
 # `browser` marker, which the default run deselects.
@@ -112,9 +112,9 @@ ban-relative-imports = "all"
 # carry fake secrets and non-loopback hosts on purpose.
 "tests/**" = ["D101", "D102", "D103", "D106", "S101", "S104", "S105", "PLR2004"]
 # The domain errors are named as docs/design.md § 3 names them: NotFound, Expired, Conflict, …
-"src/mcp_drop/domain/errors.py" = ["N818"]
+"src/mcp_vitrine/domain/errors.py" = ["N818"]
 # A tool's parameters are its schema (spec § 5.1): one per documented argument, plus injections.
-"src/mcp_drop/mcp/tools.py" = ["PLR0913", "PLR0917"]
+"src/mcp_vitrine/mcp/tools.py" = ["PLR0913", "PLR0917"]
 # Hermes loads a plugin as a package under a name of its own choosing, so it imports itself
 # relatively.
 "integrations/hermes/**" = ["TID252"]
@@ -124,7 +124,7 @@ ban-relative-imports = "all"
 [tool.mypy]
 python_version = "3.15"
 strict = true
-files = ["src", "tests", "integrations/hermes/drop", "scripts"]
+files = ["src", "tests", "integrations/hermes/vitrine", "scripts"]
 mypy_path = "integrations/hermes"
 plugins = ["pydantic.mypy"]
 warn_unreachable = true
@@ -137,7 +137,7 @@ warn_required_dynamic_aliases = true
 [tool.pytest.ini_options]
 minversion = "9.1"
 testpaths = ["tests"]
-# The Hermes plugin is not part of the package; the specs import it as Hermes does, as `drop`.
+# The Hermes plugin is not part of the package; the specs import it as Hermes does, as `vitrine`.
 pythonpath = ["integrations/hermes", "scripts"]
 python_files = ["*_spec.py"]
 python_classes = ["Describe*", "When*"]
@@ -157,7 +157,7 @@ markers = ["browser: drives a real Chromium (Playwright); run with `-m browser`"
 
 [tool.coverage.run]
 branch = true
-source = ["mcp_drop", "drop"]
+source = ["mcp_vitrine", "vitrine"]
 
 [tool.coverage.report]
 fail_under = 90
@@ -166,21 +166,21 @@ show_missing = true
 # Dependencies point one way (docs/design.md § 3): mcp/web -> services -> storage -> domain.
 # `|` marks modules that must not import each other; domain sits below storage, which uses it.
 [tool.importlinter]
-root_package = "mcp_drop"
+root_package = "mcp_vitrine"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "layers"
 type = "layers"
 layers = [
-  "mcp_drop.mcp | mcp_drop.web",
-  "mcp_drop.services",
-  "mcp_drop.storage",
-  "mcp_drop.domain",
+  "mcp_vitrine.mcp | mcp_vitrine.web",
+  "mcp_vitrine.services",
+  "mcp_vitrine.storage",
+  "mcp_vitrine.domain",
 ]
 
 [[tool.importlinter.contracts]]
 name = "core is framework-free"
 type = "forbidden"
-source_modules = ["mcp_drop.domain", "mcp_drop.storage", "mcp_drop.services"]
+source_modules = ["mcp_vitrine.domain", "mcp_vitrine.storage", "mcp_vitrine.services"]
 forbidden_modules = ["fastmcp", "starlette", "uvicorn"]

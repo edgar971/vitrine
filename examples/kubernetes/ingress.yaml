@@ -2,20 +2,20 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: drop
+  name: vitrine
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: [drop.example.com]
-      secretName: drop-tls
+    - hosts: [vitrine.example.com]
+      secretName: vitrine-tls
   rules:
-    - host: drop.example.com
+    - host: vitrine.example.com
       http:
         paths:
           - path: /
             pathType: Prefix
             backend:
               service:
-                name: drop
+                name: vitrine
                 port:
                   name: http

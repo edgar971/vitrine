@@ -6,15 +6,15 @@ import hashlib
 
 import pytest
 
-from mcp_drop.config import TokenEntry
-from mcp_drop.domain.models import Scope
-from mcp_drop.mcp.auth import HashedTokenVerifier
+from mcp_vitrine.config import TokenEntry
+from mcp_vitrine.domain.models import Scope
+from mcp_vitrine.mcp.auth import HashedTokenVerifier
 
 TOKEN = "s3cret-token-for-hermes"
 
 
 def _entry(name: str, token: str, scopes: frozenset[Scope]) -> TokenEntry:
-    """A ``DROP_TOKENS`` entry for ``token``."""
+    """A ``VITRINE_TOKENS`` entry for ``token``."""
     return TokenEntry(name=name, sha256=hashlib.sha256(token.encode()).hexdigest(), scopes=scopes)
 
 
@@ -39,7 +39,7 @@ class DescribeHashedTokenVerifier:
         async def it_carries_the_scopes(self, verifier: HashedTokenVerifier) -> None:
             token = await verifier.verify_token("viewer-token")
             assert token is not None
-            assert token.scopes == ["drop:read"]
+            assert token.scopes == ["vitrine:read"]
 
     class WhenTheTokenIsUnknown:
         async def it_refuses_it(self, verifier: HashedTokenVerifier) -> None:

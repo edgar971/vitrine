@@ -12,10 +12,10 @@ import httpx2
 import pytest
 import uvicorn
 
-from mcp_drop.app import build_app
-from mcp_drop.config import Settings, load_settings
-from mcp_drop.domain.models import ArtifactDraft, PublishedArtifact
-from mcp_drop.services.container import Services
+from mcp_vitrine.app import build_app
+from mcp_vitrine.config import Settings, load_settings
+from mcp_vitrine.domain.models import ArtifactDraft, PublishedArtifact
+from mcp_vitrine.services.container import Services
 from tests.conftest import FrozenClock
 
 CLIENT = "hermes"
@@ -36,7 +36,7 @@ FILES = {
 
 
 def token_hash(token: str) -> str:
-    """The ``DROP_TOKENS`` form of a token."""
+    """The ``VITRINE_TOKENS`` form of a token."""
     return hashlib.sha256(token.encode()).hexdigest()
 
 
@@ -61,7 +61,7 @@ def port() -> int:
 
 @pytest.fixture
 def overrides() -> dict[str, str]:
-    """Extra ``DROP_*`` variables; a nested class narrows a limit by overriding this."""
+    """Extra ``VITRINE_*`` variables; a nested class narrows a limit by overriding this."""
     return {}
 
 
@@ -71,10 +71,10 @@ def settings(
 ) -> Settings:
     """Two clients, one with every scope and one that only reads, on this spec's origin."""
     monkeypatch.setenv(
-        "DROP_TOKENS",
+        "VITRINE_TOKENS",
         f"{CLIENT}:{token_hash(FULL_TOKEN)},viewer:{token_hash(READ_TOKEN)}:read",
     )
-    monkeypatch.setenv("DROP_PUBLIC_BASE_URL", f"http://127.0.0.1:{port}")
+    monkeypatch.setenv("VITRINE_PUBLIC_BASE_URL", f"http://127.0.0.1:{port}")
     for key, value in overrides.items():
         monkeypatch.setenv(key, value)
     return load_settings()
@@ -88,7 +88,7 @@ def services(settings: Settings, clock: FrozenClock) -> Services:
 
 @pytest.fixture
 def base(settings: Settings, services: Services, port: int) -> Iterator[str]:
-    """``build_app`` under uvicorn, configured as ``mcp-drop serve`` runs it."""
+    """``build_app`` under uvicorn, configured as ``mcp-vitrine serve`` runs it."""
     config = uvicorn.Config(
         build_app(settings, services),
         host="127.0.0.1",

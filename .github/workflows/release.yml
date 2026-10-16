@@ -22,7 +22,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE: ghcr.io/edgar971/drop
+  IMAGE: ghcr.io/edgar971/vitrine
 
 jobs:
   ci:
@@ -135,10 +135,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # PyPI (or TestPyPI, for a pre-release) trusts this workflow, in this environment, to publish
-    # mcp-drop: no token is stored.
+    # mcp-vitrine: no token is stored.
     environment:
       name: ${{ needs.version.outputs.prerelease == 'true' && 'testpypi' || 'pypi' }}
-      url: ${{ needs.version.outputs.prerelease == 'true' && 'https://test.pypi.org' || 'https://pypi.org' }}/project/mcp-drop/${{ needs.version.outputs.version }}/
+      url: ${{ needs.version.outputs.prerelease == 'true' && 'https://test.pypi.org' || 'https://pypi.org' }}/project/mcp-vitrine/${{ needs.version.outputs.version }}/
     permissions:
       contents: read
       id-token: write

@@ -10,10 +10,10 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from mcp import MCPError
-from mcp_drop.config import Settings, load_settings
-from mcp_drop.domain.models import ArtifactQuery
-from mcp_drop.services.audit import AuditEvent, DenialReason
-from mcp_drop.services.container import Services
+from mcp_vitrine.config import Settings, load_settings
+from mcp_vitrine.domain.models import ArtifactQuery
+from mcp_vitrine.services.audit import AuditEvent, DenialReason
+from mcp_vitrine.services.container import Services
 from tests.mcp.conftest import Call
 
 Events = Callable[[], tuple[AuditEvent, ...]]
@@ -24,7 +24,7 @@ class DescribeRateLimits:
     class WhenTheWritesBucketIsEmpty:
         @pytest.fixture
         def settings(self, environment: None, monkeypatch: pytest.MonkeyPatch) -> Settings:
-            monkeypatch.setenv("DROP_RATE_WRITES", "1/h")
+            monkeypatch.setenv("VITRINE_RATE_WRITES", "1/h")
             return load_settings()
 
         async def it_fails_with_the_wait(self, call: Call) -> None:
@@ -54,7 +54,7 @@ class DescribeRateLimits:
     class WhenTheReadsBucketIsEmpty:
         @pytest.fixture
         def settings(self, environment: None, monkeypatch: pytest.MonkeyPatch) -> Settings:
-            monkeypatch.setenv("DROP_RATE_READS", "1/h")
+            monkeypatch.setenv("VITRINE_RATE_READS", "1/h")
             return load_settings()
 
         async def it_limits_resources_too(
@@ -67,7 +67,7 @@ class DescribeRateLimits:
     class WhenALimitIsOff:
         @pytest.fixture
         def settings(self, environment: None, monkeypatch: pytest.MonkeyPatch) -> Settings:
-            monkeypatch.setenv("DROP_RATE_LINKS", "off")
+            monkeypatch.setenv("VITRINE_RATE_LINKS", "off")
             return load_settings()
 
         async def it_never_refuses(self, call: Call, published: dict[str, Any]) -> None:

@@ -1,4 +1,4 @@
-# drop roadmap
+# vitrine roadmap
 
 `0.1.0` is built and about to be released: everything below M0–M5 is merged, `just check` is
 green on Python 3.15, and the release procedure lives in
@@ -10,7 +10,7 @@ green on Python 3.15, and the release procedure lives in
 | M1 core | `config`, `domain`, `storage.FileStore`, `services` (artifacts, links, audit, limits) |
 | M2 MCP layer | hashed-token auth and scopes, tools, resources, the `share` prompt, the two-era public gate |
 | M3 web layer | `/a` and `/s` views, `/api/artifacts`, `/u/{sig}`, `/healthz`, the edge middleware |
-| M4 operations | the `mcp-drop` CLI, metrics, the container image, `examples/` |
+| M4 operations | the `mcp-vitrine` CLI, metrics, the container image, `examples/` |
 | M5 integrations | the Hermes plugin, client snippets, the release workflow |
 
 ## The `0.1.0` release
@@ -29,7 +29,7 @@ Ordered by expected value. Each item already has a seam in the [design](design.m
 1. A content preview in the public-gate prompt, so the human approves what they actually saw
    (security R3).
 2. An out-of-band approval link, for clients that cannot elicit — and for the agent that holds a
-   `drop:publish` token and can answer its own prompt (security R2).
+   `vitrine:publish` token and can answer its own prompt (security R2).
 3. An S3-compatible `Store` for more than one replica.
 4. OAuth/OIDC auth for multi-user deployments.
 5. More renderers (ipynb, mermaid, diff).

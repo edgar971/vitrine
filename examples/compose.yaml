@@ -1,32 +1,32 @@
-# drop behind Caddy, which gets and renews the TLS certificate.
+# vitrine behind Caddy, which gets and renews the TLS certificate.
 #
 #   1. Point DNS for your domain at this host.
 #   2. Write .env beside this file (never commit it):
-#        DROP_DOMAIN=drop.example.com
-#        DROP_SECRET=<mcp-drop secret new>
-#        DROP_TOKENS=<entries from mcp-drop token new>
+#        VITRINE_DOMAIN=vitrine.example.com
+#        VITRINE_SECRET=<mcp-vitrine secret new>
+#        VITRINE_TOKENS=<entries from mcp-vitrine token new>
 #   3. docker compose up -d
 #
-# Only Caddy publishes ports. drop trusts X-Forwarded-For from the `edge` subnet alone, which
-# only Caddy and drop are on.
+# Only Caddy publishes ports. vitrine trusts X-Forwarded-For from the `edge` subnet alone, which
+# only Caddy and vitrine are on.
 
-name: drop
+name: vitrine
 
 services:
-  drop:
-    image: ghcr.io/edgar971/drop:0.1.0
+  vitrine:
+    image: ghcr.io/edgar971/vitrine:0.1.0
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     environment:
-      DROP_SECRET: ${DROP_SECRET:?set DROP_SECRET in .env}
-      DROP_TOKENS: ${DROP_TOKENS:?set DROP_TOKENS in .env}
-      DROP_PUBLIC_BASE_URL: https://${DROP_DOMAIN:?set DROP_DOMAIN in .env}
-      DROP_FORWARDED_ALLOW_IPS: 172.30.80.0/24
-      DROP_LOG_FORMAT: json
+      VITRINE_SECRET: ${VITRINE_SECRET:?set VITRINE_SECRET in .env}
+      VITRINE_TOKENS: ${VITRINE_TOKENS:?set VITRINE_TOKENS in .env}
+      VITRINE_PUBLIC_BASE_URL: https://${VITRINE_DOMAIN:?set VITRINE_DOMAIN in .env}
+      VITRINE_FORWARDED_ALLOW_IPS: 172.30.80.0/24
+      VITRINE_LOG_FORMAT: json
     volumes:
-      - drop-data:/data
+      - vitrine-data:/data
     networks: [edge]
 
   caddy:
@@ -39,16 +39,16 @@ services:
       - "443:443"
       - "443:443/udp"
     environment:
-      DROP_DOMAIN: ${DROP_DOMAIN}
+      VITRINE_DOMAIN: ${VITRINE_DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-    depends_on: [drop]
+    depends_on: [vitrine]
     networks: [edge]
 
 volumes:
-  drop-data:
+  vitrine-data:
   caddy-data:
   caddy-config:
 

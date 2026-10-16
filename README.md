@@ -49,7 +49,7 @@ curl -s -H "Authorization: Bearer $TOKEN" -F title=Hello -F file=@index.html \
 Open the `url`: that is the whole product, a private expiring link to an HTML page.
 
 Serving beyond localhost? Set `VITRINE_PUBLIC_BASE_URL` to the address people will open, and read
-[operations](docs/operations.md) for TLS, backups and the container image.
+[operations](https://github.com/edgar971/vitrine/blob/main/docs/operations.md) for TLS, backups and the container image.
 
 ## Connect a client
 
@@ -104,7 +104,7 @@ The optional plugin publishes files already on disk (PDFs, images, a folder with
 hermes plugins install edgar971/vitrine/integrations/hermes/vitrine --enable
 ```
 
-See [integrations/hermes](integrations/hermes/) for details.
+See [integrations/hermes](https://github.com/edgar971/vitrine/tree/main/integrations/hermes/) for details.
 
 **Any other MCP client** that supports remote servers with headers:
 
@@ -122,6 +122,22 @@ See [integrations/hermes](integrations/hermes/) for details.
 Files too large to pass inline go through `artifact_upload_url`, which returns a single-use URL
 and a ready-made `curl -T` command.
 
+## What an agent can do
+
+| Tool | Scope | Does |
+|---|---|---|
+| `artifact_create` | `write` | Publish text files (HTML, Markdown, CSV, SVG, …) and get a private link |
+| `artifact_update` | `write` | Add a version behind the same id and link |
+| `artifact_upload_url` | `write` | A single-use URL for binaries and large files (`curl -T`) |
+| `artifact_delete` | `write` | Remove an artifact and every link to it |
+| `artifact_get` / `artifact_list` | `read` | Read metadata back, or find earlier artifacts |
+| `artifact_link` | `share` | Mint a fresh private link, with its own expiry |
+| `artifact_revoke_links` | `share` | Kill every private link issued so far |
+| `artifact_set_visibility` | `publish` | Make an artifact public, after a human approves |
+
+Agents also get `artifact://` resources to read an artifact back before revising it, and a
+`share` prompt. The full contract is in the [spec](https://github.com/edgar971/vitrine/blob/main/docs/spec.md) § 5.
+
 ## How it works
 
 - **One process, one port, one directory.** No database, no queue, no sidecar: artifacts are
@@ -134,22 +150,24 @@ and a ready-made `curl -T` command.
 - **Plain HTTP for browsers.** `/a/<id>/` views a public artifact, `/s/<sig>/` serves a private
   link, `/api/artifacts` takes uploads, `/healthz` answers probes.
 - **Configure it your way.** `VITRINE_*` environment variables or a TOML file; secrets only ever
-  come from the environment. Every key is in [configuration](docs/configuration.md).
+  come from the environment. Every key is in [configuration](https://github.com/edgar971/vitrine/blob/main/docs/configuration.md).
 
 ## Documents
 
-- [spec](docs/spec.md) — the contract: data model, MCP tools, HTTP routes, configuration, limits.
-- [design](docs/design.md) — how it is built: architecture, storage, flows, extension points.
-- [security](docs/security.md) — threat model, controls and residual risks.
-- [operations](docs/operations.md) — backup, restore, upgrades, monitoring, deployments.
-- [roadmap](docs/roadmap.md) — what is left before `0.1.0`, and what comes after.
-- [examples](examples/) — a TOML file, Compose with Caddy, Kubernetes manifests.
-- [adr](docs/adr/) — the decisions that are expensive to reverse.
+- [spec](https://github.com/edgar971/vitrine/blob/main/docs/spec.md) — the contract: data model, MCP tools, HTTP routes, configuration, limits.
+- [design](https://github.com/edgar971/vitrine/blob/main/docs/design.md) — how it is built: architecture, storage, flows, extension points.
+- [security](https://github.com/edgar971/vitrine/blob/main/docs/security.md) — threat model, controls and residual risks.
+- [operations](https://github.com/edgar971/vitrine/blob/main/docs/operations.md) — backup, restore, upgrades, monitoring, deployments.
+- [configuration](https://github.com/edgar971/vitrine/blob/main/docs/configuration.md) — every setting, generated from the code.
+- [roadmap](https://github.com/edgar971/vitrine/blob/main/docs/roadmap.md) — what is left before `0.1.0`, and what comes after.
+- [examples](https://github.com/edgar971/vitrine/tree/main/examples/) — a TOML file, Compose with Caddy, Kubernetes manifests.
+- [adr](https://github.com/edgar971/vitrine/tree/main/docs/adr/) — the decisions that are expensive to reverse.
+- [research](https://github.com/edgar971/vitrine/blob/main/docs/research.md) — the platform facts and alternatives behind the design.
 
 ## Contributing
 
-Bug reports and pull requests are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md), and
-[AGENTS.md](AGENTS.md) if you work with a coding agent. Report vulnerabilities through
-[SECURITY.md](SECURITY.md) rather than a public issue.
+Bug reports and pull requests are welcome — start with [CONTRIBUTING.md](https://github.com/edgar971/vitrine/blob/main/CONTRIBUTING.md), and
+[AGENTS.md](https://github.com/edgar971/vitrine/blob/main/AGENTS.md) if you work with a coding agent. Report vulnerabilities through
+[SECURITY.md](https://github.com/edgar971/vitrine/blob/main/SECURITY.md) rather than a public issue.
 
 MIT licensed.

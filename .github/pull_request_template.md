@@ -1,4 +1,7 @@
-<!-- The title is a Conventional Commit; it may become a changelog entry (CONTRIBUTING.md § Changelog). -->
+<!--
+The title is a Conventional Commit; it may become a changelog entry (CONTRIBUTING.md § Changelog).
+A release, a docs-only change or a security fix has its own template: CONTRIBUTING.md § Pull requests.
+-->
 
 ## What and why
 

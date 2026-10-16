@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from mcp_drop.domain.models import Scope
-from mcp_drop.mcp.policy import bucket_of, scope_of, tags
-from mcp_drop.services.limits import Bucket
+from mcp_vitrine.domain.models import Scope
+from mcp_vitrine.mcp.policy import bucket_of, scope_of, tags
+from mcp_vitrine.services.limits import Bucket
 
 
 class DescribeTags:

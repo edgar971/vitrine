@@ -5,8 +5,8 @@ from __future__ import annotations
 import httpx2
 import pytest
 
-from mcp_drop.domain.models import PublishedArtifact
-from mcp_drop.web.responses import SANDBOX_CSP
+from mcp_vitrine.domain.models import PublishedArtifact
+from mcp_vitrine.web.responses import SANDBOX_CSP
 
 
 def _get(http: httpx2.Client, published: PublishedArtifact, path: str) -> httpx2.Response:
@@ -101,7 +101,7 @@ class DescribeTheRenderers:
     class WhenTheOperatorDisabledTheRenderer:
         @pytest.fixture
         def overrides(self) -> dict[str, str]:
-            return {"DROP_RENDERERS": "csv"}
+            return {"VITRINE_RENDERERS": "csv"}
 
         def it_serves_the_file_itself(
             self, http: httpx2.Client, published: PublishedArtifact

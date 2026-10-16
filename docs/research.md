@@ -1,4 +1,4 @@
-# drop research
+# vitrine research
 
 The evidence behind the [spec](spec.md) and [design](design.md), gathered on 2026-10-15. Platform
 facts were checked against installed source (`fastmcp==4.1.0`, `mcp==2.3.0`) and the Hermes Agent
@@ -35,11 +35,11 @@ client-agnostic equivalent.
 
 ### FastMCP 4.1
 
-| Fact | Consequence for drop |
+| Fact | Consequence for vitrine |
 |---|---|
 | `mcp.http_app(path=…)` gives a Starlette ASGI app; `@mcp.custom_route` adds HTTP routes | One process and one port serve MCP and the views |
 | Custom routes are **not** covered by the auth provider | Every route authenticates itself, with a route-table test (security T3) |
-| `TokenVerifier` can be subclassed; `StaticTokenVerifier` is documented as "never use in production" (plaintext tokens) | drop's verifier checks SHA-256 hashes |
+| `TokenVerifier` can be subclassed; `StaticTokenVerifier` is documented as "never use in production" (plaintext tokens) | vitrine's verifier checks SHA-256 hashes |
 | `get_access_token().client_id` is available inside tools | Records the `source` client |
 | `ctx.elicit()` raises on `2026-07-28` connections. Those use the SEP-2322 guard pattern: return `InputRequiredResult`, read `ctx.input_responses` on the retry. | The public gate implements both (spec § 6.1) |
 | `ctx.elicit(response_type=None)` is refused; `bool` fails validation when a client accepts with `{}` | The consent form uses one boolean field with a default |
@@ -78,14 +78,14 @@ gateways.
 
 ## 5. The design spike
 
-Before any of drop was written, a throwaway spike implemented the load-bearing mechanisms —
+Before any of vitrine was written, a throwaway spike implemented the load-bearing mechanisms —
 `/mcp` auth, the views with their headers and 404s, signed links and their failure modes, path
 traversal, upload limits, DNS rebinding, the Chromium sandbox, and both elicitation eras — and
 checked them from the outside: 59 checks, all passing on Python 3.13 and on 3.15.0.
 
 The spike itself is gone. Every check it made is a spec under `tests/` that runs in CI, and the
 [threat model](security.md) § 3 names the spec holding each control. What the spike discovered
-about a *platform*, rather than about drop, is in the tables above.
+about a *platform*, rather than about vitrine, is in the tables above.
 
 Two of its findings are still load-bearing for CI:
 

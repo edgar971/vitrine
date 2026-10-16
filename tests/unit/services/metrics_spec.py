@@ -9,17 +9,17 @@ from pathlib import Path
 import pytest
 from prometheus_client import generate_latest
 
-from mcp_drop.config import parse_rate
-from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import RateLimited, Refused
-from mcp_drop.domain.models import ArtifactDraft, GateDecision, VersionDraft, Visibility
-from mcp_drop.metrics import PrometheusMetrics
-from mcp_drop.services.artifacts import ArtifactService
-from mcp_drop.services.audit import AuditLog, DenialReason
-from mcp_drop.services.limits import Bucket, RateLimiter
-from mcp_drop.services.links import LinkPolicy, LinkService
-from mcp_drop.storage.base import StoreConfig
-from mcp_drop.storage.filesystem import FileStore
+from mcp_vitrine.config import parse_rate
+from mcp_vitrine.domain.clock import Clock
+from mcp_vitrine.domain.errors import RateLimited, Refused
+from mcp_vitrine.domain.models import ArtifactDraft, GateDecision, VersionDraft, Visibility
+from mcp_vitrine.metrics import PrometheusMetrics
+from mcp_vitrine.services.artifacts import ArtifactService
+from mcp_vitrine.services.audit import AuditLog, DenialReason
+from mcp_vitrine.services.limits import Bucket, RateLimiter
+from mcp_vitrine.services.links import LinkPolicy, LinkService
+from mcp_vitrine.storage.base import StoreConfig
+from mcp_vitrine.storage.filesystem import FileStore
 
 CLIENT = "hermes"
 TITLE = "Quarterly secrets"
@@ -69,7 +69,7 @@ def service(
     """An artifact service that counts."""
     return ArtifactService(
         store=FileStore(store_config, clock),
-        links=LinkService(LinkPolicy(base_url="https://drop.example.com"), SECRET, clock),
+        links=LinkService(LinkPolicy(base_url="https://vitrine.example.com"), SECRET, clock),
         audit=audit,
         clock=clock,
         metrics=metrics,
@@ -155,22 +155,22 @@ class DescribeThePrometheusExporter:
 
     class WhenItIsScraped:
         def it_exports_the_artifact_count(self, scraped: str) -> None:
-            assert "drop_artifacts 1.0" in scraped
+            assert "vitrine_artifacts 1.0" in scraped
 
         def it_exports_the_stored_bytes(self, scraped: str) -> None:
-            assert "drop_storage_bytes 2.0" in scraped
+            assert "vitrine_storage_bytes 2.0" in scraped
 
         def it_exports_versions_by_client(self, scraped: str) -> None:
-            assert 'drop_versions_created_total{client="hermes"} 1.0' in scraped
+            assert 'vitrine_versions_created_total{client="hermes"} 1.0' in scraped
 
         def it_exports_views_by_route(self, scraped: str) -> None:
-            assert 'drop_views_total{route="s"} 1.0' in scraped
+            assert 'vitrine_views_total{route="s"} 1.0' in scraped
 
         def it_exports_gate_verdicts(self, scraped: str) -> None:
-            assert 'drop_public_gate_total{outcome="approved"} 1.0' in scraped
+            assert 'vitrine_public_gate_total{outcome="approved"} 1.0' in scraped
 
         def it_exports_refusals_by_reason(self, scraped: str) -> None:
-            assert 'drop_rejected_total{reason="rate_limited"} 1.0' in scraped
+            assert 'vitrine_rejected_total{reason="rate_limited"} 1.0' in scraped
 
         def it_carries_no_artifact_id(self, scraped: str, created: str) -> None:
             assert created not in scraped

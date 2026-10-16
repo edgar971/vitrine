@@ -12,11 +12,11 @@ import httpx2
 import pytest
 from starlette.routing import Route
 
-from mcp_drop.app import build_app
-from mcp_drop.config import Settings
-from mcp_drop.domain import layout
-from mcp_drop.services.container import Services
-from mcp_drop.web.routes import ROUTE_ACCESS, Access
+from mcp_vitrine.app import build_app
+from mcp_vitrine.config import Settings
+from mcp_vitrine.domain import layout
+from mcp_vitrine.services.container import Services
+from mcp_vitrine.web.routes import ROUTE_ACCESS, Access
 
 FORGED = "dmlld3xrN20.AAAAAAAAAAAAAAAAAAAAAA"
 

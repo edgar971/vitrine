@@ -1,7 +1,7 @@
 """Agent-written HTML in Chromium (security T7): it runs, but in an opaque origin.
 
 The script runs; ``document.cookie`` and ``localStorage`` throw even with a cookie set for
-drop's host; ``window.origin`` is ``"null"``; and a relative image still loads under a signed
+vitrine's host; ``window.origin`` is ``"null"``; and a relative image still loads under a signed
 path.
 """
 
@@ -13,8 +13,8 @@ import json
 import pytest
 from playwright.sync_api import BrowserContext, Page
 
-from mcp_drop.domain.models import ArtifactDraft, PublishedArtifact
-from mcp_drop.services.container import Services
+from mcp_vitrine.domain.models import ArtifactDraft, PublishedArtifact
+from mcp_vitrine.services.container import Services
 
 pytestmark = pytest.mark.browser
 
@@ -42,7 +42,7 @@ def probe(services: Services) -> PublishedArtifact:
 
 @pytest.fixture
 def opened(context: BrowserContext, page: Page, base: str, probe: PublishedArtifact) -> Page:
-    """The probe, opened with a cookie already set for drop's host."""
+    """The probe, opened with a cookie already set for vitrine's host."""
     context.add_cookies([{"name": "session", "value": "secret", "url": base}])
     page.goto(probe.url)
     page.wait_for_function("document.body.dataset.result && document.body.dataset.image")
@@ -63,7 +63,7 @@ class DescribeTheSandboxInChromium:
         def it_runs_in_an_opaque_origin(self, opened: Page) -> None:
             assert _result(opened)["origin"] == "null"
 
-        def it_cannot_read_drop_s_cookies(self, opened: Page) -> None:
+        def it_cannot_read_vitrine_s_cookies(self, opened: Page) -> None:
             assert _result(opened)["cookie"] == "threw"
 
         def it_cannot_reach_storage(self, opened: Page) -> None:

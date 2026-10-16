@@ -16,10 +16,10 @@ import httpx2
 import pytest
 import uvicorn
 
-from mcp_drop.config import Settings
-from mcp_drop.domain import layout
-from mcp_drop.domain.models import SCHEMA_VERSION, ArtifactDraft
-from mcp_drop.services.container import Services
+from mcp_vitrine.config import Settings
+from mcp_vitrine.domain import layout
+from mcp_vitrine.domain.models import SCHEMA_VERSION, ArtifactDraft
+from mcp_vitrine.services.container import Services
 from tests.cli.conftest import Runner
 from tests.http.conftest import free_port
 
@@ -94,9 +94,9 @@ class DescribeServe:
             monkeypatch: pytest.MonkeyPatch,
             uvicorn_run: dict[str, Any],
         ) -> None:
-            monkeypatch.setenv("DROP_LOG_FORMAT", "json")
+            monkeypatch.setenv("VITRINE_LOG_FORMAT", "json")
             run("serve")
-            record = logging.LogRecord("drop", logging.INFO, __file__, 1, "hello", None, None)
+            record = logging.LogRecord("vitrine", logging.INFO, __file__, 1, "hello", None, None)
             line = json.loads(logging.root.handlers[0].format(record))
             assert (line["level"], line["message"]) == ("INFO", "hello")
 
@@ -110,7 +110,7 @@ class DescribeServe:
             uvicorn_run: dict[str, Any],
         ) -> None:
             _set_schema(settings, artifact_id, SCHEMA_VERSION - 1)
-            assert "mcp-drop migrate" in run("serve").err
+            assert "mcp-vitrine migrate" in run("serve").err
 
         def it_never_listens(
             self,
@@ -144,9 +144,9 @@ class DescribeServe:
             monkeypatch: pytest.MonkeyPatch,
             uvicorn_run: dict[str, Any],
         ) -> None:
-            monkeypatch.setenv("DROP_METRICS_PORT", "9090")
+            monkeypatch.setenv("VITRINE_METRICS_PORT", "9090")
             monkeypatch.setitem(sys.modules, "prometheus_client", None)
-            monkeypatch.delitem(sys.modules, "mcp_drop.metrics", raising=False)
+            monkeypatch.delitem(sys.modules, "mcp_vitrine.metrics", raising=False)
             assert run("serve").status == 2
 
     class WhenTheConfigurationIsInvalid:
@@ -157,21 +157,21 @@ class DescribeServe:
             monkeypatch: pytest.MonkeyPatch,
             uvicorn_run: dict[str, Any],
         ) -> None:
-            monkeypatch.delenv("DROP_SECRET")
+            monkeypatch.delenv("VITRINE_SECRET")
             assert run("serve").status == 2
 
 
 class DescribeTheServerProcess:
     @pytest.fixture
     def server(self, environment: None) -> Iterator[Listening]:
-        """``python -m mcp_drop serve`` on a free port, with metrics on a second one."""
+        """``python -m mcp_vitrine serve`` on a free port, with metrics on a second one."""
         port, metrics_port = free_port(), free_port()
         env = os.environ | {
-            "DROP_PUBLIC_BASE_URL": f"http://127.0.0.1:{port}",
-            "DROP_METRICS_PORT": str(metrics_port),
+            "VITRINE_PUBLIC_BASE_URL": f"http://127.0.0.1:{port}",
+            "VITRINE_METRICS_PORT": str(metrics_port),
         }
         process = subprocess.Popen(  # noqa: S603 - our own interpreter and module
-            [sys.executable, "-m", "mcp_drop", "serve", "--port", str(port)],
+            [sys.executable, "-m", "mcp_vitrine", "serve", "--port", str(port)],
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -189,7 +189,7 @@ class DescribeTheServerProcess:
             assert httpx2.get(f"{server.base}/healthz").json() == {"ok": True}
 
         def it_serves_metrics_on_their_own_port(self, server: Listening) -> None:
-            assert "drop_artifacts 0.0" in httpx2.get(f"{server.metrics}/metrics").text
+            assert "vitrine_artifacts 0.0" in httpx2.get(f"{server.metrics}/metrics").text
 
 
 def _wait_for(url: str) -> None:

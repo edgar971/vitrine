@@ -10,23 +10,23 @@ import pytest
 from fastmcp import Client, FastMCP
 from mcp.types import Tool
 
-from mcp_drop.mcp.instructions import INSTRUCTIONS
-from mcp_drop.mcp.policy import scope_of
-from mcp_drop.services.container import Services
+from mcp_vitrine.mcp.instructions import INSTRUCTIONS
+from mcp_vitrine.mcp.policy import scope_of
+from mcp_vitrine.services.container import Services
 
 SPEC = Path(__file__).parents[2] / "docs" / "spec.md"
 
 # design § 4, "Tool catalogue": title, scope, read-only, destructive, idempotent, open-world.
 CATALOGUE: dict[str, tuple[str, str, bool, bool, bool, bool]] = {
-    "artifact_create": ("Create artifact", "drop:write", False, False, False, False),
-    "artifact_update": ("Update artifact", "drop:write", False, False, False, False),
-    "artifact_get": ("Get artifact", "drop:read", True, False, True, False),
-    "artifact_list": ("List artifacts", "drop:read", True, False, True, False),
-    "artifact_link": ("Create private link", "drop:share", False, False, False, False),
-    "artifact_set_visibility": ("Change visibility", "drop:publish", False, False, True, True),
-    "artifact_revoke_links": ("Revoke private links", "drop:share", False, True, False, False),
-    "artifact_upload_url": ("Create upload URL", "drop:write", False, False, False, False),
-    "artifact_delete": ("Delete artifact", "drop:write", False, True, True, False),
+    "artifact_create": ("Create artifact", "vitrine:write", False, False, False, False),
+    "artifact_update": ("Update artifact", "vitrine:write", False, False, False, False),
+    "artifact_get": ("Get artifact", "vitrine:read", True, False, True, False),
+    "artifact_list": ("List artifacts", "vitrine:read", True, False, True, False),
+    "artifact_link": ("Create private link", "vitrine:share", False, False, False, False),
+    "artifact_set_visibility": ("Change visibility", "vitrine:publish", False, False, True, True),
+    "artifact_revoke_links": ("Revoke private links", "vitrine:share", False, True, False, False),
+    "artifact_upload_url": ("Create upload URL", "vitrine:write", False, False, False, False),
+    "artifact_delete": ("Delete artifact", "vitrine:write", False, True, True, False),
 }
 
 WRITERS = ("artifact_create", "artifact_update", "artifact_upload_url")

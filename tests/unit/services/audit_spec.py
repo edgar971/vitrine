@@ -10,10 +10,10 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import AuditUnavailable
-from mcp_drop.domain.models import GateDecision, Visibility
-from mcp_drop.services.audit import (
+from mcp_vitrine.domain.clock import Clock
+from mcp_vitrine.domain.errors import AuditUnavailable
+from mcp_vitrine.domain.models import GateDecision, Visibility
+from mcp_vitrine.services.audit import (
     AuditEvent,
     AuditEventName,
     AuditLog,

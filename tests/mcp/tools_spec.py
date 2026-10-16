@@ -9,11 +9,11 @@ from typing import Any
 import pytest
 from fastmcp.exceptions import ToolError
 
-from mcp_drop.config import Settings
-from mcp_drop.domain.ids import new_id
-from mcp_drop.domain.models import Visibility
-from mcp_drop.services.audit import AuditEvent, AuditEventName
-from mcp_drop.services.container import Services
+from mcp_vitrine.config import Settings
+from mcp_vitrine.domain.ids import new_id
+from mcp_vitrine.domain.models import Visibility
+from mcp_vitrine.services.audit import AuditEvent, AuditEventName
+from mcp_vitrine.services.container import Services
 from tests.mcp.conftest import CLIENT, Call
 
 Events = Callable[[], tuple[AuditEvent, ...]]

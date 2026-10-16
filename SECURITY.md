@@ -1,6 +1,6 @@
 # Security policy
 
-drop holds private data and hands out links to it, so security reports are welcome and taken
+vitrine holds private data and hands out links to it, so security reports are welcome and taken
 seriously. The threat model, the controls and the residual risks are in
 [`docs/security.md`](docs/security.md).
 
@@ -17,7 +17,7 @@ latest `0.1.x` is, and older minor versions are not.
 ## Reporting a vulnerability
 
 Use GitHub's private vulnerability reporting: **Security → Report a vulnerability** on
-<https://github.com/edgar971/drop/security/advisories/new>. Please do not open a public issue, and
+<https://github.com/edgar971/vitrine/security/advisories/new>. Please do not open a public issue, and
 do not test against someone else's deployment.
 
 A useful report includes:
@@ -36,4 +36,4 @@ before writing it up publicly.
   (security § 5 R2).
 - A leaked link being usable by whoever holds it: that is what "anyone with the link" means
   (security § 5 R4).
-- Reports from a scanner without a demonstrated impact on drop.
+- Reports from a scanner without a demonstrated impact on vitrine.

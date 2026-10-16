@@ -12,14 +12,14 @@ from datetime import timedelta
 import httpx2
 import pytest
 
-from mcp_drop.domain.models import (
+from mcp_vitrine.domain.models import (
     ArtifactDraft,
     GateDecision,
     PublishedArtifact,
     VersionDraft,
     Visibility,
 )
-from mcp_drop.services.container import Services
+from mcp_vitrine.services.container import Services
 from tests.conftest import FrozenClock
 from tests.http.conftest import CLIENT, signature
 

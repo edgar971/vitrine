@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from mcp_drop.config import Settings
-from mcp_drop.domain import layout
-from mcp_drop.domain.models import SCHEMA_VERSION, ArtifactDraft
-from mcp_drop.services.audit import AuditEvent, AuditEventName
-from mcp_drop.services.container import Services
-from mcp_drop.storage import schema
+from mcp_vitrine.config import Settings
+from mcp_vitrine.domain import layout
+from mcp_vitrine.domain.models import SCHEMA_VERSION, ArtifactDraft
+from mcp_vitrine.services.audit import AuditEvent, AuditEventName
+from mcp_vitrine.services.container import Services
+from mcp_vitrine.storage import schema
 from tests.cli.conftest import Runner
 from tests.conftest import FrozenClock
 

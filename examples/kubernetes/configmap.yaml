@@ -1,14 +1,14 @@
-# Non-secret settings (docs/configuration.md). DROP_SECRET and DROP_TOKENS come from the
-# drop-secrets Secret, never from here.
+# Non-secret settings (docs/configuration.md). VITRINE_SECRET and VITRINE_TOKENS come from the
+# vitrine-secrets Secret, never from here.
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: drop
+  name: vitrine
 data:
-  drop.toml: |
-    [drop]
+  vitrine.toml: |
+    [vitrine]
     data_dir        = "/data"
-    public_base_url = "https://drop.example.com"
+    public_base_url = "https://vitrine.example.com"
     host            = "0.0.0.0"
     port            = 8080
     # The ingress controller's pods; the network policy lets nothing else reach port 8080.

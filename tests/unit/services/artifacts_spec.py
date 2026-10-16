@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import (
+from mcp_vitrine.domain.clock import Clock
+from mcp_vitrine.domain.errors import (
     AuditUnavailable,
     Conflict,
     Expired,
@@ -21,8 +21,8 @@ from mcp_drop.domain.errors import (
     StorageUnavailable,
     TooLarge,
 )
-from mcp_drop.domain.ids import new_id
-from mcp_drop.domain.models import (
+from mcp_vitrine.domain.ids import new_id
+from mcp_vitrine.domain.models import (
     ArtifactDraft,
     ArtifactQuery,
     GateDecision,
@@ -30,13 +30,13 @@ from mcp_drop.domain.models import (
     VersionDraft,
     Visibility,
 )
-from mcp_drop.services.artifacts import ArtifactService, SweepReport, request_hash
-from mcp_drop.services.audit import AuditEvent, AuditEventName, AuditLog, DenialReason
-from mcp_drop.services.links import LinkPolicy, LinkService
-from mcp_drop.storage.base import StoreConfig
-from mcp_drop.storage.filesystem import FileStore
+from mcp_vitrine.services.artifacts import ArtifactService, SweepReport, request_hash
+from mcp_vitrine.services.audit import AuditEvent, AuditEventName, AuditLog, DenialReason
+from mcp_vitrine.services.links import LinkPolicy, LinkService
+from mcp_vitrine.storage.base import StoreConfig
+from mcp_vitrine.storage.filesystem import FileStore
 
-BASE = "https://drop.example.com"
+BASE = "https://vitrine.example.com"
 SECRET = b"0123456789abcdef0123456789abcdef"
 CLIENT = "hermes"
 ENTRY = "index.html"

@@ -1,4 +1,4 @@
-# Default deny, in and out. drop makes no outbound calls at all, so it gets no egress, not even
+# Default deny, in and out. vitrine makes no outbound calls at all, so it gets no egress, not even
 # DNS. In: the ingress controller on 8080 and the metrics scraper on 9090, nothing else.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -11,11 +11,11 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: drop-ingress
+  name: vitrine-ingress
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: drop
+      app.kubernetes.io/name: vitrine
   policyTypes: [Ingress]
   ingress:
     - from:

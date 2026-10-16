@@ -10,9 +10,9 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from mcp import MCPError
-from mcp_drop.domain.models import ArtifactQuery, Scope
-from mcp_drop.services.audit import AuditEvent, AuditEventName, DenialReason
-from mcp_drop.services.container import Services
+from mcp_vitrine.domain.models import ArtifactQuery, Scope
+from mcp_vitrine.services.audit import AuditEvent, AuditEventName, DenialReason
+from mcp_vitrine.services.container import Services
 from tests.mcp.conftest import CLIENT, Call
 
 Events = Callable[[], tuple[AuditEvent, ...]]

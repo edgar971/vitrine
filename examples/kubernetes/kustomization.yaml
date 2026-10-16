@@ -1,16 +1,16 @@
-# drop on Kubernetes: one replica on an RWO volume, Pod Security `restricted`, no egress.
+# vitrine on Kubernetes: one replica on an RWO volume, Pod Security `restricted`, no egress.
 #
-#   kubectl create namespace drop   # or apply namespace.yaml first
-#   kubectl -n drop create secret generic drop-secrets \
-#     --from-literal=DROP_SECRET="$(mcp-drop secret new)" \
-#     --from-literal=DROP_TOKENS="<entries from mcp-drop token new>"
+#   kubectl create namespace vitrine   # or apply namespace.yaml first
+#   kubectl -n vitrine create secret generic vitrine-secrets \
+#     --from-literal=VITRINE_SECRET="$(mcp-vitrine secret new)" \
+#     --from-literal=VITRINE_TOKENS="<entries from mcp-vitrine token new>"
 #   kubectl apply -k .
 #
-# Replace drop.example.com (configmap, deployment probes, ingress), the ingress class and the
+# Replace vitrine.example.com (configmap, deployment probes, ingress), the ingress class and the
 # namespace labels the network policy matches, to fit your cluster.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-namespace: drop
+namespace: vitrine
 resources:
   - namespace.yaml
   - configmap.yaml
@@ -21,5 +21,5 @@ resources:
   - networkpolicy.yaml
 labels:
   - pairs:
-      app.kubernetes.io/name: drop
+      app.kubernetes.io/name: vitrine
     includeSelectors: true

@@ -1,14 +1,14 @@
 # AGENTS.md
 
-Guide for coding agents and contributors working on **drop** (`mcp-drop`). Humans start at
+Guide for coding agents and contributors working on **vitrine** (`mcp-vitrine`). Humans start at
 `README.md`. The contract is `docs/spec.md`; how it is built is `docs/design.md`; the threat model
 is `docs/security.md`. When this file and the spec disagree, the spec wins: fix this file.
 
-## What drop is
+## What vitrine is
 
 A self-hosted MCP server that turns agent output into **private** (signed, expiring, revocable)
 or **public** links. Status: M1–M5 done (the core, the MCP layer, the web layer assembled with
-`/mcp` by `mcp_drop.app.build_app`, the `mcp-drop` CLI, metrics, the image, `examples/` and the
+`/mcp` by `mcp_vitrine.app.build_app`, the `mcp-vitrine` CLI, metrics, the image, `examples/` and the
 Hermes plugin); `v0.1.0` is released by pushing a `v*` tag (`.github/workflows/release.yml`).
 
 ## Commands
@@ -20,7 +20,7 @@ Only `uv` and `just` are required. `just check` runs every gate CI runs, and it 
 | Install | `uv sync` |
 | Every gate CI runs (**before every commit**) | `just check` |
 | One test | `uv run pytest -k <name> --no-cov` |
-| Serve locally | `uv run mcp-drop serve` |
+| Serve locally | `uv run mcp-vitrine serve` |
 | Test the built wheel | `just wheel-test` |
 | Prepare a release | `just release <version>` (CONTRIBUTING.md § Releasing) |
 
@@ -32,15 +32,15 @@ need Docker; CI runs them as their own jobs. After changing a `Settings` field, 
 
 ## Layout
 
-`src/mcp_drop/{domain,storage,services,mcp,web}` (`docs/design.md` § 3). Dependencies point one
+`src/mcp_vitrine/{domain,storage,services,mcp,web}` (`docs/design.md` § 3). Dependencies point one
 way: `mcp`/`web` → `services` → `storage`/`domain`. `services`, `storage` and `domain` never
 import FastMCP or Starlette, so the behaviour is testable without a server; import-linter
 enforces it.
 
-`integrations/hermes/drop/` is the Hermes plugin. It is not part of the package: it runs on
+`integrations/hermes/vitrine/` is the Hermes plugin. It is not part of the package: it runs on
 Hermes's interpreter (Python 3.11+), so it uses the standard library only, imports itself
 relatively, and has its own ruff target (`integrations/hermes/ruff.toml`). The specs import it as
-`drop` and drive a real server through it.
+`vitrine` and drive a real server through it.
 
 ## Conventions
 

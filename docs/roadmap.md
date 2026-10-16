@@ -18,9 +18,7 @@ green on Python 3.15, and the release procedure lives in
 - [x] Every invariant in [AGENTS.md](../AGENTS.md) has a named spec (held by
       `tests/unit/invariants_spec.py`).
 - [x] Coverage is at least 90% (97%), and `pip-audit` is clean.
-- [ ] The release image is signed and carries an SBOM (`release.yml` does both; check it on the
-      rehearsal).
-- [ ] A rehearsal pre-release on TestPyPI, installed and checked (CONTRIBUTING.md § Releasing).
+- [ ] The release image is signed and carries an SBOM (`release.yml` does both).
 - [ ] The threat model in [security.md](security.md) reviewed against the shipped code.
 - [ ] The final tag: PyPI, the signed image, and a GitHub release.
 

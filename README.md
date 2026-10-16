@@ -23,11 +23,11 @@ uvx mcp-vitrine --version          # run without installing
 uv tool install mcp-vitrine        # or install the `mcp-vitrine` command
 ```
 
-Or with Docker. Pick a version from the
-[releases](https://github.com/edgar971/vitrine/releases); there is no `latest` tag:
+Or with Docker. `stable` is the newest release; for a deployment, pin a version from the
+[releases](https://github.com/edgar971/vitrine/releases) instead:
 
 ```bash
-docker pull ghcr.io/edgar971/vitrine:<version>
+docker pull ghcr.io/edgar971/vitrine:stable
 ```
 
 ## Run it
@@ -46,11 +46,11 @@ uvx mcp-vitrine serve              # http://localhost:8080, data in ./data
 With Docker, the same commands run inside the image:
 
 ```bash
-docker run --rm ghcr.io/edgar971/vitrine:<version> secret new
-docker run --rm ghcr.io/edgar971/vitrine:<version> token new claude
+docker run --rm ghcr.io/edgar971/vitrine:stable secret new
+docker run --rm ghcr.io/edgar971/vitrine:stable token new claude
 docker run -d --name vitrine -p 127.0.0.1:8080:8080 -v vitrine-data:/data \
   -e VITRINE_SECRET=<secret> -e VITRINE_TOKENS=<entry> \
-  ghcr.io/edgar971/vitrine:<version>
+  ghcr.io/edgar971/vitrine:stable
 ```
 
 Check that it works, using the token that `token new` printed:

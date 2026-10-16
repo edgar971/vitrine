@@ -48,6 +48,7 @@ The first release. Everything below is new.
   labelled by artifact id or title.
 - **A container image**, `ghcr.io/edgar971/vitrine`, for amd64 and arm64: non-root, fine with a
   read-only root filesystem and no capabilities, signed with cosign and shipped with an SBOM.
+  Each release is tagged with its version, and `stable` follows the newest one.
 - **Deployment examples** in [`examples/`](examples/): a TOML file, Compose with Caddy for TLS,
   and Kubernetes manifests (Pod Security `restricted`, default-deny network policy).
 - **A Hermes Agent plugin** ([`integrations/hermes/`](integrations/hermes/)) that publishes files

@@ -1,7 +1,7 @@
 # vitrine for Hermes Agent
 
 A Hermes plugin that publishes files already on disk to a vitrine server. The vitrine MCP server does
-everything else; set it up first ([README](../../README.md#hermes-agent)) under an `mcp_servers` key
+everything else; set it up first ([README](../../README.md#connect-a-client)) under an `mcp_servers` key
 that is **not** `vitrine` — a key equal to the plugin's name makes Hermes register the server's tools
 without ever exposing them, and nothing can call them. Its tools are then `mcp__<key>__artifact_*`.
 

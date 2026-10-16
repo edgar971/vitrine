@@ -56,6 +56,17 @@ New behaviour needs an `it_` that fails without it; a security fix also covers t
   control).
 - A decision that is expensive to reverse gets an ADR in [`docs/adr/`](docs/adr/).
 
+### Pull requests
+
+A new pull request starts from the [general template](.github/pull_request_template.md). Three
+kinds have their own checklist; open them with the template in the URL:
+
+| Pull request | Template | Open with |
+|---|---|---|
+| A release (`chore(release): X.Y.Z`) | [release](.github/PULL_REQUEST_TEMPLATE/release.md) | `https://github.com/edgar971/vitrine/compare/main...<branch>?template=release.md` |
+| A docs-only change | [docs](.github/PULL_REQUEST_TEMPLATE/docs.md) | `…?template=docs.md` |
+| A security fix | [security](.github/PULL_REQUEST_TEMPLATE/security.md) | `…?template=security.md` |
+
 ## Changelog
 
 `CHANGELOG.md` is generated from commit messages by [git-cliff](https://git-cliff.org)
@@ -78,7 +89,8 @@ hand; the one exception is `0.1.0`, whose notes were written before the changelo
 
 1. **Rehearse with a pre-release.** `just release 0.2.0rc1` bumps every copy of the version
    (`pyproject.toml`, the example image tags, the Hermes plugin), re-locks and runs the gates.
-   Commit it as `chore(release): 0.2.0rc1`, merge, and tag the merged commit:
+   Commit it as `chore(release): 0.2.0rc1`, open its pull request with the
+   [release template](#pull-requests), merge, and tag the merged commit:
    `git tag v0.2.0rc1 <sha> && git push origin v0.2.0rc1`. The release workflow pushes and signs
    `ghcr.io/edgar971/vitrine:0.2.0rc1`, publishes to **TestPyPI**, and creates a GitHub pre-release
    with notes rendered from the commits.

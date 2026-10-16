@@ -6,13 +6,14 @@ seriously. The threat model, the controls and the residual risks are in
 
 ## Supported versions
 
-No release exists yet. Until `0.1.0` ships, only the `main` branch is supported; after that, the
-latest `0.1.x` is, and older minor versions are not.
+Fixes land on `main` and ship in a patch release of the latest minor version. Older minor versions
+are not patched: upgrade ([operations](docs/operations.md) § 4).
 
 | Version | Supported |
 |---|---|
-| `main` | ✅ |
-| `< 0.1.0` releases | none exist |
+| The latest minor release (`0.1.x` today) | ✅ |
+| Older minor releases | ❌ |
+| `main` | ✅ (unreleased) |
 
 ## Reporting a vulnerability
 

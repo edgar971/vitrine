@@ -1,9 +1,28 @@
 # vitrine for Hermes Agent
 
-A Hermes plugin that publishes files already on disk to a vitrine server. The vitrine MCP server does
-everything else; set it up first ([README](../../README.md#hermes-agent)) under an `mcp_servers` key
-that is **not** `vitrine` — a key equal to the plugin's name makes Hermes register the server's tools
-without ever exposing them, and nothing can call them. Its tools are then `mcp__<key>__artifact_*`.
+Hermes uses vitrine in two parts: the vitrine **MCP server**, which does nearly everything, and an
+optional **plugin** that publishes files already on disk.
+
+## Connect the MCP server
+
+In `~/.hermes/config.yaml`, with `VITRINE_TOKEN` in `~/.hermes/.env`:
+
+```yaml
+mcp_servers:
+  vitrine_mcp:                         # any key but `vitrine`, which the plugin owns
+    url: "http://localhost:8080/mcp"
+    headers: { Authorization: "Bearer ${VITRINE_TOKEN}" }
+    elicitation: { timeout: 300 }      # how long the approve/deny prompt for public waits
+```
+
+The key becomes the tools' prefix (`mcp__vitrine_mcp__artifact_create`, …). It has to differ from
+`vitrine`: with a plugin of that name installed, Hermes registers the server's tools but never
+exposes them, so nothing can call them and `tool_search` does not list them.
+
+Making an artifact public shows Hermes's approve/deny prompt, in the CLI or the chat gateway.
+Scheduled jobs cannot answer it, so they cannot make anything public.
+
+## The plugin
 
 | Adds | What it does |
 |---|---|
@@ -12,7 +31,7 @@ without ever exposing them, and nothing can call them. Its tools are then `mcp__
 | `/share <path>…` | A private link to the files, without a turn of the agent |
 | `/artifacts [query]` | The newest artifacts, with ids and visibility (links are minted on purpose, through the agent) |
 
-## Install
+### Install
 
 ```bash
 hermes plugins install edgar971/vitrine/integrations/hermes/vitrine --enable
@@ -29,7 +48,7 @@ The plugin needs the token's `write` scope to publish and `read` for `/artifacts
 standard library only, so it adds no dependencies to Hermes's environment, and runs on every
 Python Hermes supports (3.11 and later).
 
-## What it uploads
+### What it uploads
 
 A file keeps its name. A folder contributes its contents at their paths relative to it, so a
 site's `index.html` lands at the root. Hidden files and symlinks inside a folder are skipped:

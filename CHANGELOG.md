@@ -9,6 +9,8 @@ Each version's section is generated from its Conventional Commits by git-cliff
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-16
+
 The first release. Everything below is new.
 
 ### Added

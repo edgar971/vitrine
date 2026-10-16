@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "mcp-vitrine"
-version = "0.1.0rc1"
+version = "0.1.0"
 description = "Self-hosted MCP server that turns agent output into private (signed, expiring, revocable) or public links."
 readme = "README.md"
 requires-python = ">=3.15"

@@ -226,7 +226,7 @@ Slack, …), and fails closed for cron jobs.
 
 ```yaml
 mcp_servers:
-  vitrine:
+  vitrine_mcp:                    # not `vitrine`: a key equal to the plugin's name hides its tools
     url: "https://vitrine.example.com/mcp"
     headers: { Authorization: "Bearer ${VITRINE_TOKEN}" }
     elicitation: { timeout: 300 }

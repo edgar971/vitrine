@@ -2,7 +2,8 @@ name: vitrine
 version: 0.1.0
 description: >-
   Publish local files and folders to a vitrine server as private links, and list what was shared.
-  Pairs with the vitrine MCP server (mcp_servers.vitrine_mcp), which owns links, visibility and history.
+  Pairs with the vitrine MCP server (its own `mcp_servers` key, never one named `vitrine`), which
+  owns links, visibility and history.
 author: Edgar Pino
 kind: standalone
 platforms:

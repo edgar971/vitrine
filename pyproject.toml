@@ -13,11 +13,15 @@ license-files = ["LICENSE"]
 authors = [{ name = "Edgar Pino" }]
 keywords = ["mcp", "artifacts", "sharing", "self-hosted", "fastmcp", "agents"]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 3 - Alpha",
   "Environment :: Web Environment",
   "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
+  "Operating System :: POSIX",
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.15",
+  "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Typing :: Typed",
 ]
 dependencies = [
@@ -40,6 +44,7 @@ mcp-vitrine = "mcp_vitrine.cli:main"
 Homepage = "https://github.com/edgar971/vitrine"
 Documentation = "https://github.com/edgar971/vitrine/tree/main/docs"
 Changelog = "https://github.com/edgar971/vitrine/blob/main/CHANGELOG.md"
+Issues = "https://github.com/edgar971/vitrine/issues"
 Security = "https://github.com/edgar971/vitrine/blob/main/SECURITY.md"
 
 # Same gates as CI (docs/design.md § 10). The browser group is only needed for the

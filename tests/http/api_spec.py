@@ -8,9 +8,9 @@ from typing import Any
 import httpx2
 import pytest
 
-from mcp_drop.domain.models import PublishedArtifact, Visibility
-from mcp_drop.services.audit import AuditEvent, AuditEventName, DenialReason
-from mcp_drop.services.container import Services
+from mcp_vitrine.domain.models import PublishedArtifact, Visibility
+from mcp_vitrine.services.audit import AuditEvent, AuditEventName, DenialReason
+from mcp_vitrine.services.container import Services
 from tests.http.conftest import READ_TOKEN
 
 INDEX = ("file", ("index.html", b"<h1>hi</h1>"))
@@ -134,7 +134,7 @@ class DescribeCreatingOverTheApi:
     class WhenThereAreTooManyFiles:
         @pytest.fixture
         def overrides(self) -> dict[str, str]:
-            return {"DROP_MAX_FILES": "1"}
+            return {"VITRINE_MAX_FILES": "1"}
 
         def it_answers_413(self, create: Create) -> None:
             assert create(files=[INDEX, CHART]).status_code == 413
@@ -142,7 +142,7 @@ class DescribeCreatingOverTheApi:
     class WhenTheStoreIsFull:
         @pytest.fixture
         def overrides(self) -> dict[str, str]:
-            return {"DROP_QUOTA": "16", "DROP_MAX_ARTIFACT": "16"}
+            return {"VITRINE_QUOTA": "16", "VITRINE_MAX_ARTIFACT": "16"}
 
         def it_answers_507(self, create: Create) -> None:
             create()
@@ -178,7 +178,7 @@ class DescribeCreatingOverTheApi:
     class WhenTheClientIsOverItsWriteRate:
         @pytest.fixture
         def overrides(self) -> dict[str, str]:
-            return {"DROP_RATE_WRITES": "1/m"}
+            return {"VITRINE_RATE_WRITES": "1/m"}
 
         def it_answers_429_with_retry_after(self, create: Create) -> None:
             create()

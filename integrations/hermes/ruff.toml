@@ -1,4 +1,4 @@
-# The plugin runs on Hermes's interpreter (Python 3.11-3.14), not drop's, so the formatter and
+# The plugin runs on Hermes's interpreter (Python 3.11-3.14), not vitrine's, so the formatter and
 # pyupgrade must not use newer syntax here. A spec parses every file as 3.11 to hold this.
 extend = "../../pyproject.toml"
 target-version = "py311"

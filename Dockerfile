@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# drop's image: multi-arch (amd64, arm64), non-root, and fine on a read-only root filesystem.
+# vitrine's image: multi-arch (amd64, arm64), non-root, and fine on a read-only root filesystem.
 # Everything it writes goes to /data (artifacts, staging, audit), so mount a volume there.
 
 ARG PYTHON_VERSION=3.15
@@ -32,27 +32,27 @@ RUN --mount=type=cache,target=/root/.cache/uv --mount=type=secret,id=ca_bundle,r
     with-ca uv sync --no-dev --extra metrics --no-editable
 
 FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
-LABEL org.opencontainers.image.title="drop" \
+LABEL org.opencontainers.image.title="vitrine" \
       org.opencontainers.image.description="Private and public links for agent output (MCP server)" \
-      org.opencontainers.image.source="https://github.com/edgar971/drop" \
+      org.opencontainers.image.source="https://github.com/edgar971/vitrine" \
       org.opencontainers.image.licenses="MIT"
-RUN groupadd --system --gid 10001 drop \
-    && useradd --system --uid 10001 --gid drop --no-create-home --shell /usr/sbin/nologin drop \
-    && mkdir /data && chown drop:drop /data
+RUN groupadd --system --gid 10001 vitrine \
+    && useradd --system --uid 10001 --gid vitrine --no-create-home --shell /usr/sbin/nologin vitrine \
+    && mkdir /data && chown vitrine:vitrine /data
 COPY --from=build /python /python
 COPY --from=build /app/.venv /app/.venv
 COPY docker/healthcheck.py /app/healthcheck.py
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DROP_HOST=0.0.0.0 \
-    DROP_PORT=8080 \
-    DROP_DATA_DIR=/data
+    VITRINE_HOST=0.0.0.0 \
+    VITRINE_PORT=8080 \
+    VITRINE_DATA_DIR=/data
 USER 10001:10001
 WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "/app/healthcheck.py"]
-ENTRYPOINT ["mcp-drop"]
+ENTRYPOINT ["mcp-vitrine"]
 CMD ["serve"]

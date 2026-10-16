@@ -13,10 +13,10 @@ from fastmcp.client.elicitation import ElicitResult
 from fastmcp.exceptions import ToolError
 
 from mcp import MCPError
-from mcp_drop.config import Settings
-from mcp_drop.domain.models import ArtifactDraft, GateDecision, Scope, VersionDraft, Visibility
-from mcp_drop.services.audit import AuditEvent, AuditEventName
-from mcp_drop.services.container import Services
+from mcp_vitrine.config import Settings
+from mcp_vitrine.domain.models import ArtifactDraft, GateDecision, Scope, VersionDraft, Visibility
+from mcp_vitrine.services.audit import AuditEvent, AuditEventName
+from mcp_vitrine.services.container import Services
 from tests.mcp.conftest import CLIENT, HANDSHAKE, MODERN, Call, Handler
 
 Events = Callable[[], tuple[AuditEvent, ...]]

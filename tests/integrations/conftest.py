@@ -43,9 +43,9 @@ class Recorder:
 
 @pytest.fixture
 def connected(base: str, monkeypatch: pytest.MonkeyPatch) -> str:
-    """``DROP_URL`` and ``DROP_TOKEN`` as Hermes reads them from ``~/.hermes/.env``."""
-    monkeypatch.setenv("DROP_URL", base)
-    monkeypatch.setenv("DROP_TOKEN", FULL_TOKEN)
+    """``VITRINE_URL`` and ``VITRINE_TOKEN`` as Hermes reads them from ``~/.hermes/.env``."""
+    monkeypatch.setenv("VITRINE_URL", base)
+    monkeypatch.setenv("VITRINE_TOKEN", FULL_TOKEN)
     return base
 
 
@@ -71,7 +71,7 @@ def site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def hang_up() -> Iterator[str]:
     """A server that reads a request's headers, then resets the connection without answering.
 
-    That is what reaches the client when drop refuses a large upload unread: the kernel drops
+    That is what reaches the client when vitrine refuses a large upload unread: the kernel drops
     the answer along with the unread body.
     """
     listener = socket.create_server(("127.0.0.1", 0))

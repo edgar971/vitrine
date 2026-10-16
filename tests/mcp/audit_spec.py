@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from mcp_drop.services.audit import AuditEvent, AuditEventName
+from mcp_vitrine.services.audit import AuditEvent, AuditEventName
 from tests.mcp.conftest import Call
 
 Events = Callable[[], tuple[AuditEvent, ...]]

@@ -1,10 +1,10 @@
-# drop
+# vitrine
 
-[![ci](https://github.com/edgar971/drop/actions/workflows/ci.yml/badge.svg)](https://github.com/edgar971/drop/actions/workflows/ci.yml)
+[![ci](https://github.com/edgar971/vitrine/actions/workflows/ci.yml/badge.svg)](https://github.com/edgar971/vitrine/actions/workflows/ci.yml)
 ![python](https://img.shields.io/badge/python-3.15%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-**Shareable, versioned artifacts for AI agents.** drop is a small, self-hosted MCP server. An
+**Shareable, versioned artifacts for AI agents.** vitrine is a small, self-hosted MCP server. An
 agent publishes an HTML report, a chart, a PDF or a folder of files, and gets back a link that
 opens in any browser.
 
@@ -21,19 +21,19 @@ can attach the file, but it cannot:
 - let you decide who can see it, or revoke it later;
 - tell you what was shared.
 
-claude.ai Artifacts and friends solve this inside one vendor's UI. drop is the self-hosted,
+claude.ai Artifacts and friends solve this inside one vendor's UI. vitrine is the self-hosted,
 client-agnostic equivalent: any MCP client can publish, and anyone with a browser can view.
 
 ## Quick start
 
-All you need is [`uv`](https://docs.astral.sh/uv/). `uvx` fetches Python 3.15 and drop on first
+All you need is [`uv`](https://docs.astral.sh/uv/). `uvx` fetches Python 3.15 and vitrine on first
 use; nothing is installed permanently.
 
 ```bash
-export DROP_SECRET="$(uvx mcp-drop secret new)"   # signs every private link
-uvx mcp-drop token new claude                     # prints a token, and the entry holding its hash
-export DROP_TOKENS="claude:<sha256>:read+write+share+publish"   # the entry it printed
-uvx mcp-drop serve                                # http://localhost:8080, artifacts in ./data
+export VITRINE_SECRET="$(uvx mcp-vitrine secret new)"   # signs every private link
+uvx mcp-vitrine token new claude                     # prints a token, and the entry holding its hash
+export VITRINE_TOKENS="claude:<sha256>:read+write+share+publish"   # the entry it printed
+uvx mcp-vitrine serve                                # http://localhost:8080, artifacts in ./data
 ```
 
 Check it from another shell:
@@ -48,13 +48,13 @@ curl -s -H "Authorization: Bearer $TOKEN" -F title=Hello -F file=@index.html \
 
 Open the `url`: that is the whole product, a private expiring link to an HTML page.
 
-Serving beyond localhost? Set `DROP_PUBLIC_BASE_URL` to the address people will open, and read
+Serving beyond localhost? Set `VITRINE_PUBLIC_BASE_URL` to the address people will open, and read
 [operations](docs/operations.md) for TLS, backups and the container image.
 
 ## Connect a client
 
-drop speaks MCP over Streamable HTTP at `/mcp` with a bearer token. Give every client its own
-token (`mcp-drop token new <name>`) so revocation and the audit log stay per client, and only the
+vitrine speaks MCP over Streamable HTTP at `/mcp` with a bearer token. Give every client its own
+token (`mcp-vitrine token new <name>`) so revocation and the audit log stay per client, and only the
 scopes it needs — `--scopes read,write` leaves out `share` and `publish`.
 
 Making an artifact public asks a human through MCP elicitation. A client that cannot ask, or a
@@ -63,45 +63,45 @@ person who declines or does not answer, leaves it private.
 **Claude Code**
 
 ```bash
-claude mcp add --transport http drop http://localhost:8080/mcp \
-  --header "Authorization: Bearer $DROP_TOKEN"
+claude mcp add --transport http vitrine http://localhost:8080/mcp \
+  --header "Authorization: Bearer $VITRINE_TOKEN"
 ```
 
-Or in a project's `.mcp.json` (Claude Code expands `${DROP_TOKEN}` from the environment, so the
+Or in a project's `.mcp.json` (Claude Code expands `${VITRINE_TOKEN}` from the environment, so the
 token never lands in the file):
 
 ```json
 {
   "mcpServers": {
-    "drop": {
+    "vitrine": {
       "type": "http",
       "url": "http://localhost:8080/mcp",
-      "headers": { "Authorization": "Bearer ${DROP_TOKEN}" }
+      "headers": { "Authorization": "Bearer ${VITRINE_TOKEN}" }
     }
   }
 }
 ```
 
-**Hermes Agent** — in `~/.hermes/config.yaml`, with `DROP_TOKEN` in `~/.hermes/.env`:
+**Hermes Agent** — in `~/.hermes/config.yaml`, with `VITRINE_TOKEN` in `~/.hermes/.env`:
 
 ```yaml
 mcp_servers:
-  drop_mcp:                         # any key but `drop` — the plugin below owns that name
+  vitrine_mcp:                         # any key but `vitrine` — the plugin below owns that name
     url: "http://localhost:8080/mcp"
-    headers: { Authorization: "Bearer ${DROP_TOKEN}" }
+    headers: { Authorization: "Bearer ${VITRINE_TOKEN}" }
     elicitation: { timeout: 300 }   # how long the approve/deny prompt for public waits
 ```
 
-The key is the tools' prefix (`mcp__drop_mcp__artifact_create`, …), and it has to differ from `drop`:
+The key is the tools' prefix (`mcp__vitrine_mcp__artifact_create`, …), and it has to differ from `vitrine`:
 with a plugin of that name installed, Hermes registers the server's tools but never exposes them, so
 nothing can call them and `tool_search` does not list them.
 
 The optional plugin publishes files already on disk (PDFs, images, a folder with assets) through
-`artifact_publish_files`, and adds a `drop:drop` skill plus the `/share <path>…` and
-`/artifacts [query]` commands. It needs `DROP_URL` (the server's base URL) beside `DROP_TOKEN`:
+`artifact_publish_files`, and adds a `vitrine:vitrine` skill plus the `/share <path>…` and
+`/artifacts [query]` commands. It needs `VITRINE_URL` (the server's base URL) beside `VITRINE_TOKEN`:
 
 ```bash
-hermes plugins install edgar971/drop/integrations/hermes/drop --enable
+hermes plugins install edgar971/vitrine/integrations/hermes/vitrine --enable
 ```
 
 See [integrations/hermes](integrations/hermes/) for details.
@@ -111,8 +111,8 @@ See [integrations/hermes](integrations/hermes/) for details.
 ```json
 {
   "mcpServers": {
-    "drop": {
-      "url": "https://drop.example.com/mcp",
+    "vitrine": {
+      "url": "https://vitrine.example.com/mcp",
       "headers": { "Authorization": "Bearer <token>" }
     }
   }
@@ -133,7 +133,7 @@ and a ready-made `curl -T` command.
   Agent-written HTML runs in a CSP sandbox, in an opaque origin.
 - **Plain HTTP for browsers.** `/a/<id>/` views a public artifact, `/s/<sig>/` serves a private
   link, `/api/artifacts` takes uploads, `/healthz` answers probes.
-- **Configure it your way.** `DROP_*` environment variables or a TOML file; secrets only ever
+- **Configure it your way.** `VITRINE_*` environment variables or a TOML file; secrets only ever
   come from the environment. Every key is in [configuration](docs/configuration.md).
 
 ## Documents

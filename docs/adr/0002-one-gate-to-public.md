@@ -25,7 +25,7 @@ human sees it.
 - On approval the artifact's visibility and link epoch change together, so every existing private
   link is revoked as it goes public.
 - The gate is one code path, implemented for both protocol eras (ADR 0004), and the tools that can
-  reach it need the `drop:publish` scope — a client that never publishes simply does not have it.
+  reach it need the `vitrine:publish` scope — a client that never publishes simply does not have it.
 
 ## Consequences
 

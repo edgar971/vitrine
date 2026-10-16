@@ -58,10 +58,12 @@ class DescribeTheHostGuard:
     class WhenTheOperatorAllowedAnotherHost:
         @pytest.fixture
         def overrides(self) -> dict[str, str]:
-            return {"DROP_ALLOWED_HOSTS": "drop.internal"}
+            return {"VITRINE_ALLOWED_HOSTS": "vitrine.internal"}
 
         def it_lets_that_host_through(self, http: httpx2.Client) -> None:
-            assert http.get("/healthz", headers={"Host": "drop.internal:8080"}).status_code == 200
+            assert (
+                http.get("/healthz", headers={"Host": "vitrine.internal:8080"}).status_code == 200
+            )
 
 
 class DescribeTheOriginCheck:
@@ -80,7 +82,7 @@ class DescribeTheOriginCheck:
             headers = MCP_HEADERS | {"Origin": "null"}
             assert http.post("/mcp", json=INITIALIZE, headers=headers).status_code == 403
 
-    class WhenTheOriginIsDropItself:
+    class WhenTheOriginIsVitrineItself:
         def it_lets_the_request_through(self, http: httpx2.Client, base: str) -> None:
             headers = MCP_HEADERS | {"Origin": base}
             assert http.post("/mcp", json=INITIALIZE, headers=headers).status_code == 200
@@ -95,7 +97,7 @@ class DescribeTheOriginCheck:
 class DescribeTheMcpBodyLimit:
     @pytest.fixture
     def overrides(self) -> dict[str, str]:
-        return {"DROP_MAX_MCP_BODY": "16KB"}
+        return {"VITRINE_MAX_MCP_BODY": "16KB"}
 
     class WhenTheDeclaredLengthIsTooLarge:
         def it_answers_413(self, http: httpx2.Client) -> None:

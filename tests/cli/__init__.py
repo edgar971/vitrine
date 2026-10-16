@@ -1,1 +1,1 @@
-"""Command-line specs: ``mcp-drop`` run in-process, and once as a real server."""
+"""Command-line specs: ``mcp-vitrine`` run in-process, and once as a real server."""

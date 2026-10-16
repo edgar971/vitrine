@@ -10,8 +10,8 @@ from fastmcp import Client
 from mcp.types import TextResourceContents
 
 from mcp import MCPError
-from mcp_drop.domain.ids import new_id
-from mcp_drop.services.audit import AuditEventName
+from mcp_vitrine.domain.ids import new_id
+from mcp_vitrine.services.audit import AuditEventName
 from tests.mcp.conftest import Call
 
 

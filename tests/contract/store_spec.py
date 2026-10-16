@@ -9,11 +9,11 @@ from datetime import timedelta
 
 import pytest
 
-from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import Conflict, Invalid, NotFound, OverQuota, Refused, TooLarge
-from mcp_drop.domain.ids import new_id
-from mcp_drop.domain.models import ArtifactDraft, ArtifactQuery, VersionDraft, Visibility
-from mcp_drop.storage.base import Store
+from mcp_vitrine.domain.clock import Clock
+from mcp_vitrine.domain.errors import Conflict, Invalid, NotFound, OverQuota, Refused, TooLarge
+from mcp_vitrine.domain.ids import new_id
+from mcp_vitrine.domain.models import ArtifactDraft, ArtifactQuery, VersionDraft, Visibility
+from mcp_vitrine.storage.base import Store
 
 ENTRY = "index.html"
 CLIENT = "hermes"
@@ -623,7 +623,7 @@ class DescribeCompensation:
             artifact_id = _create(store)
             original = store.get(artifact_id)
             store.add_version(artifact_id, VersionDraft(files={"report.html": b"new"}))
-            store.drop_version(artifact_id, 2)
+            store.vitrine_version(artifact_id, 2)
             store.replace_meta(original)
             assert store.get(artifact_id).version == 1
 

@@ -1,11 +1,11 @@
 name: Bug report
-description: drop did something the spec says it should not.
+description: vitrine did something the spec says it should not.
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
-        Never paste a token, `DROP_SECRET`, or a `/s/…` or `/u/…` URL: they are credentials.
+        Never paste a token, `VITRINE_SECRET`, or a `/s/…` or `/u/…` URL: they are credentials.
         Security problems go to a private advisory, not here.
   - type: textarea
     id: what
@@ -24,7 +24,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: "`mcp-drop --version`, or the image tag or digest."
+      description: "`mcp-vitrine --version`, or the image tag or digest."
     validations:
       required: true
   - type: dropdown

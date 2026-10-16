@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from mcp_drop.config import Settings
-from mcp_drop.reference import GROUPS, group_of, render
+from mcp_vitrine.config import Settings
+from mcp_vitrine.reference import GROUPS, group_of, render
 
 DOC = Path(__file__).parents[2] / "docs" / "configuration.md"
 

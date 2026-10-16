@@ -1,5 +1,5 @@
 name: Feature request
-description: Something drop should do.
+description: Something vitrine should do.
 labels: [enhancement]
 body:
   - type: textarea

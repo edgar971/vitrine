@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from mcp_drop.domain.errors import Invalid
-from mcp_drop.domain.ids import (
+from mcp_vitrine.domain.errors import Invalid
+from mcp_vitrine.domain.ids import (
     ALPHABET,
     CLIENT_REF_MAX,
     ID_LENGTH,

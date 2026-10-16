@@ -1,0 +1,18 @@
+# vitrine.toml: safe to commit. Secrets never go here; they come from VITRINE_SECRET and VITRINE_TOKENS
+# (`mcp-vitrine secret new`, `mcp-vitrine token new <name>`), and a file that sets one is refused.
+# Every key, with its default: docs/configuration.md.
+# Run: mcp-vitrine config check --config vitrine.toml && mcp-vitrine serve --config vitrine.toml
+
+[vitrine]
+data_dir        = "/var/lib/vitrine"
+public_base_url = "https://vitrine.example.com"
+host            = "127.0.0.1"          # behind a reverse proxy on the same host
+port            = 8080
+public_mode     = "confirm"            # a human approves every publish (spec § 6)
+renderers       = ["md", "csv", "tsv", "json"]
+quota           = "20GB"
+retain_versions = 10
+link_ttl        = "3d"
+link_ttl_max    = "30d"
+metrics_port    = 9090                 # needs mcp-vitrine[metrics]; 0 turns it off
+log_format      = "json"

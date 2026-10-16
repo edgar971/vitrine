@@ -7,7 +7,7 @@
 
 ## Context
 
-drop stores artifacts and their metadata, and its target deployment is one agent host or one small
+vitrine stores artifacts and their metadata, and its target deployment is one agent host or one small
 server: one process, one port, one directory. The data is a set of files, written once per version
 and addressed by id. The candidate designs were a SQL database (SQLite or PostgreSQL) with the
 blobs on disk, a blob store such as S3, or the filesystem alone.

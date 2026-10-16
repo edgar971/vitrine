@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from mcp_drop.config import (
+from mcp_vitrine.config import (
     LogLevel,
     Settings,
     load_settings,
@@ -16,9 +16,9 @@ from mcp_drop.config import (
     parse_size,
     plain_http_warning,
 )
-from mcp_drop.domain import layout
-from mcp_drop.domain.errors import ConfigError
-from mcp_drop.domain.models import PublicMode, Scope
+from mcp_vitrine.domain import layout
+from mcp_vitrine.domain.errors import ConfigError
+from mcp_vitrine.domain.models import PublicMode, Scope
 
 GIGABYTE = 1024**3
 
@@ -30,7 +30,7 @@ def _valid_environment(environment: None) -> None:
 
 def _config_file(tmp_path: Path, body: str) -> Path:
     """Write a TOML file for the spec to load."""
-    path = tmp_path / "drop.toml"
+    path = tmp_path / "vitrine.toml"
     path.write_text(body, encoding="utf-8")
     return path
 
@@ -119,7 +119,7 @@ class DescribePrecedence:
     class WhenOnlyTheConfigFileSetsAKey:
         def it_takes_the_file_value(self, tmp_path: Path) -> None:
             settings = load_settings(
-                config_path=_config_file(tmp_path, '[drop]\nhost = "0.0.0.0"\n')
+                config_path=_config_file(tmp_path, '[vitrine]\nhost = "0.0.0.0"\n')
             )
             assert settings.host == "0.0.0.0"
 
@@ -132,21 +132,21 @@ class DescribePrecedence:
         def it_prefers_the_environment(
             self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         ) -> None:
-            monkeypatch.setenv("DROP_HOST", "10.0.0.5")
+            monkeypatch.setenv("VITRINE_HOST", "10.0.0.5")
             settings = load_settings(
-                config_path=_config_file(tmp_path, '[drop]\nhost = "0.0.0.0"\n')
+                config_path=_config_file(tmp_path, '[vitrine]\nhost = "0.0.0.0"\n')
             )
             assert settings.host == "10.0.0.5"
 
     class WhenAFlagSetsAKeyTheEnvironmentAlsoSets:
         def it_prefers_the_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_PORT", "1111")
+            monkeypatch.setenv("VITRINE_PORT", "1111")
             settings = load_settings(flags={"port": 3333})
             assert settings.port == 3333
 
     class WhenTheFileMixesBothLevels:
         def it_refuses_the_ambiguity(self, tmp_path: Path) -> None:
-            path = _config_file(tmp_path, 'host = "0.0.0.0"\n[drop]\nport = 9000\n')
+            path = _config_file(tmp_path, 'host = "0.0.0.0"\n[vitrine]\nport = 9000\n')
             with pytest.raises(ConfigError):
                 load_settings(config_path=path)
 
@@ -154,72 +154,72 @@ class DescribePrecedence:
 class DescribeEnvironmentFormats:
     class WhenAListIsCommaSeparated:
         def it_splits_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_ALLOWED_HOSTS", "drop.example.com, drop.local")
-            assert load_settings().allowed_hosts == ["drop.example.com", "drop.local"]
+            monkeypatch.setenv("VITRINE_ALLOWED_HOSTS", "vitrine.example.com, vitrine.local")
+            assert load_settings().allowed_hosts == ["vitrine.example.com", "vitrine.local"]
 
     class WhenASizeCarriesAUnit:
         def it_reads_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_QUOTA", "20GB")
+            monkeypatch.setenv("VITRINE_QUOTA", "20GB")
             assert load_settings().quota == 20 * GIGABYTE
 
     class WhenARateIsOff:
         def it_disables_the_bucket(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_RATE_WRITES", "off")
+            monkeypatch.setenv("VITRINE_RATE_WRITES", "off")
             assert load_settings().rate_writes is None
 
     class WhenTheLogLevelIsLowercase:
         def it_reads_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_LOG_LEVEL", "debug")
+            monkeypatch.setenv("VITRINE_LOG_LEVEL", "debug")
             assert load_settings().log_level is LogLevel.DEBUG
 
 
 class DescribeSecrets:
     class WhenTheyComeFromTheEnvironment:
         def it_reads_both_of_them(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_TOKENS", f"hermes:{'b' * 64}:read,ci-bot:{'c' * 64}")
+            monkeypatch.setenv("VITRINE_TOKENS", f"hermes:{'b' * 64}:read,ci-bot:{'c' * 64}")
             settings = load_settings()
             assert settings.tokens["hermes"].scopes == {Scope.READ}
             assert settings.tokens["ci-bot"].scopes == frozenset(Scope)
 
     class WhenTheConfigFileSetsTheSecret:
         def it_refuses_the_file(self, tmp_path: Path) -> None:
-            path = _config_file(tmp_path, '[drop]\nsecret = "not-a-place-for-secrets"\n')
+            path = _config_file(tmp_path, '[vitrine]\nsecret = "not-a-place-for-secrets"\n')
             with pytest.raises(ConfigError):
                 load_settings(config_path=path)
 
     class WhenTheConfigFileSetsTheTokens:
         def it_refuses_the_file(self, tmp_path: Path) -> None:
-            path = _config_file(tmp_path, f'[drop]\ntokens = "hermes:{"b" * 64}"\n')
+            path = _config_file(tmp_path, f'[vitrine]\ntokens = "hermes:{"b" * 64}"\n')
             with pytest.raises(ConfigError):
                 load_settings(config_path=path)
 
     class WhenTheSecretIsShorterThanTheMinimum:
         def it_refuses_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_SECRET", "too short")
+            monkeypatch.setenv("VITRINE_SECRET", "too short")
             with pytest.raises(ConfigError):
                 load_settings()
 
     class WhenATokenHashIsNotASha256:
         def it_refuses_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_TOKENS", "hermes:not-a-hash")
+            monkeypatch.setenv("VITRINE_TOKENS", "hermes:not-a-hash")
             with pytest.raises(ConfigError):
                 load_settings()
 
     class WhenATokenNameIsRepeated:
         def it_refuses_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_TOKENS", f"hermes:{'b' * 64},hermes:{'c' * 64}")
+            monkeypatch.setenv("VITRINE_TOKENS", f"hermes:{'b' * 64},hermes:{'c' * 64}")
             with pytest.raises(ConfigError):
                 load_settings()
 
     class WhenATokenNameIsNotALowercaseIdentifier:
         def it_refuses_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_TOKENS", f"Hermes:{'b' * 64}")
+            monkeypatch.setenv("VITRINE_TOKENS", f"Hermes:{'b' * 64}")
             with pytest.raises(ConfigError):
                 load_settings()
 
     class WhenNoTokenIsConfigured:
         def it_refuses_the_configuration(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_TOKENS", "")
+            monkeypatch.setenv("VITRINE_TOKENS", "")
             with pytest.raises(ConfigError):
                 load_settings()
 
@@ -227,57 +227,57 @@ class DescribeSecrets:
 class DescribeValidation:
     class WhenTheLinkTtlExceedsItsCeiling:
         def it_refuses_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_LINK_TTL", "30d")
-            monkeypatch.setenv("DROP_LINK_TTL_MAX", "7d")
+            monkeypatch.setenv("VITRINE_LINK_TTL", "30d")
+            monkeypatch.setenv("VITRINE_LINK_TTL_MAX", "7d")
             with pytest.raises(ConfigError):
                 load_settings()
 
     class WhenTheUploadTtlExceedsItsCeiling:
         def it_refuses_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_UPLOAD_TTL", "2h")
-            monkeypatch.setenv("DROP_UPLOAD_TTL_MAX", "15m")
+            monkeypatch.setenv("VITRINE_UPLOAD_TTL", "2h")
+            monkeypatch.setenv("VITRINE_UPLOAD_TTL_MAX", "15m")
             with pytest.raises(ConfigError):
                 load_settings()
 
     class WhenTheArtifactLimitExceedsTheQuota:
         def it_refuses_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_MAX_ARTIFACT", "20GB")
-            monkeypatch.setenv("DROP_QUOTA", "1GB")
+            monkeypatch.setenv("VITRINE_MAX_ARTIFACT", "20GB")
+            monkeypatch.setenv("VITRINE_QUOTA", "1GB")
             with pytest.raises(ConfigError):
                 load_settings()
 
     class WhenTheBaseUrlCarriesAPath:
         def it_refuses_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_PUBLIC_BASE_URL", "https://drop.example.com/drop")
+            monkeypatch.setenv("VITRINE_PUBLIC_BASE_URL", "https://vitrine.example.com/vitrine")
             with pytest.raises(ConfigError):
                 load_settings()
 
     class WhenTheBaseUrlIsNotHttp:
         def it_refuses_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_PUBLIC_BASE_URL", "ftp://drop.example.com")
+            monkeypatch.setenv("VITRINE_PUBLIC_BASE_URL", "ftp://vitrine.example.com")
             with pytest.raises(ConfigError):
                 load_settings()
 
     class WhenTheBaseUrlCarriesCredentials:
         def it_refuses_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_PUBLIC_BASE_URL", "https://user:pass@drop.example.com")
+            monkeypatch.setenv("VITRINE_PUBLIC_BASE_URL", "https://user:pass@vitrine.example.com")
             with pytest.raises(ConfigError):
                 load_settings()
 
     class WhenTheBaseUrlEndsInASlash:
         def it_normalises_it_to_an_origin(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_PUBLIC_BASE_URL", "https://drop.example.com/")
-            assert load_settings().public_base_url == "https://drop.example.com"
+            monkeypatch.setenv("VITRINE_PUBLIC_BASE_URL", "https://vitrine.example.com/")
+            assert load_settings().public_base_url == "https://vitrine.example.com"
 
     class WhenARendererIsUnknown:
         def it_refuses_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_RENDERERS", "md,docx")
+            monkeypatch.setenv("VITRINE_RENDERERS", "md,docx")
             with pytest.raises(ConfigError):
                 load_settings()
 
     class WhenTheFileNamesAKeyThatDoesNotExist:
         def it_refuses_the_file(self, tmp_path: Path) -> None:
-            path = _config_file(tmp_path, '[drop]\nmax_uplaod = "1MB"\n')
+            path = _config_file(tmp_path, '[vitrine]\nmax_uplaod = "1MB"\n')
             with pytest.raises(ConfigError, match="max_uplaod"):
                 load_settings(config_path=path)
 
@@ -296,34 +296,34 @@ class DescribeValidation:
 class DescribeTheEnvironmentItself:
     class WhenAVariableNamesAKeyThatDoesNotExist:
         def it_refuses_to_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_MAX_UPLAOD", "1MB")
-            with pytest.raises(ConfigError, match="DROP_MAX_UPLAOD"):
+            monkeypatch.setenv("VITRINE_MAX_UPLAOD", "1MB")
+            with pytest.raises(ConfigError, match="VITRINE_MAX_UPLAOD"):
                 load_settings()
 
     class WhenTheShellAlsoConfiguresAClient:
         def it_starts(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_URL", "https://drop.example.com")
-            monkeypatch.setenv("DROP_TOKEN", "a-client-token")
+            monkeypatch.setenv("VITRINE_URL", "https://vitrine.example.com")
+            monkeypatch.setenv("VITRINE_TOKEN", "a-client-token")
             assert isinstance(load_settings(), Settings)
 
 
 class DescribeThePlainHttpWarning:
     class WhenTheBaseUrlIsHttpAndTheBindIsPublic:
         def it_warns(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_PUBLIC_BASE_URL", "http://drop.example.com")
-            monkeypatch.setenv("DROP_HOST", "0.0.0.0")
+            monkeypatch.setenv("VITRINE_PUBLIC_BASE_URL", "http://vitrine.example.com")
+            monkeypatch.setenv("VITRINE_HOST", "0.0.0.0")
             assert "clear text" in (plain_http_warning(load_settings()) or "")
 
     class WhenTheBindIsLoopback:
         def it_stays_quiet(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_PUBLIC_BASE_URL", "http://127.0.0.1:8080")
-            monkeypatch.setenv("DROP_HOST", "127.0.0.1")
+            monkeypatch.setenv("VITRINE_PUBLIC_BASE_URL", "http://127.0.0.1:8080")
+            monkeypatch.setenv("VITRINE_HOST", "127.0.0.1")
             assert plain_http_warning(load_settings()) is None
 
     class WhenTheBaseUrlIsHttps:
         def it_stays_quiet(self, monkeypatch: pytest.MonkeyPatch) -> None:
-            monkeypatch.setenv("DROP_PUBLIC_BASE_URL", "https://drop.example.com")
-            monkeypatch.setenv("DROP_HOST", "0.0.0.0")
+            monkeypatch.setenv("VITRINE_PUBLIC_BASE_URL", "https://vitrine.example.com")
+            monkeypatch.setenv("VITRINE_HOST", "0.0.0.0")
             assert plain_http_warning(load_settings()) is None
 
 

@@ -5,15 +5,15 @@ from __future__ import annotations
 import httpx2
 import pytest
 
-from mcp_drop.domain.models import PublishedArtifact
-from mcp_drop.services.audit import AuditEvent
-from mcp_drop.services.container import Services
+from mcp_vitrine.domain.models import PublishedArtifact
+from mcp_vitrine.services.audit import AuditEvent
+from mcp_vitrine.services.container import Services
 
 
 class DescribeTheViewBucket:
     @pytest.fixture
     def overrides(self) -> dict[str, str]:
-        return {"DROP_RATE_VIEWS": "1/m"}
+        return {"VITRINE_RATE_VIEWS": "1/m"}
 
     @pytest.fixture
     def spent(self, http: httpx2.Client, published: PublishedArtifact) -> PublishedArtifact:
@@ -45,7 +45,7 @@ class DescribeTheViewBucket:
     class WhenAnUntrustedPeerForwardsAnotherAddress:
         @pytest.fixture
         def overrides(self) -> dict[str, str]:
-            return {"DROP_RATE_VIEWS": "1/m", "DROP_FORWARDED_ALLOW_IPS": "192.0.2.1"}
+            return {"VITRINE_RATE_VIEWS": "1/m", "VITRINE_FORWARDED_ALLOW_IPS": "192.0.2.1"}
 
         def it_ignores_the_header(self, http: httpx2.Client, spent: PublishedArtifact) -> None:
             response = http.get(spent.url, headers={"X-Forwarded-For": "203.0.113.9"})
@@ -54,7 +54,7 @@ class DescribeTheViewBucket:
     class WhenTheLimitIsOff:
         @pytest.fixture
         def overrides(self) -> dict[str, str]:
-            return {"DROP_RATE_VIEWS": "off"}
+            return {"VITRINE_RATE_VIEWS": "off"}
 
         def it_never_answers_429(self, http: httpx2.Client, spent: PublishedArtifact) -> None:
             assert http.get(spent.url).status_code == 200

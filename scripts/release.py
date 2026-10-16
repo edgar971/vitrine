@@ -25,15 +25,15 @@ GIT_CLIFF = "git-cliff@2.14.2"
 VERSION = re.compile(r"^(?P<base>\d+\.\d+\.\d+)(?P<pre>(?:a|b|rc)\d+)?$")
 FINAL_TAG = re.compile(r"^v\d+\.\d+\.\d+$")
 UNRELEASED = "## [Unreleased]"
-IMAGE = "ghcr.io/edgar971/drop:"
+IMAGE = "ghcr.io/edgar971/vitrine:"
 
 # Each file that repeats the version, and how its copy is written. The Hermes plugin carries the
 # base version: its manifest is not a Python package and has no pre-release form.
 PYPROJECT = Path("pyproject.toml")
 IMAGE_COPIES = (Path("examples/compose.yaml"), Path("examples/kubernetes/deployment.yaml"))
 PLUGIN_COPIES = (
-    Path("integrations/hermes/drop/plugin.yaml"),
-    Path("integrations/hermes/drop/SKILL.md"),
+    Path("integrations/hermes/vitrine/plugin.yaml"),
+    Path("integrations/hermes/vitrine/SKILL.md"),
 )
 
 

@@ -1,4 +1,4 @@
-"""drop for Hermes Agent: publish local files as private links (MCP server: ``mcp_servers.drop``).
+"""drop for Hermes Agent: publish local files as private links (MCP server: ``mcp_servers``).
 
 The MCP server owns everything else, including the one path to public. This plugin only adds
 what an MCP call cannot do well: stream files that are already on disk.

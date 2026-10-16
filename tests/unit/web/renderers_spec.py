@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 
-from mcp_drop.web.renderers import (
+from mcp_vitrine.web.renderers import (
     render_csv,
     render_json,
     render_markdown,

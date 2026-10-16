@@ -11,12 +11,12 @@ import pytest
 from fastmcp.client.elicitation import ElicitResult
 from fastmcp.exceptions import ToolError
 
-from mcp_drop.config import Settings, load_settings
-from mcp_drop.domain.models import GateDecision, Visibility
-from mcp_drop.mcp import gate
-from mcp_drop.mcp.server import build_mcp
-from mcp_drop.services.audit import AuditEvent, AuditEventName
-from mcp_drop.services.container import Services
+from mcp_vitrine.config import Settings, load_settings
+from mcp_vitrine.domain.models import GateDecision, Visibility
+from mcp_vitrine.mcp import gate
+from mcp_vitrine.mcp.server import build_mcp
+from mcp_vitrine.services.audit import AuditEvent, AuditEventName
+from mcp_vitrine.services.container import Services
 from tests.mcp.conftest import HANDSHAKE, MODERN, Call, Handler
 
 Events = Callable[[], tuple[AuditEvent, ...]]
@@ -177,7 +177,7 @@ class DescribeThePublicGate:
     class WhenPublicModeIsDisabled:
         @pytest.fixture
         def settings(self, environment: None, monkeypatch: pytest.MonkeyPatch) -> Settings:
-            monkeypatch.setenv("DROP_PUBLIC_MODE", "disabled")
+            monkeypatch.setenv("VITRINE_PUBLIC_MODE", "disabled")
             return load_settings()
 
         async def it_does_not_ask(
@@ -204,7 +204,7 @@ class DescribeThePublicGate:
     class WhenPublicModeIsUnrestricted:
         @pytest.fixture
         def settings(self, environment: None, monkeypatch: pytest.MonkeyPatch) -> Settings:
-            monkeypatch.setenv("DROP_PUBLIC_MODE", "unrestricted")
+            monkeypatch.setenv("VITRINE_PUBLIC_MODE", "unrestricted")
             return load_settings()
 
         async def it_makes_the_artifact_public_without_asking(
@@ -222,7 +222,7 @@ class DescribeThePublicGate:
         def it_warns_at_startup(
             self, settings: Settings, services: Services, caplog: pytest.LogCaptureFixture
         ) -> None:
-            with caplog.at_level(logging.WARNING, logger="mcp_drop.mcp.server"):
+            with caplog.at_level(logging.WARNING, logger="mcp_vitrine.mcp.server"):
                 build_mcp(settings, services)
             assert "unrestricted" in caplog.text
 

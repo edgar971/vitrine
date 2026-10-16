@@ -1,12 +1,12 @@
 ---
 paths:
-  - "src/mcp_drop/mcp/**"
+  - "src/mcp_vitrine/mcp/**"
 ---
 
 # MCP layer gotchas
 
 - Set all four `ToolAnnotations` hints explicitly. FastMCP's defaults say destructive and
-  open-world, which is wrong for most drop tools and makes clients prompt needlessly.
+  open-world, which is wrong for most vitrine tools and makes clients prompt needlessly.
 - A parameter injected with `Depends(...)` or `CurrentAccessToken()` is hidden from the schema.
   Anything else is visible to the model, so it needs a `Field(description=...)` and limits.
 - `mcp/gate.py` is the only code that awaits the client. On `2026-07-28` connections it returns

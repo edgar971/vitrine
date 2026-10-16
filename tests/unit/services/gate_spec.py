@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from mcp_drop.domain.models import (
+from mcp_vitrine.domain.models import (
     Artifact,
     ArtifactDetail,
     FileEntry,
@@ -14,7 +14,7 @@ from mcp_drop.domain.models import (
     PublicMode,
     Version,
 )
-from mcp_drop.services.gate import CONSENT_SCHEMA, PublicGate
+from mcp_vitrine.services.gate import CONSENT_SCHEMA, PublicGate
 
 NOW = datetime(2026, 10, 15, 10, 0, tzinfo=UTC)
 

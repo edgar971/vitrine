@@ -5,8 +5,8 @@ from __future__ import annotations
 import httpx2
 import pytest
 
-from mcp_drop.domain.models import GateDecision, PublishedArtifact, Visibility
-from mcp_drop.services.container import Services
+from mcp_vitrine.domain.models import GateDecision, PublishedArtifact, Visibility
+from mcp_vitrine.services.container import Services
 from tests.http.conftest import CLIENT
 
 INDEX = ("file", ("index.html", b"<h1>new</h1>"))

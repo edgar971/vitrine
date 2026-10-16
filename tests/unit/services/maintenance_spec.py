@@ -8,16 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from mcp_drop.domain import layout
-from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import AuditUnavailable
-from mcp_drop.domain.ids import new_id
-from mcp_drop.domain.models import SCHEMA_VERSION, ArtifactDraft
-from mcp_drop.services import maintenance
-from mcp_drop.services.audit import OPERATOR, AuditEvent, AuditEventName, AuditLog
-from mcp_drop.storage import schema
-from mcp_drop.storage.base import StoreConfig
-from mcp_drop.storage.filesystem import FileStore
+from mcp_vitrine.domain import layout
+from mcp_vitrine.domain.clock import Clock
+from mcp_vitrine.domain.errors import AuditUnavailable
+from mcp_vitrine.domain.ids import new_id
+from mcp_vitrine.domain.models import SCHEMA_VERSION, ArtifactDraft
+from mcp_vitrine.services import maintenance
+from mcp_vitrine.services.audit import OPERATOR, AuditEvent, AuditEventName, AuditLog
+from mcp_vitrine.storage import schema
+from mcp_vitrine.storage.base import StoreConfig
+from mcp_vitrine.storage.filesystem import FileStore
 
 OLD = SCHEMA_VERSION - 1
 # Version OLD carried an extra key this build no longer has.

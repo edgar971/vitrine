@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from mcp_drop.config import Settings, load_settings
-from mcp_drop.storage.base import StoreConfig
+from mcp_vitrine.config import Settings, load_settings
+from mcp_vitrine.storage.base import StoreConfig
 
 SECRET = "0123456789abcdef0123456789abcdef"
 TOKEN_HASH = "a" * 64
@@ -58,10 +58,10 @@ def advance(clock: FrozenClock) -> Callable[[timedelta], None]:
 
 @pytest.fixture
 def environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A valid environment, with any ambient ``DROP_*`` key removed first."""
+    """A valid environment, with any ambient ``VITRINE_*`` key removed first."""
     for key in list(os.environ):
-        if key.startswith("DROP_"):
+        if key.startswith("VITRINE_"):
             monkeypatch.delenv(key)
-    monkeypatch.setenv("DROP_SECRET", SECRET)
-    monkeypatch.setenv("DROP_TOKENS", f"hermes:{TOKEN_HASH}:read+write+share+publish")
-    monkeypatch.setenv("DROP_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("VITRINE_SECRET", SECRET)
+    monkeypatch.setenv("VITRINE_TOKENS", f"hermes:{TOKEN_HASH}:read+write+share+publish")
+    monkeypatch.setenv("VITRINE_DATA_DIR", str(tmp_path / "data"))

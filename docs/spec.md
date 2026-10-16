@@ -1,11 +1,11 @@
-# drop specification
+# vitrine specification
 
-Version: 0.1 (the contract `mcp-drop` 0.1 implements). The keywords **MUST**, **MUST NOT**, **SHOULD** and
+Version: 0.1 (the contract `mcp-vitrine` 0.1 implements). The keywords **MUST**, **MUST NOT**, **SHOULD** and
 **MAY** are used as in RFC 2119. Everything marked *configurable* has a key in § 8.
 
 ## 1. Scope
 
-drop stores files that agents publish and serves them to browsers. This spec defines:
+vitrine stores files that agents publish and serves them to browsers. This spec defines:
 
 - the data model and on-disk format;
 - the MCP interface used by agents;
@@ -158,7 +158,7 @@ private link survives a round trip through public.
 
 New content on a public artifact is public the moment it lands, so a version **MUST NOT** be added
 to a public artifact without the gate (§ 6). Over MCP, `artifact_update` asks the human when the
-token holds `drop:publish`; without that scope, and on every HTTP route, the write is refused
+token holds `vitrine:publish`; without that scope, and on every HTTP route, the write is refused
 (`publish_refused`, `gate` = `unsupported`). The check runs under the same lock as the write, so a
 publish that lands concurrently cannot slip a version past it.
 
@@ -193,27 +193,27 @@ see the tool at all, and calling it fails as an unknown tool.
 
 | Scope | Grants |
 |---|---|
-| `drop:read` | `artifact_get`, `artifact_list`, resources |
-| `drop:write` | create, update, upload and delete |
-| `drop:share` | `artifact_link`, `artifact_revoke_links` |
-| `drop:publish` | `artifact_set_visibility`, which still passes the public gate (§ 6) |
+| `vitrine:read` | `artifact_get`, `artifact_list`, resources |
+| `vitrine:write` | create, update, upload and delete |
+| `vitrine:share` | `artifact_link`, `artifact_revoke_links` |
+| `vitrine:publish` | `artifact_set_visibility`, which still passes the public gate (§ 6) |
 
-The HTTP API applies the same scopes: `/api` writes need `drop:write`, and listing needs
-`drop:read`.
+The HTTP API applies the same scopes: `/api` writes need `vitrine:write`, and listing needs
+`vitrine:read`.
 
 ### 5.1 Tools
 
 | Tool | Parameters | Result | Scope |
 |---|---|---|---|
-| `artifact_create` | `title`; `files: {path: text}` (UTF-8, total ≤ `max_mcp_body`); `entry?`; `expires_in?`; `tags?`; `note?`; `client_ref?` (§ 4.5) | `{id, url, version, expires_at, created}`. Always **private**; `url` is a fresh private link. `created` is false when `client_ref` matched. | `drop:write` |
-| `artifact_update` | `id`; `files?`; `merge=false`; `entry?`; `title?`; `expires_in?` (`"never"` clears); `tags?`; `note?` | `{id, url, version}`. The id is unchanged. With `merge`, files overlay the current version; without it they replace it. Without `files`, the current files carry over, so a metadata-only change is still a new version. On a **public** artifact the human is asked first (§ 6.1) and `url` is the public URL; a token without `drop:publish` is refused without asking (§ 4.4). | `drop:write` (+ `drop:publish` for a public artifact) |
-| `artifact_get` | `id`; `version?` | Metadata plus `files: [{path, bytes}]` | `drop:read` |
-| `artifact_list` | `query?` (title or tag substring); `tag?`; `visibility?`; `source?`; `limit=20` (max 100); `cursor?` | `{items: [{id, title, visibility, version, updated_at, source, tags}], next_cursor}`, newest first. **No URLs**: links are minted on purpose with `artifact_link`. | `drop:read` |
-| `artifact_link` | `id`; `ttl?` | `{url, expires_at}`. A fresh private link, or the public URL if public. | `drop:share` |
-| `artifact_set_visibility` | `id`; `visibility` | `{id, visibility, url}`. Going public follows § 6. Every change increments the link epoch. | `drop:publish` |
-| `artifact_revoke_links` | `id` | `{id, link_epoch}` | `drop:share` |
-| `artifact_upload_url` | `filename`; `id?`; `title?`; `ttl?` | `{id, put_url, expires_at, curl}`: a single-use signed upload URL (§ 7.3) for the artifact `id`, pre-allocated when none was given. `filename` and `title` ride unsigned in the URL's query: the signature fixes the id, the expiry and the nonce; the rest is the capability holder's to name. | `drop:write` |
-| `artifact_delete` | `id` | `{deleted: id}` | `drop:write` |
+| `artifact_create` | `title`; `files: {path: text}` (UTF-8, total ≤ `max_mcp_body`); `entry?`; `expires_in?`; `tags?`; `note?`; `client_ref?` (§ 4.5) | `{id, url, version, expires_at, created}`. Always **private**; `url` is a fresh private link. `created` is false when `client_ref` matched. | `vitrine:write` |
+| `artifact_update` | `id`; `files?`; `merge=false`; `entry?`; `title?`; `expires_in?` (`"never"` clears); `tags?`; `note?` | `{id, url, version}`. The id is unchanged. With `merge`, files overlay the current version; without it they replace it. Without `files`, the current files carry over, so a metadata-only change is still a new version. On a **public** artifact the human is asked first (§ 6.1) and `url` is the public URL; a token without `vitrine:publish` is refused without asking (§ 4.4). | `vitrine:write` (+ `vitrine:publish` for a public artifact) |
+| `artifact_get` | `id`; `version?` | Metadata plus `files: [{path, bytes}]` | `vitrine:read` |
+| `artifact_list` | `query?` (title or tag substring); `tag?`; `visibility?`; `source?`; `limit=20` (max 100); `cursor?` | `{items: [{id, title, visibility, version, updated_at, source, tags}], next_cursor}`, newest first. **No URLs**: links are minted on purpose with `artifact_link`. | `vitrine:read` |
+| `artifact_link` | `id`; `ttl?` | `{url, expires_at}`. A fresh private link, or the public URL if public. | `vitrine:share` |
+| `artifact_set_visibility` | `id`; `visibility` | `{id, visibility, url}`. Going public follows § 6. Every change increments the link epoch. | `vitrine:publish` |
+| `artifact_revoke_links` | `id` | `{id, link_epoch}` | `vitrine:share` |
+| `artifact_upload_url` | `filename`; `id?`; `title?`; `ttl?` | `{id, put_url, expires_at, curl}`: a single-use signed upload URL (§ 7.3) for the artifact `id`, pre-allocated when none was given. `filename` and `title` ride unsigned in the URL's query: the signature fixes the id, the expiry and the nonce; the rest is the capability holder's to name. | `vitrine:write` |
+| `artifact_delete` | `id` | `{deleted: id}` | `vitrine:write` |
 
 Every tool also carries a `title` and all four MCP annotation hints (`readOnlyHint`,
 `destructiveHint`, `idempotentHint`, `openWorldHint`); the values are listed in
@@ -231,7 +231,7 @@ No tool other than `artifact_set_visibility` takes a visibility, and no HTTP rou
 | `artifact://{id}/{path}` | Text of one file in the current version. Text types only, up to 1 MB. Anything else returns an error naming the size and type. |
 | `artifact://{id}/history` | This artifact's audit events, newest first (§ 11.3). An unknown id is `not found`. |
 
-Clients use resources to read an artifact back before revising it. Every resource needs `drop:read`
+Clients use resources to read an artifact back before revising it. Every resource needs `vitrine:read`
 and spends the `rate_reads` bucket. A file named `history` at an artifact's root is shadowed by the
 history resource; read it with `GET /s/…` instead.
 
@@ -253,7 +253,7 @@ model the sharing policy once, for every tool. It is part of the contract; chang
 minor-version change.
 
 ```text
-drop publishes files as links. Use it for anything the user should open in a browser,
+vitrine publishes files as links. Use it for anything the user should open in a browser,
 revise later or pass on: HTML pages, reports, charts, PDFs, images.
 - Everything you publish is private: links are signed and expire.
 - To revise, call artifact_update with the same id; the link stays the same.
@@ -326,10 +326,10 @@ cover them.
 | `GET /a/{id}/[{path}]` | none | Public artifact, current version. A missing, private or malformed id returns 404. |
 | `GET /a/{id}@{n}/[{path}]` | none | Pinned version `n` of a public artifact. A version that is not retained returns 404. |
 | `GET /s/{sig}/[{path}]`, `GET /s/{sig}@{n}/[{path}]` | view signature | The same for any artifact the signature names |
-| `PUT /u/{sig}?filename=[&title=]` | upload signature, from a client still configured with `drop:write` | Raw body. Creates the pre-allocated private artifact (`201`), or adds a version that overlays the file on the current ones (`200`). Single use. Returns `{id, url, version, expires_at}`. A public target returns 403 (§ 4.4). An URL whose client was removed from `DROP_TOKENS`, or lost `drop:write`, returns 404. |
-| `POST /api/artifacts` | bearer, `drop:write` | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?` (repeatable, or comma-separated), `note?`, `client_ref?`. Any other field is refused with 400, so there is no way to send a visibility. Returns `201 {id, url, version, expires_at}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
-| `PUT /api/artifacts/{id}` | bearer, `drop:write` | Same body, without `client_ref`. Adds a version; `merge=true` overlays; `expires_in=never` clears the expiry. A public target returns 403 (§ 4.4). |
-| `GET /api/artifacts` | bearer, `drop:read` | Same query parameters and page as `artifact_list` |
+| `PUT /u/{sig}?filename=[&title=]` | upload signature, from a client still configured with `vitrine:write` | Raw body. Creates the pre-allocated private artifact (`201`), or adds a version that overlays the file on the current ones (`200`). Single use. Returns `{id, url, version, expires_at}`. A public target returns 403 (§ 4.4). An URL whose client was removed from `VITRINE_TOKENS`, or lost `vitrine:write`, returns 404. |
+| `POST /api/artifacts` | bearer, `vitrine:write` | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?` (repeatable, or comma-separated), `note?`, `client_ref?`. Any other field is refused with 400, so there is no way to send a visibility. Returns `201 {id, url, version, expires_at}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
+| `PUT /api/artifacts/{id}` | bearer, `vitrine:write` | Same body, without `client_ref`. Adds a version; `merge=true` overlays; `expires_in=never` clears the expiry. A public target returns 403 (§ 4.4). |
+| `GET /api/artifacts` | bearer, `vitrine:read` | Same query parameters and page as `artifact_list` |
 | `GET /healthz` | none | `200 {"ok": true}` when `data_dir` is writable (probed through `data_dir/tmp`, where every write starts), else 503 |
 | `GET /metrics` on `metrics_port` | none | Prometheus text format, on a separate listener (§ 11) |
 
@@ -447,14 +447,14 @@ client name, and writing a line per refused request would turn a flood into disk
 ### 8.1 Sources and precedence
 
 1. Command-line flags (`--host`, `--port`, `--config`)
-2. Environment variables `DROP_<KEY>` (upper-case key)
-3. A TOML file given with `--config` (top-level keys or a `[drop]` table)
+2. Environment variables `VITRINE_<KEY>` (upper-case key)
+3. A TOML file given with `--config` (top-level keys or a `[vitrine]` table)
 4. Defaults
 
 **Secrets** (`secret`, `tokens`) are accepted **only** from the environment. A config file that
 sets them **MUST** be rejected at startup, so config files can be committed safely. Unknown keys
-**MUST** be rejected, which catches typos, in the file and among `DROP_*` variables alike. The
-client-side `DROP_URL` and `DROP_TOKEN` (what MCP clients and the Hermes plugin read) are not
+**MUST** be rejected, which catches typos, in the file and among `VITRINE_*` variables alike. The
+client-side `VITRINE_URL` and `VITRINE_TOKEN` (what MCP clients and the Hermes plugin read) are not
 settings and are ignored, so one shell can run the server and a client.
 
 **Formats**
@@ -534,10 +534,10 @@ Validation at startup:
 ### 8.3 Example
 
 ```toml
-# drop.toml: safe to commit; secrets come from DROP_SECRET and DROP_TOKENS
-[drop]
-data_dir        = "/var/lib/drop"
-public_base_url = "https://drop.example.com"
+# vitrine.toml: safe to commit; secrets come from VITRINE_SECRET and VITRINE_TOKENS
+[vitrine]
+data_dir        = "/var/lib/vitrine"
+public_base_url = "https://vitrine.example.com"
 host            = "0.0.0.0"
 public_mode     = "confirm"
 renderers       = ["md", "csv", "json"]
@@ -548,28 +548,28 @@ log_format      = "json"
 ```
 
 ```bash
-export DROP_SECRET="$(mcp-drop secret new)"
-export DROP_TOKENS="hermes:<sha256>:read+write+share+publish,ci-bot:<sha256>:write"   # from `mcp-drop token new`
-mcp-drop serve --config drop.toml
+export VITRINE_SECRET="$(mcp-vitrine secret new)"
+export VITRINE_TOKENS="hermes:<sha256>:read+write+share+publish,ci-bot:<sha256>:write"   # from `mcp-vitrine token new`
+mcp-vitrine serve --config vitrine.toml
 ```
 
 ## 9. Command line
 
 | Command | Purpose |
 |---|---|
-| `mcp-drop serve [--config FILE] [--host H] [--port P]` | Run the server. It refuses to start on data with another `schema_version` ([operations](operations.md) § 4), sweeps once before the first request, then every `sweep_interval`. |
-| `mcp-drop config check [--config FILE]` | Validate the configuration and print the effective values, with secrets redacted. Exits non-zero on error. |
-| `mcp-drop token new <name> [--scopes read,write,share,publish]` | Print a new random token, plus its `DROP_TOKENS` entry. Writes nothing to disk. |
-| `mcp-drop token hash <token>` | Print the hash of an existing token |
-| `mcp-drop secret new` | Print a new random 32-byte hex secret |
-| `mcp-drop sweep [--config FILE]` | Run the expiry and staging sweep once, then exit (for cron-style setups). Safe beside a running server: staging younger than 10 minutes is left alone. |
-| `mcp-drop audit [--id ID] [--client NAME] [--since 7d] [--json] [--config FILE]` | Print audit events, newest first; `--json` prints the stored lines |
-| `mcp-drop backup <dest> [--config FILE]` | Write a consistent, restorable copy of `data_dir` ([operations](operations.md) § 2) |
-| `mcp-drop migrate [--dry-run] [--config FILE]` | Upgrade `meta.json` files to the current `schema_version` ([operations](operations.md) § 4) |
+| `mcp-vitrine serve [--config FILE] [--host H] [--port P]` | Run the server. It refuses to start on data with another `schema_version` ([operations](operations.md) § 4), sweeps once before the first request, then every `sweep_interval`. |
+| `mcp-vitrine config check [--config FILE]` | Validate the configuration and print the effective values, with secrets redacted. Exits non-zero on error. |
+| `mcp-vitrine token new <name> [--scopes read,write,share,publish]` | Print a new random token, plus its `VITRINE_TOKENS` entry. Writes nothing to disk. |
+| `mcp-vitrine token hash <token>` | Print the hash of an existing token |
+| `mcp-vitrine secret new` | Print a new random 32-byte hex secret |
+| `mcp-vitrine sweep [--config FILE]` | Run the expiry and staging sweep once, then exit (for cron-style setups). Safe beside a running server: staging younger than 10 minutes is left alone. |
+| `mcp-vitrine audit [--id ID] [--client NAME] [--since 7d] [--json] [--config FILE]` | Print audit events, newest first; `--json` prints the stored lines |
+| `mcp-vitrine backup <dest> [--config FILE]` | Write a consistent, restorable copy of `data_dir` ([operations](operations.md) § 2) |
+| `mcp-vitrine migrate [--dry-run] [--config FILE]` | Upgrade `meta.json` files to the current `schema_version` ([operations](operations.md) § 4) |
 
 Every command exits `0` on success, `1` when it failed, and `2` when the arguments or the
 configuration are wrong. Commands that read `data_dir` load the same configuration as `serve`, so
-they need `DROP_SECRET` and `DROP_TOKENS` too.
+they need `VITRINE_SECRET` and `VITRINE_TOKENS` too.
 
 ## 10. Errors
 
@@ -607,12 +607,12 @@ tool error `internal error`.
 
 | Metric | Type | Labels |
 |---|---|---|
-| `drop_artifacts` | gauge | — |
-| `drop_storage_bytes` | gauge | — |
-| `drop_versions_created_total` | counter | `client` |
-| `drop_views_total` | counter | `route` = `a` \| `s` |
-| `drop_public_gate_total` | counter | `outcome` = `approved` \| `declined` \| `unsupported` \| `disabled` \| `not_required` (one per gate decision: making an artifact public, or adding a version to a public one) |
-| `drop_rejected_total` | counter | `reason` = `rate_limited` \| `scope` |
+| `vitrine_artifacts` | gauge | — |
+| `vitrine_storage_bytes` | gauge | — |
+| `vitrine_versions_created_total` | counter | `client` |
+| `vitrine_views_total` | counter | `route` = `a` \| `s` |
+| `vitrine_public_gate_total` | counter | `outcome` = `approved` \| `declined` \| `unsupported` \| `disabled` \| `not_required` (one per gate decision: making an artifact public, or adding a version to a public one) |
+| `vitrine_rejected_total` | counter | `reason` = `rate_limited` \| `scope` |
 
 Metrics **MUST NOT** carry artifact ids or titles.
 
@@ -636,7 +636,7 @@ state change is acknowledged.
 | `upload_url_issued` | `expires_at` |
 | `deleted` | — |
 | `expired` | — (written by the sweep) |
-| `migrated` | `version` (the `schema_version` reached), `files` (how many `meta.json` files); no `artifact`; `client` = `@operator`. Written once per `mcp-drop migrate` run that changes anything, before the first file changes. |
+| `migrated` | `version` (the `schema_version` reached), `files` (how many `meta.json` files); no `artifact`; `client` = `@operator`. Written once per `mcp-vitrine migrate` run that changes anything, before the first file changes. |
 | `access_denied` | `reason` = `scope` \| `rate_limited`; `tool`, or `route` as a route **name** (`upload`, `api_create`, …), never a path. A refused resource read is `tool` = `resources/read`. `artifact` is present only when the call named a well-formed id. |
 
 Rules:
@@ -657,4 +657,4 @@ Rules:
 | Versioning | Semantic versioning. The MCP tool names and parameters, the HTTP routes, the config keys and `meta.json` are the public API. |
 | MCP protocol | Both `2025-11-25` and `2026-07-28` clients are supported. The confirmation mechanism follows the negotiated version (§ 6.1). |
 | Python | 3.15 and newer |
-| On-disk format | `meta.json` carries `schema_version`. Upgrades migrate forward on `mcp-drop migrate`; the server refuses to start on data it would misread ([operations](operations.md) § 4). |
+| On-disk format | `meta.json` carries `schema_version`. Upgrades migrate forward on `mcp-vitrine migrate`; the server refuses to start on data it would misread ([operations](operations.md) § 4). |

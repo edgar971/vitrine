@@ -1,12 +1,12 @@
-# TLS for drop. Caddy keeps the original Host header, which drop checks (spec § 7.4), and sets
-# X-Forwarded-For, which drop trusts from the compose `edge` subnet only.
-{$DROP_DOMAIN} {
+# TLS for vitrine. Caddy keeps the original Host header, which vitrine checks (spec § 7.4), and sets
+# X-Forwarded-For, which vitrine trusts from the compose `edge` subnet only.
+{$VITRINE_DOMAIN} {
 	encode zstd gzip
 
-	# Optional hardening (docs/design.md § 12): if every agent reaches drop another way, keep
+	# Optional hardening (docs/design.md § 12): if every agent reaches vitrine another way, keep
 	# the write surface off the internet and serve only the views.
 	# @writes path /mcp /mcp/* /api/* /u/*
 	# respond @writes 404
 
-	reverse_proxy drop:8080
+	reverse_proxy vitrine:8080
 }

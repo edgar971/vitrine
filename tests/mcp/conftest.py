@@ -12,11 +12,11 @@ from fastmcp.server.auth import AccessToken
 from mcp.server.auth.middleware.auth_context import auth_context_var
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 
-from mcp_drop.config import Settings
-from mcp_drop.domain.models import Scope
-from mcp_drop.mcp.server import build_mcp
-from mcp_drop.services.audit import AuditEvent
-from mcp_drop.services.container import Services
+from mcp_vitrine.config import Settings
+from mcp_vitrine.domain.models import Scope
+from mcp_vitrine.mcp.server import build_mcp
+from mcp_vitrine.services.audit import AuditEvent
+from mcp_vitrine.services.container import Services
 from tests.conftest import FrozenClock
 
 CLIENT = "hermes"

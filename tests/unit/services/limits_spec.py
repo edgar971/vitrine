@@ -6,9 +6,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from mcp_drop.config import Settings, parse_rate
-from mcp_drop.domain.errors import RateLimited
-from mcp_drop.services.limits import Bucket, RateLimiter
+from mcp_vitrine.config import Settings, parse_rate
+from mcp_vitrine.domain.errors import RateLimited
+from mcp_vitrine.services.limits import Bucket, RateLimiter
 
 CLIENT = "hermes"
 

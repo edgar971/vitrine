@@ -6,10 +6,9 @@ import json
 
 import pytest
 
-from mcp_drop.domain.errors import (
+from mcp_vitrine.domain.errors import (
     AuditUnavailable,
     Conflict,
-    DropError,
     Expired,
     Invalid,
     NotFound,
@@ -19,8 +18,9 @@ from mcp_drop.domain.errors import (
     SchemaMismatch,
     StorageUnavailable,
     TooLarge,
+    VitrineError,
 )
-from mcp_drop.web.responses import SANDBOX_CSP, Prefix, problem, status_of
+from mcp_vitrine.web.responses import SANDBOX_CSP, Prefix, problem, status_of
 
 
 class DescribeTheSandbox:
@@ -59,7 +59,7 @@ class DescribeStatusOf:
             (SchemaMismatch("v9"), 500),
         ],
     )
-    def it_maps_each_domain_error_once(self, error: DropError, status: int) -> None:
+    def it_maps_each_domain_error_once(self, error: VitrineError, status: int) -> None:
         assert status_of(error) == status
 
 

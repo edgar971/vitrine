@@ -1,4 +1,4 @@
-# drop — one task runner for every gate. `just --list` shows the recipes.
+# vitrine — one task runner for every gate. `just --list` shows the recipes.
 # CI runs these same recipes (docs/design.md § 10), so nothing is checked only locally.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
@@ -50,7 +50,7 @@ test-browser:
 audit:
     #!/usr/bin/env bash
     set -euo pipefail
-    requirements="$(mktemp -t drop-audit.XXXXXX.txt)"
+    requirements="$(mktemp -t vitrine-audit.XXXXXX.txt)"
     trap 'rm -f "$requirements"' EXIT
     uv export --frozen --no-emit-project --no-hashes --quiet --output-file "$requirements"
     uvx pip-audit --requirement "$requirements" --no-deps --disable-pip --progress-spinner off
@@ -58,7 +58,7 @@ audit:
 # Behind a TLS-intercepting proxy, CA=<bundle.pem> passes its CA to the build as a secret
 # (it never lands in a layer).
 # Build the image for this machine
-image tag="drop:dev":
+image tag="vitrine:dev":
     #!/usr/bin/env bash
     set -euo pipefail
     ca=()
@@ -67,7 +67,7 @@ image tag="drop:dev":
     docker build ${ca[@]+"${ca[@]}"} --tag "{{tag}}" .
 
 # Build the image, then run it read-only, without capabilities, and probe /healthz
-image-test tag="drop:dev": (image tag)
+image-test tag="vitrine:dev": (image tag)
     docker/smoke.sh "{{tag}}"
 
 # Validate examples/: kubeconform on the Kubernetes manifests, Compose and the Caddyfile
@@ -80,23 +80,23 @@ examples:
         docker run --rm -v "$PWD/examples/kubernetes:/k:ro" ghcr.io/yannh/kubeconform:v0.8.0 \
             -strict -summary -skip Kustomization /k
     fi
-    DROP_SECRET=x DROP_TOKENS=x DROP_DOMAIN=drop.example.com \
+    VITRINE_SECRET=x VITRINE_TOKENS=x VITRINE_DOMAIN=vitrine.example.com \
         docker compose -f examples/compose.yaml config --quiet
-    docker run --rm -e DROP_DOMAIN=drop.example.com -v "$PWD/examples/Caddyfile:/etc/caddy/Caddyfile:ro" \
+    docker run --rm -e VITRINE_DOMAIN=vitrine.example.com -v "$PWD/examples/Caddyfile:/etc/caddy/Caddyfile:ro" \
         caddy:2.10 caddy adapt --config /etc/caddy/Caddyfile >/dev/null
     echo "examples: kubernetes, compose and Caddyfile are valid"
 
 # Regenerate docs/configuration.md from Settings (a spec fails while it is stale)
 docs:
-    uv run python -m mcp_drop.reference > docs/configuration.md
+    uv run python -m mcp_vitrine.reference > docs/configuration.md
 
 # One spec: just one DescribeThePackage
 one name:
     uv run pytest -k "{{name}}" --no-cov
 
-# Serve locally with the environment's DROP_* settings
+# Serve locally with the environment's VITRINE_* settings
 dev:
-    uv run mcp-drop serve
+    uv run mcp-vitrine serve
 
 # Build the wheel, install it alone in a fresh venv, and drive serve, /api and /mcp through it
 wheel-test:

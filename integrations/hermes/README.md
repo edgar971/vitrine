@@ -1,28 +1,28 @@
-# drop for Hermes Agent
+# vitrine for Hermes Agent
 
-A Hermes plugin that publishes files already on disk to a drop server. The drop MCP server does
+A Hermes plugin that publishes files already on disk to a vitrine server. The vitrine MCP server does
 everything else; set it up first ([README](../../README.md#hermes-agent)) under an `mcp_servers` key
-that is **not** `drop` — a key equal to the plugin's name makes Hermes register the server's tools
+that is **not** `vitrine` — a key equal to the plugin's name makes Hermes register the server's tools
 without ever exposing them, and nothing can call them. Its tools are then `mcp__<key>__artifact_*`.
 
 | Adds | What it does |
 |---|---|
 | `artifact_publish_files` tool | Streams files or a folder to `POST /api/artifacts` (or `PUT` with `id`, a new version behind the same link) and returns a **private** link. It has no visibility parameter: going public is the server's `artifact_set_visibility`, which asks you. |
-| `drop:drop` skill | When to share output as a link, and to keep it private unless you ask |
+| `vitrine:vitrine` skill | When to share output as a link, and to keep it private unless you ask |
 | `/share <path>…` | A private link to the files, without a turn of the agent |
 | `/artifacts [query]` | The newest artifacts, with ids and visibility (links are minted on purpose, through the agent) |
 
 ## Install
 
 ```bash
-hermes plugins install edgar971/drop/integrations/hermes/drop --enable
+hermes plugins install edgar971/vitrine/integrations/hermes/vitrine --enable
 ```
 
 In `~/.hermes/.env`:
 
 ```bash
-DROP_URL=https://drop.example.com
-DROP_TOKEN=<a token from `mcp-drop token new hermes`>
+VITRINE_URL=https://vitrine.example.com
+VITRINE_TOKEN=<a token from `mcp-vitrine token new hermes`>
 ```
 
 The plugin needs the token's `write` scope to publish and `read` for `/artifacts`. It uses the
@@ -38,5 +38,5 @@ resolve against the agent's working directory.
 
 ## Development
 
-`tests/integrations/hermes_spec.py` drives a real drop server through the plugin. CI also runs
+`tests/integrations/hermes_spec.py` drives a real vitrine server through the plugin. CI also runs
 Hermes's own admission check (`hermes plugins validate`) at a pinned Hermes commit.

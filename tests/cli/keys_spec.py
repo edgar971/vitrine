@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from mcp_drop.config import parse_tokens
+from mcp_vitrine.config import parse_tokens
 from tests.cli.conftest import Runner
 from tests.conftest import SECRET
 
@@ -36,7 +36,7 @@ class DescribeTokenNew:
             entry = _field(run("token", "new", "hermes").out, "entry")
             assert entry.endswith(":read+write+share+publish")
 
-        def it_prints_an_entry_drop_tokens_accepts(self, run: Runner) -> None:
+        def it_prints_an_entry_vitrine_tokens_accepts(self, run: Runner) -> None:
             entry = _field(run("token", "new", "hermes").out, "entry")
             assert list(parse_tokens(entry)) == ["hermes"]
 
@@ -95,20 +95,20 @@ class DescribeConfigCheck:
         def it_warns_that_it_holds_all_four(
             self, run: Runner, environment: None, monkeypatch: pytest.MonkeyPatch
         ) -> None:
-            monkeypatch.setenv("DROP_TOKENS", f"hermes:{'a' * 64}")
+            monkeypatch.setenv("VITRINE_TOKENS", f"hermes:{'a' * 64}")
             assert "warning: token 'hermes' lists no scopes" in run("config", "check").err
 
     class WhenAValueIsInvalid:
         def it_exits_as_misconfigured(
             self, run: Runner, environment: None, monkeypatch: pytest.MonkeyPatch
         ) -> None:
-            monkeypatch.setenv("DROP_SECRET", "short")
+            monkeypatch.setenv("VITRINE_SECRET", "short")
             assert run("config", "check").status == 2
 
     class WhenTheFileHoldsASecret:
         def it_names_the_problem_without_echoing_it(
             self, run: Runner, environment: None, tmp_path: Path
         ) -> None:
-            config = tmp_path / "drop.toml"
+            config = tmp_path / "vitrine.toml"
             config.write_text('secret = "do-not-print-me-0123456789abcdef"\n')
             assert "do-not-print-me" not in run("config", "check", "--config", str(config)).err

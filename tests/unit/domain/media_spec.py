@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcp_drop.domain.media import OCTET_STREAM, content_type, is_text
+from mcp_vitrine.domain.media import OCTET_STREAM, content_type, is_text
 
 
 class DescribeContentType:

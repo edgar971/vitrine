@@ -74,15 +74,17 @@ class DescribeAVersion:
 
 class DescribeBumping:
     def it_sets_the_project_version(self) -> None:
-        text = '[project]\nname = "mcp-drop"\nversion = "0.1.0"\n'
+        text = '[project]\nname = "mcp-vitrine"\nversion = "0.1.0"\n'
         assert 'version = "0.2.0rc1"' in release.bump_pyproject(text, "0.2.0rc1")
 
     def it_retags_the_image(self) -> None:
-        text = "    image: ghcr.io/edgar971/drop:0.1.0\n"
-        assert release.bump_image(text, "0.2.0rc1") == "    image: ghcr.io/edgar971/drop:0.2.0rc1\n"
+        text = "    image: ghcr.io/edgar971/vitrine:0.1.0\n"
+        assert (
+            release.bump_image(text, "0.2.0rc1") == "    image: ghcr.io/edgar971/vitrine:0.2.0rc1\n"
+        )
 
     def it_gives_the_plugin_the_base_version_of_a_pre_release(self) -> None:
-        assert release.bump_plugin("name: drop\nversion: 0.1.0\n", "0.2.0rc1").endswith(
+        assert release.bump_plugin("name: vitrine\nversion: 0.1.0\n", "0.2.0rc1").endswith(
             "version: 0.2.0\n"
         )
 

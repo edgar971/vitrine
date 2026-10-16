@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from mcp_drop.domain import layout
-from mcp_drop.domain.clock import Clock
-from mcp_drop.domain.errors import SchemaMismatch
-from mcp_drop.domain.ids import new_id
-from mcp_drop.domain.models import SCHEMA_VERSION, ArtifactDraft
-from mcp_drop.storage import schema
-from mcp_drop.storage.base import StoreConfig
-from mcp_drop.storage.filesystem import FileStore
+from mcp_vitrine.domain import layout
+from mcp_vitrine.domain.clock import Clock
+from mcp_vitrine.domain.errors import SchemaMismatch
+from mcp_vitrine.domain.ids import new_id
+from mcp_vitrine.domain.models import SCHEMA_VERSION, ArtifactDraft
+from mcp_vitrine.storage import schema
+from mcp_vitrine.storage.base import StoreConfig
+from mcp_vitrine.storage.filesystem import FileStore
 
 OLD = SCHEMA_VERSION - 1
 
@@ -77,7 +77,7 @@ class DescribeRequireCurrent:
 
     class WhenAnArtifactIsOlder:
         def it_asks_for_a_migration(self, root: Path, old: str) -> None:
-            with pytest.raises(SchemaMismatch, match="mcp-drop migrate"):
+            with pytest.raises(SchemaMismatch, match="mcp-vitrine migrate"):
                 schema.require_current(root)
 
     class WhenAnArtifactIsNewer:

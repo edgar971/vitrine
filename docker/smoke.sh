@@ -5,8 +5,8 @@ set -euo pipefail
 
 image="$1"
 port="${SMOKE_PORT:-18080}"
-name="drop-smoke-$$"
-volume="drop-smoke-$$"
+name="vitrine-smoke-$$"
+volume="vitrine-smoke-$$"
 host="localhost:8080"
 
 cleanup() {
@@ -22,7 +22,7 @@ entry="$(docker run --rm "$image" token new smoke --scopes read 2>/dev/null | aw
 docker run --detach --name "$name" \
     --read-only --cap-drop ALL --security-opt no-new-privileges \
     --volume "$volume:/data" \
-    --env DROP_SECRET="$secret" --env DROP_TOKENS="$entry" \
+    --env VITRINE_SECRET="$secret" --env VITRINE_TOKENS="$entry" \
     --publish "127.0.0.1:$port:8080" \
     "$image" >/dev/null
 

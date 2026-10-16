@@ -10,11 +10,11 @@ from pathlib import Path
 import httpx2
 import pytest
 
-from mcp_drop.config import Settings
-from mcp_drop.domain import layout
-from mcp_drop.domain.errors import Expired, NotFound
-from mcp_drop.domain.models import ArtifactDraft, PublishedArtifact
-from mcp_drop.services.container import Services
+from mcp_vitrine.config import Settings
+from mcp_vitrine.domain import layout
+from mcp_vitrine.domain.errors import Expired, NotFound
+from mcp_vitrine.domain.models import ArtifactDraft, PublishedArtifact
+from mcp_vitrine.services.container import Services
 from tests.conftest import FrozenClock
 from tests.http.conftest import CLIENT
 from tests.unit.services.metrics_spec import RecordingMetrics
@@ -73,7 +73,7 @@ class DescribeTheLifespan:
         @pytest.fixture
         def overrides(self) -> dict[str, str]:
             """Sweep every second."""
-            return {"DROP_SWEEP_INTERVAL": "1s"}
+            return {"VITRINE_SWEEP_INTERVAL": "1s"}
 
         def it_deletes_what_expired_meanwhile(
             self, base: str, services: Services, clock: FrozenClock
@@ -89,7 +89,7 @@ class DescribeTheLifespan:
         @pytest.fixture
         def overrides(self) -> dict[str, str]:
             """Sweep every second."""
-            return {"DROP_SWEEP_INTERVAL": "1s"}
+            return {"VITRINE_SWEEP_INTERVAL": "1s"}
 
         @pytest.fixture
         def failing(self, services: Services, monkeypatch: pytest.MonkeyPatch) -> list[int]:

@@ -1,4 +1,4 @@
-# drop design
+# vitrine design
 
 How the [spec](spec.md) is built. The aims, in order: **safe by default, simple, easy to run,
 easy to extend.**
@@ -7,7 +7,7 @@ easy to extend.**
 
 1. **One process, one port, one directory.** No database, no queue, no sidecar.
 2. **The server owns its security.** Auth, link signing, the public gate, the rebinding guard and
-   the sandbox headers all live in drop. A reverse proxy is optional.
+   the sandbox headers all live in vitrine. A reverse proxy is optional.
 3. **MCP first.** Every capability is an MCP tool. HTTP exists only for browsers and bulk upload.
 4. **One gate to public.** It is a single code path, tested for each MCP protocol era, and it
    fails closed.
@@ -37,7 +37,7 @@ easy to extend.**
 ## 3. Package layout
 
 ```
-src/mcp_drop/
+src/mcp_vitrine/
   app.py          build_app(settings) → one Starlette app: web routes + /mcp, one middleware
                   stack, and the lifespan that sweeps at startup and every sweep_interval
   cli.py          serve · config check · token · secret · sweep · audit · backup · migrate
@@ -74,7 +74,7 @@ tools = LocalProvider()
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False,
                                 idempotent_hint=False, open_world_hint=False),
     tags={"write"},
-    auth=require_scopes("drop:write"),
+    auth=require_scopes("vitrine:write"),
     timeout=30,
 )
 def artifact_create(
@@ -90,7 +90,7 @@ def artifact_create(
                           entry=entry)
     return service.create(draft, client=caller.client_id)
 
-server = FastMCP("drop", instructions=INSTRUCTIONS, providers=[tools, resources, prompts],
+server = FastMCP("vitrine", instructions=INSTRUCTIONS, providers=[tools, resources, prompts],
                  auth=verifier)
 ```
 
@@ -99,7 +99,7 @@ These rules were validated against FastMCP 4.1 (see [`research.md`](research.md)
 | Rule | Why |
 |---|---|
 | Use `@provider.tool(...)` on a `LocalProvider` per feature, not `@mcp.tool` on a global server | No import-time global; providers compose into `FastMCP(providers=[...])` and test alone |
-| Set all four `ToolAnnotations` hints and a `title` on every tool | Clients use them for UI and approval policy; the defaults (destructive, open-world) are wrong for most of drop |
+| Set all four `ToolAnnotations` hints and a `title` on every tool | Clients use them for UI and approval policy; the defaults (destructive, open-world) are wrong for most of vitrine |
 | Use `Annotated[T, Field(description=…, constraints)]` for every parameter | Descriptions and limits land in the JSON schema the model sees. No separate docs to drift. |
 | Inject services with `Depends(...)` and the caller with `CurrentAccessToken()` | Injected parameters are hidden from the schema; no globals, and easy test overrides |
 | Use per-tool `auth=require_scopes(...)` | A token without the scope does not even *see* the tool. Least privilege comes for free. |
@@ -114,15 +114,15 @@ These rules were validated against FastMCP 4.1 (see [`research.md`](research.md)
 
 | Tool | Title | Scope | read-only | destructive | idempotent | open-world |
 |---|---|---|---|---|---|---|
-| `artifact_create` | Create artifact | `drop:write` | no | no | no | no |
-| `artifact_update` | Update artifact | `drop:write` | no | no | no | no |
-| `artifact_get` | Get artifact | `drop:read` | yes | no | yes | no |
-| `artifact_list` | List artifacts | `drop:read` | yes | no | yes | no |
-| `artifact_link` | Create private link | `drop:share` | no | no | no | no |
-| `artifact_set_visibility` | Change visibility | `drop:publish` | no | no | yes | **yes** |
-| `artifact_revoke_links` | Revoke private links | `drop:share` | no | yes | no | no |
-| `artifact_upload_url` | Create upload URL | `drop:write` | no | no | no | no |
-| `artifact_delete` | Delete artifact | `drop:write` | no | **yes** | yes | no |
+| `artifact_create` | Create artifact | `vitrine:write` | no | no | no | no |
+| `artifact_update` | Update artifact | `vitrine:write` | no | no | no | no |
+| `artifact_get` | Get artifact | `vitrine:read` | yes | no | yes | no |
+| `artifact_list` | List artifacts | `vitrine:read` | yes | no | yes | no |
+| `artifact_link` | Create private link | `vitrine:share` | no | no | no | no |
+| `artifact_set_visibility` | Change visibility | `vitrine:publish` | no | no | yes | **yes** |
+| `artifact_revoke_links` | Revoke private links | `vitrine:share` | no | yes | no | no |
+| `artifact_upload_url` | Create upload URL | `vitrine:write` | no | no | no | no |
+| `artifact_delete` | Delete artifact | `vitrine:write` | no | **yes** | yes | no |
 
 `set_visibility` is marked open-world because making something public exposes it beyond the
 system.
@@ -213,8 +213,8 @@ New implementations run the same shared contract tests as the defaults (§ 9).
 **Any MCP client** (Claude Code shown):
 
 ```bash
-claude mcp add --transport http drop https://drop.example.com/mcp \
-  --header "Authorization: Bearer $DROP_TOKEN"
+claude mcp add --transport http vitrine https://vitrine.example.com/mcp \
+  --header "Authorization: Bearer $VITRINE_TOKEN"
 ```
 
 Each client gets its own token and scopes. Binaries go through `artifact_upload_url` and
@@ -226,24 +226,24 @@ Slack, …), and fails closed for cron jobs.
 
 ```yaml
 mcp_servers:
-  drop_mcp:                       # not `drop`: a key equal to the plugin's name hides its tools
-    url: "https://drop.example.com/mcp"
-    headers: { Authorization: "Bearer ${DROP_TOKEN}" }
+  vitrine_mcp:                    # not `vitrine`: a key equal to the plugin's name hides its tools
+    url: "https://vitrine.example.com/mcp"
+    headers: { Authorization: "Bearer ${VITRINE_TOKEN}" }
     elicitation: { timeout: 300 }
 plugins:
-  enabled: [drop]
+  enabled: [vitrine]
 ```
 
-The optional **Hermes plugin** (`integrations/hermes/drop/`) adds:
+The optional **Hermes plugin** (`integrations/hermes/vitrine/`) adds:
 
 - `artifact_publish_files(paths, …)`, which streams local files to `/api/artifacts`, always
   private;
-- a `drop:drop` skill;
+- a `vitrine:vitrine` skill;
 - the `/share` and `/artifacts` commands.
 
 It has no visibility parameter and no `ctx.call_mcp` grant. It uses only the standard library
 (`http.client`), so it adds nothing to Hermes's environment and runs on every Python Hermes
-supports (3.11+). When drop refuses an upload before reading it (a wrong token, a missing scope,
+supports (3.11+). When vitrine refuses an upload before reading it (a wrong token, a missing scope,
 a rate limit, an oversized body), the client still reads the refusal, or names those causes when
 the connection was reset first. CI runs `hermes plugins validate` on it at a pinned Hermes commit,
 and `tests/integrations/hermes_spec.py` drives a real server through it.
@@ -282,7 +282,7 @@ tests/
   contract/     one suite parametrised over every Store implementation
   mcp/          tool behaviour via FastMCP's in-memory Client (schemas, annotations, gate)
   http/         real uvicorn on a free port: auth and scopes, headers, guard, limits, logs
-  cli/          the mcp-drop commands, in-process against a temporary data_dir
+  cli/          the mcp-vitrine commands, in-process against a temporary data_dir
   integrations/ client plugins (Hermes) driving a real server
   browser/      Playwright Chromium, marker "browser"; its own CI job
 ```
@@ -308,15 +308,15 @@ procedure is CONTRIBUTING.md § Releasing.
 
 **Container image:** the `Dockerfile` — CPython 3.15 on `debian:trixie-slim`, user 10001, a
 read-only root filesystem, everything it writes under `/data`. Running it, and what to check
-before exposing drop, is [operations](operations.md) § 9.
+before exposing vitrine, is [operations](operations.md) § 9.
 
 **ADRs:** `docs/adr/` records the decisions that are expensive to reverse.
 
 ## 11. Deployment
 
-Local `uvx mcp-drop serve`, a container, Compose with Caddy for TLS, or the Kubernetes manifests:
+Local `uvx mcp-vitrine serve`, a container, Compose with Caddy for TLS, or the Kubernetes manifests:
 [operations](operations.md) § 9 has each one, the image's run flags, and what to check before
-exposing drop to the internet, and [`examples/`](../examples/) holds the deployment shapes.
+exposing vitrine to the internet, and [`examples/`](../examples/) holds the deployment shapes.
 
 ## 12. Compatibility risks
 

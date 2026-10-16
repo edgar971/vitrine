@@ -8,9 +8,9 @@ import time
 import httpx2
 import pytest
 
-from mcp_drop.domain.models import PublishedArtifact
-from mcp_drop.services.container import Services
-from mcp_drop.web.middleware import ACCESS_LOGGER
+from mcp_vitrine.domain.models import PublishedArtifact
+from mcp_vitrine.services.container import Services
+from mcp_vitrine.web.middleware import ACCESS_LOGGER
 from tests.http.conftest import CLIENT, FULL_TOKEN, signature
 
 
@@ -29,7 +29,7 @@ def _server_log(caplog: pytest.LogCaptureFixture) -> str:
     return "\n".join(
         record.getMessage()
         for record in caplog.records
-        if record.name.startswith(("mcp_drop", "uvicorn", "starlette", "fastmcp", "mcp."))
+        if record.name.startswith(("mcp_vitrine", "uvicorn", "starlette", "fastmcp", "mcp."))
     )
 
 

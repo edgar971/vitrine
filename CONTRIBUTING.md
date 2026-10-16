@@ -87,20 +87,18 @@ hand; the one exception is `0.1.0`, whose notes were written before the changelo
 
 ## Releasing
 
-1. **Rehearse with a pre-release.** `just release 0.2.0rc1` bumps every copy of the version
-   (`pyproject.toml`, the example image tags, the Hermes plugin), re-locks and runs the gates.
-   Commit it as `chore(release): 0.2.0rc1`, open its pull request with the
+1. **Optionally, rehearse with a pre-release.** `just release 0.2.0rc1` bumps every copy of the
+   version (`pyproject.toml`, the example image tags, the Hermes plugin), re-locks and runs the
+   gates. Commit it as `chore(release): 0.2.0rc1`, open its pull request with the
    [release template](#pull-requests), merge, and tag the merged commit:
    `git tag v0.2.0rc1 <sha> && git push origin v0.2.0rc1`. The release workflow pushes and signs
-   `ghcr.io/edgar971/vitrine:0.2.0rc1`, publishes to **TestPyPI**, and creates a GitHub pre-release
-   with notes rendered from the commits.
-2. **Check the rehearsal**: install it with
-   `uvx --index https://test.pypi.org/simple/ --index-strategy unsafe-best-match --from mcp-vitrine==0.2.0rc1 mcp-vitrine --version`
-   (its dependencies come from PyPI),
+   `ghcr.io/edgar971/vitrine:0.2.0rc1`, publishes it to **PyPI** as a pre-release (installers skip
+   it unless it is asked for by version), and creates a GitHub pre-release with notes rendered
+   from the commits. Check it with `uvx --from mcp-vitrine==0.2.0rc1 mcp-vitrine --version`,
    connect a client, and verify the image as [operations](docs/operations.md) § 9 says.
-3. **Release.** `just release 0.2.0` does the same and also writes the `## [0.2.0]` section of
-   `CHANGELOG.md`. Commit, merge and tag `v0.2.0`: this one goes to **PyPI**, and its notes are
-   that section.
+2. **Release.** `just release 0.2.0` does the same and also writes the `## [0.2.0]` section of
+   `CHANGELOG.md`. Commit, merge and tag `v0.2.0`: it goes to PyPI, and its notes are that
+   section.
 
 The tag must be PEP 440 (`v0.2.0rc1`, not `v0.2.0-rc.1`), and the workflow refuses a tag that
 disagrees with `pyproject.toml`. The image is pushed and verified before anything reaches PyPI,

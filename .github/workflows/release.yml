@@ -5,8 +5,9 @@ name: release
 # a GitHub release. Nothing is published unless every CI gate passes on the tagged commit.
 #
 # - `vX.Y.Z` is a release: PyPI, and notes from its CHANGELOG.md section.
-# - `vX.Y.ZrcN` (or aN, bN) is a pre-release to rehearse one: TestPyPI, and notes rendered from
-#   the commits since the last release; the GitHub release is marked as a pre-release.
+# - `vX.Y.ZrcN` (or aN, bN) is a pre-release: PyPI too, where installers skip it unless asked for
+#   it by version, and notes rendered from the commits since the last release; the GitHub release
+#   is marked as a pre-release.
 #
 # The image goes first: a PyPI version can never be uploaded again, so it is spent only once the
 # image is out and verified.
@@ -160,11 +161,10 @@ jobs:
     needs: [ci, version, image]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # PyPI (or TestPyPI, for a pre-release) trusts this workflow, in this environment, to publish
-    # mcp-vitrine: no token is stored.
+    # PyPI trusts this workflow, in this environment, to publish mcp-vitrine: no token is stored.
     environment:
-      name: ${{ needs.version.outputs.prerelease == 'true' && 'testpypi' || 'pypi' }}
-      url: ${{ needs.version.outputs.prerelease == 'true' && 'https://test.pypi.org' || 'https://pypi.org' }}/project/mcp-vitrine/${{ needs.version.outputs.version }}/
+      name: pypi
+      url: https://pypi.org/project/mcp-vitrine/${{ needs.version.outputs.version }}/
     permissions:
       contents: read
       id-token: write
@@ -188,14 +188,7 @@ jobs:
         run: uvx twine@6.2.0 check --strict dist/*
 
       - name: Publish by trusted publishing
-        env:
-          PRERELEASE: ${{ needs.version.outputs.prerelease }}
-        run: |
-          if [ "$PRERELEASE" = "true" ]; then
-            uv publish --trusted-publishing always --publish-url https://test.pypi.org/legacy/
-          else
-            uv publish --trusted-publishing always
-          fi
+        run: uv publish --trusted-publishing always
 
 
   github:

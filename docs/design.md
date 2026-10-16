@@ -302,9 +302,9 @@ checks that every commit is a Conventional Commit.
 `ci.yml`), a PEP 440 check against `pyproject.toml`, the image for amd64 and arm64 with an SBOM,
 a provenance attestation and a keyless cosign signature, tagged with its version (`stable`
 follows the newest final release once its image is verified; there is no `latest`), then
-`uv build` and trusted publishing to TestPyPI for a pre-release and to PyPI for a final version, then a GitHub release with notes from the changelog. The image goes
-first, because a PyPI version can never be uploaded twice. Rehearse with a pre-release; the
-procedure is CONTRIBUTING.md § Releasing.
+`uv build` and trusted publishing to PyPI (a pre-release too, which installers skip unless it is
+asked for), then a GitHub release with notes from the changelog. The image goes first, because a
+PyPI version can never be uploaded twice. The procedure is CONTRIBUTING.md § Releasing.
 
 **Container image:** the `Dockerfile` — CPython 3.15 on `debian:trixie-slim`, user 10001, a
 read-only root filesystem, everything it writes under `/data`. Running it, and what to check

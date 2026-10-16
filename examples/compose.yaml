@@ -14,7 +14,7 @@ name: vitrine
 
 services:
   vitrine:
-    image: ghcr.io/edgar971/vitrine:0.1.0
+    image: ghcr.io/edgar971/vitrine:0.1.0rc1
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]

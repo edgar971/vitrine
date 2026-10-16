@@ -226,7 +226,7 @@ Slack, …), and fails closed for cron jobs.
 
 ```yaml
 mcp_servers:
-  drop:
+  drop_mcp:                       # not `drop`: a key equal to the plugin's name hides its tools
     url: "https://drop.example.com/mcp"
     headers: { Authorization: "Bearer ${DROP_TOKEN}" }
     elicitation: { timeout: 300 }

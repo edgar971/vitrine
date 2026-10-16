@@ -1,8 +1,7 @@
 # drop security model
 
 The threat model, controls and residual risks for the [spec](spec.md) and [design](design.md).
-In the repository this document becomes `docs/security.md`, next to a `SECURITY.md` that explains
-how to report vulnerabilities (GitHub private advisories) and which versions are supported.
+Report a vulnerability through [`SECURITY.md`](../SECURITY.md), not an issue.
 
 ## 1. Assets
 
@@ -34,8 +33,9 @@ how to report vulnerabilities (GitHub private advisories) and which versions are
 
 ## 3. Threats and controls
 
-"Validated" refers to the spike checks in [`research.md`](research.md) § 5. "Spec" means the
-control is specified and must ship with the tests listed in § 6.
+**Validated** rows are the controls the design spike proved first; each is a spec today, and the
+cell names the closest one. **Spec** rows came after the spike, where the code is the evidence;
+§ 6 lists their tests.
 
 | # | Threat | Control | Status |
 |---|---|---|---|
@@ -80,11 +80,11 @@ control is specified and must ship with the tests listed in § 6.
 | R3 | The human approves without reading | The prompt names the title, the file count and the consequence. A future option can add a short content preview. |
 | R4 | Public URLs last until revoked: the id is the secret | That is the meaning of "anyone with the link". `artifact_set_visibility(private)` or `artifact_delete` removes access at the origin immediately; public views are `max-age=60`, so a shared cache or CDN may serve them for up to a minute longer. |
 | R5 | A single replica means downtime on restart | Acceptable for the target scale; the `Store` seam is the path to more replicas |
-| R6 | Protocol-era detection uses a private FastMCP method | Minor-version pin plus per-era tests (design § 10) |
+| R6 | Protocol-era detection uses a private FastMCP method | Minor-version pin plus per-era tests (design § 12) |
 
-## 6. Security tests the implementation must ship
+## 6. The security specs
 
-1. Every validated check in [`research.md`](research.md) § 5, as pytest.
+1. Every control in § 3, as a pytest spec.
 2. **Route table:** enumerate the ASGI routes and assert each is `/mcp` (provider auth),
    bearer-checked, signature-checked, or on the explicit public list (`/a/…`, `/healthz`).
 3. **Upload single use:** a second `PUT` with the same signature returns 409.

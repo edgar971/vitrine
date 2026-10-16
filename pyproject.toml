@@ -68,8 +68,8 @@ url = "https://pypi.org/simple"
 line-length = 100
 target-version = "py315"
 src = ["src", "tests", "integrations/hermes"]
-# The docs are the spec, not code: their examples are hand-wrapped, and the spike is throwaway.
-extend-exclude = ["docs/spike", "**/*.md"]
+# The docs are the spec, not code: their examples are hand-wrapped.
+extend-exclude = ["**/*.md"]
 
 [tool.ruff.lint]
 select = [

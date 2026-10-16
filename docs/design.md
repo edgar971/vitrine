@@ -38,57 +38,22 @@ easy to extend.**
 
 ```
 src/mcp_drop/
-  __main__.py            python -m mcp_drop → cli
-  cli.py                 serve · config check · token new|hash · secret new · sweep · audit · backup · migrate
-  config.py              Settings (pydantic-settings): env + TOML, validation
-  app.py                 build_app(settings) → one Starlette app: web routes + /mcp, one middleware stack,
-                         and the lifespan that sweeps at startup and every sweep_interval
-  metrics.py             PrometheusMetrics: the metrics_port exporter (the optional `metrics` extra)
-  reference.py           docs/configuration.md, rendered from Settings (`just docs`)
-  domain/
-    models.py            Artifact, Version, Visibility, LinkClaims (pydantic, frozen)
-    errors.py            DropError → NotFound, Expired, Invalid, Conflict, TooLarge, OverQuota,
-                         RateLimited, Refused; and drop's own: ConfigError, SchemaMismatch,
-                         StorageUnavailable, AuditUnavailable (masked as `internal error`)
-    ids.py               artifact ids (80-bit Crockford base32), client refs, upload nonces
-    media.py             the extension allowlist (spec § 7.2) and which types read back as text
-    paths.py             the one path rule, and the entry rule that goes with it
-    layout.py            the data_dir layout (spec § 4.1) and its same-filesystem check
-    clock.py             the clock seam, so a service never reads the wall clock
-  storage/
-    base.py              Store protocol
-    filesystem.py        FileStore: write protocol, retention, quota, path resolution, sweeps
-    schema.py            meta.json schema_version: the startup check and the migration steps
-    backup.py            the online, lock-free copy of a data_dir
-  services/
-    artifacts.py         ArtifactService: create, update, get, list, delete, set_visibility
-    links.py             LinkService: sign/verify view and upload links
-    gate.py              PublicGate: public_mode, the question, and the verdict on an answer
-    audit.py             AuditLog: append (fsync) and query; retention sweep
-    limits.py            RateLimiter: token buckets per client and per IP
-    tokens.py            TokenBook: the hashed-token check both /mcp and /api use
-    metrics.py           Metrics: the counting seam (no-op unless metrics_port is set)
-    maintenance.py       migrate: the audited schema upgrade of a whole data_dir
-    container.py         Services: the composition root both edges are built from
-  mcp/
-    server.py            build_mcp(settings, services) → FastMCP(providers=[…], auth=…)
-    auth.py              HashedTokenVerifier, scopes
-    deps.py              Depends() providers: artifact_service(), public_gate(), from the lifespan
-    gate.py              the era-aware half of the gate: InputRequiredResult or elicitation/create
-    middleware.py        EdgeMiddleware: audit scope refusals, spend the caller's bucket
-    errors.py            @domain_errors: DropError → ToolError/ResourceError, once
-    policy.py            a component's scope and bucket, carried on its tags
-    results.py           the tool results no domain model already is
-    tools.py             LocalProvider `tools`: the nine artifact_* tools
-    resources.py         LocalProvider `resources`: artifact://… and artifact://{id}/history
-    prompts.py           LocalProvider `prompts`: share
-    instructions.py      the server instructions text (spec § 5.4), one constant
-  web/
-    routes.py            view, upload, api and health handlers; ROUTE_ACCESS classifies each
-    responses.py         security headers, the sandbox CSP, and DropError → status, once
-    renderers.py         md, csv, tsv, json
-    middleware.py        Host/Origin guard, streaming body limit, redacting access log
+  app.py          build_app(settings) → one Starlette app: web routes + /mcp, one middleware
+                  stack, and the lifespan that sweeps at startup and every sweep_interval
+  cli.py          serve · config check · token · secret · sweep · audit · backup · migrate
+  config.py       Settings (pydantic-settings): env + TOML, secrets env-only
+  reference.py    docs/configuration.md, rendered from Settings (`just docs`)
+  metrics.py      the optional metrics_port exporter
+  domain/         models, errors, ids, media, paths, layout, clock — no framework, no I/O
+  storage/        base (the Store protocol), filesystem (FileStore), schema, backup
+  services/       artifacts, links, gate, audit, limits, tokens, metrics, maintenance, container
+  mcp/            server, tools, resources, prompts, auth, deps, gate, middleware, policy, errors,
+                  results, instructions
+  web/            routes (with ROUTE_ACCESS), responses, renderers, middleware
 ```
+
+`app.py` is the composition root of both edges; `services/container.py` composes the services they
+are built from.
 
 **Dependency direction:** `mcp`/`web` → `services` → `storage` → `domain`, and every layer may use
 `config`.
@@ -281,52 +246,13 @@ It has no visibility parameter and no `ctx.call_mcp` grant. It uses only the sta
 supports (3.11+). When drop refuses an upload before reading it (a wrong token, a missing scope,
 a rate limit, an oversized body), the client still reads the refusal, or names those causes when
 the connection was reset first. CI runs `hermes plugins validate` on it at a pinned Hermes commit,
-and `tests/integrations/hermes_spec.py` drives a real server through it. The spike's draft
-([`spike/hermes-plugin-drop/`](spike/hermes-plugin-drop/)) is kept as the record of what was
-first validated.
+and `tests/integrations/hermes_spec.py` drives a real server through it.
 
-## 9. Code and test conventions
+## 9. Test conventions
 
-### Code
-
-**Language and structure**
-
-- Python 3.15+ (`requires-python = ">=3.15"`), the latest stable release.
-- Full type hints; `mypy --strict` clean.
-- `ruff` (lint and format) is the style; no style debates in review.
-- Small modules with one job each. Functions do one thing; no function needs a comment to be
-  understood.
-
-**Data and dependencies**
-
-- Pydantic models at the edges, frozen dataclasses or models inside.
-- No `dict[str, Any]` passed between layers.
-- Composition over inheritance. Protocols for seams; no abstract base classes without a second
-  implementation.
-- No globals: dependencies are passed in or injected.
-
-**Comments and docstrings**
-
-- Docstrings on public functions and tools: one line, plus `Args`/`Raises` only when not obvious.
-  A tool's docstring is its description for the model.
-- Comments explain *why*, never *what*. Delete any comment that restates the code.
-
-**Errors**
-
-- Domain errors are typed (`domain/errors.py`) and mapped once per edge (MCP and HTTP).
-- No bare `except`.
-- No error message reveals whether a private artifact exists.
-
-### Tests: BDD with classes
-
-Tests read as specifications. pytest collects nested classes and `it_*` functions:
-
-```toml
-[tool.pytest.ini_options]
-python_files     = ["*_spec.py"]
-python_classes   = ["Describe*", "When*"]
-python_functions = ["it_*"]
-```
+Tests read as specifications: `Describe*`/`When*` classes holding `it_*` functions are the only
+names pytest collects (`pyproject.toml`), so a name states one observable outcome and the suite
+reads as the behaviour it holds.
 
 ```python
 class DescribeArtifactCreate:
@@ -346,150 +272,53 @@ class DescribeArtifactCreate:
 - Fixtures are the givens and live in the nearest `conftest.py`. Outer-class fixtures are visible
   to nested classes.
 - One behaviour per `it_`, arranged as given / when / then, with no logic in tests.
-- Validated with plain pytest; no BDD plugin is needed.
 
-**Test layout**
+**Where the specs live**
 
 ```
 tests/
-  conftest.py                  shared givens: settings, tmp data_dir, tokens, clients
-  unit/        *_spec.py       domain, links, storage, services, renderers, config (no server)
-  contract/    store_spec.py   one suite parametrised over every Store implementation
-  mcp/         *_spec.py       tool behaviour via FastMCP's in-memory Client (schemas, annotations, gate)
-  http/        *_spec.py       real uvicorn on a free port: auth and scopes, headers, guard, limits
-  cli/         *_spec.py       the mcp-drop commands, run in-process against a temporary data_dir
-  integrations/*_spec.py       client plugins (Hermes) driving a real server
-  browser/     *_spec.py       Playwright Chromium, marker "browser" (sandbox isolation); own CI job
+  conftest.py   shared givens: settings, a temporary data_dir, tokens, clients
+  unit/         domain, services, storage, mcp policy/auth/errors, web, config — no server
+  contract/     one suite parametrised over every Store implementation
+  mcp/          tool behaviour via FastMCP's in-memory Client (schemas, annotations, gate)
+  http/         real uvicorn on a free port: auth and scopes, headers, guard, limits, logs
+  cli/          the mcp-drop commands, in-process against a temporary data_dir
+  integrations/ client plugins (Hermes) driving a real server
+  browser/      Playwright Chromium, marker "browser"; its own CI job
 ```
 
-## 10. Repository and tooling
+## 10. CI and releases
 
-```
-drop/                          github.com/edgar971/drop · PyPI and CLI: mcp-drop
-  AGENTS.md  CLAUDE.md         agent guidance (§ 11)
-  README.md  CHANGELOG.md  CONTRIBUTING.md  SECURITY.md  LICENSE (MIT)
-  pyproject.toml  uv.lock      one source for metadata, dependencies and tool config
-  src/mcp_drop/  tests/        § 3, § 9
-  docs/                        spec, design, security, configuration (generated), adr/
-  integrations/hermes/drop/    Hermes plugin
-  examples/                    drop.toml, compose.yaml, kubernetes/
-  Dockerfile  .dockerignore
-  .github/                     workflows/{ci,release}.yml, dependabot.yml, ISSUE_TEMPLATE/
-  .pre-commit-config.yaml
-```
+The sources of truth for the tooling are `pyproject.toml` (uv, ruff, mypy, import-linter, pytest
+and the coverage gate), the `justfile` (one recipe per gate; `just check` runs them all),
+pre-commit and `.github/workflows/`. This section does not restate them.
 
-### Tools
+**CI** runs on Python 3.15: `just check`, then a smoke test of the built wheel
+(`just wheel-test`), the browser specs, `pip-audit`, a multi-arch image build that pushes
+nothing, and `hermes plugins validate` on the Hermes plugin. On a pull request a `commits` job
+checks that every commit is a Conventional Commit.
 
-| Concern | Tool |
-|---|---|
-| Environments, locking, running, building | **uv** (`uv sync`, `uv run`, `uv lock --check`, `uv_build`) |
-| Lint and format | **ruff**: `E F I UP B SIM RUF ANN ASYNC C4 PTH RET TID S D PL PT N`, Google docstrings, no relative imports |
-| Types | **mypy** `--strict` with the pydantic plugin; `py.typed` shipped |
-| Layering | **import-linter** (§ 3) |
-| Tests | **pytest**, pytest-asyncio, pytest-cov (90% gate), Playwright for the `browser` marker |
-| Supply chain | `pip-audit` via `uvx`, Dependabot for uv and Actions, ruff `S` rules |
-| Hooks | pre-commit: the same gates as CI |
-| Task runner | `just` (`just check` runs every gate; `just dev` serves with reload) |
+**Release** runs on a `v*` tag (`release.yml`): every CI job on the tagged commit (reusing
+`ci.yml`), a PEP 440 check against `pyproject.toml`, the image for amd64 and arm64 with an SBOM,
+a provenance attestation and a keyless cosign signature (no `latest` tag — deployments pin a
+version or a digest), then `uv build` and trusted publishing to TestPyPI for a pre-release and to
+PyPI for a final version, then a GitHub release with notes from the changelog. The image goes
+first, because a PyPI version can never be uploaded twice. Rehearse with a pre-release; the
+procedure is CONTRIBUTING.md § Releasing.
 
-### CI and releases
+**Container image:** the `Dockerfile` — CPython 3.15 on `debian:trixie-slim`, user 10001, a
+read-only root filesystem, everything it writes under `/data`. Running it, and what to check
+before exposing drop, is [operations](operations.md) § 9.
 
-**CI** runs on Python 3.15: lock check, ruff, mypy, import-linter, pytest with
-coverage, a smoke test of the built wheel (`just wheel-test`), browser tests, `pip-audit`, a
-multi-arch image build without pushing, and `hermes plugins validate` on the Hermes plugin. On a
-pull request, the `commits` job checks every commit is a Conventional Commit.
+**ADRs:** `docs/adr/` records the decisions that are expensive to reverse.
 
-**Release** runs on a `v*` tag (`release.yml`). It first runs every CI job on the tagged commit
-(`ci.yml` is reusable) and checks that the tag is PEP 440 and agrees with `pyproject.toml` (and,
-for a final version, has a `CHANGELOG.md` section). Then:
+## 11. Deployment
 
-1. `ghcr.io/edgar971/drop:<version>` is pushed for amd64 and arm64 with an SBOM and provenance
-   attestation, the pushed digest is smoke-tested, and the digest is cosign-signed keylessly. No
-   `latest` tag: deployments pin a version or a digest.
-2. `uv build`, `twine check`, then trusted publishing: to PyPI (`pypi` environment) for
-   `vX.Y.Z`, to TestPyPI (`testpypi`) for a pre-release `vX.Y.Z(a|b|rc)N`. The image goes first
-   because a PyPI version can never be uploaded again.
-3. A GitHub release: notes from the version's `CHANGELOG.md` section, or for a pre-release,
-   rendered from the commits by git-cliff and marked as a pre-release.
+Local `uvx mcp-drop serve`, a container, Compose with Caddy for TLS, or the Kubernetes manifests:
+[operations](operations.md) § 9 has each one, the image's run flags, and what to check before
+exposing drop to the internet, and [`examples/`](../examples/) holds the deployment shapes.
 
-`pyproject.toml` holds the version; `mcp_drop.__version__` reads it from the installed metadata,
-and `just release <version>` moves the other copies, which a spec keeps in step. The changelog is
-generated from Conventional Commits (`cliff.toml`; CONTRIBUTING.md).
-
-**Container image**
-
-- CPython 3.15 installed by uv in a `ghcr.io/astral-sh/uv` build stage, copied onto
-  `debian:trixie-slim`; both bases pinned by digest. Dependencies from `uv sync --no-dev`.
-- Runs as user 10001 with a read-only root filesystem; writes only to `/data`.
-- `ENTRYPOINT ["mcp-drop"]` with `CMD ["serve"]`, so the same image runs every CLI command.
-
-**ADRs:** `docs/adr/` records the decisions that are expensive to reverse. The first four are:
-the filesystem store, one gate to public, self-contained auth, and the protocol-era handling;
-0005 extends the gate to new content on a public artifact.
-
-## 11. Agent guidance files
-
-`AGENTS.md` is the single source for any coding agent. `CLAUDE.md` imports it and adds only
-Claude Code specifics, so the two cannot drift.
-
-**AGENTS.md**
-
-- Kept under 100 lines.
-- Every rule has a reason; it never restates what ruff or mypy already enforce.
-- Sections:
-  1. What drop is (two lines) and where the spec lives.
-  2. Commands: `uv sync`, `just check`, `uv run pytest -k …`, `uv run mcp-drop serve`.
-  3. Layout and the layering rule.
-  4. Conventions with reasons: the MCP decorator rules (§ 4), BDD test naming (§ 9), errors,
-     no comments that restate code.
-  5. Invariants that must never break:
-     - private by default;
-     - one path to public;
-     - every HTTP route authenticates itself;
-     - signed segments never logged;
-     - every state change audited, and no content in the audit log;
-     - no `allow-same-origin`.
-  6. Definition of done: `just check` green; new behaviour has an `it_`; the spec and docs updated
-     if the contract changed.
-
-**CLAUDE.md**
-
-```markdown
-@AGENTS.md
-
-## Claude Code
-- Hooks (.claude/settings.json): ruff format + ruff check on edited .py files.
-- Rules (.claude/rules/): mcp.md loads for src/mcp_drop/mcp/**; web.md for src/mcp_drop/web/**
-  and app.py; tests.md for tests/**.
-```
-
-`.claude/rules/` holds only path-scoped gotchas, such as tool annotations and the protocol-era
-gate for `mcp/`, and the BDD naming for `tests/`. Nothing in it restates `AGENTS.md`.
-
-## 12. Deployment options
-
-| Option | How | Fits |
-|---|---|---|
-| Local | `uvx mcp-drop serve` | One agent on one machine, bound to `127.0.0.1` |
-| Container | `docker run -v drop:/data -e DROP_SECRET -e DROP_TOKENS -p 8080:8080 ghcr.io/edgar971/drop` | Any Docker host |
-| Compose | `examples/compose.yaml` (with Caddy for TLS) | Small servers |
-| Kubernetes | `examples/kubernetes/` | Clusters |
-
-**The Kubernetes example**
-
-- Pod Security `restricted`; a single-replica `Recreate` deployment; non-root, read-only root
-  filesystem; no service-account token.
-- Probes send an allowed `Host` header.
-- Storage is an RWO PVC.
-- A default-deny NetworkPolicy with **no egress**; ingress only from the ingress controller and
-  the metrics scraper.
-
-**Before exposing drop to the internet:**
-
-- terminate TLS;
-- use a dedicated hostname that carries no other application's cookies;
-- optionally block `/mcp`, `/api` and `/u` at the proxy.
-
-## 13. Compatibility risks
+## 12. Compatibility risks
 
 | Risk | Handling |
 |---|---|

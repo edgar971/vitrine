@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-15
-- **Context:** [`docs/spec.md`](../spec.md) § 6.1; [`docs/design.md`](../design.md) § 4, § 13;
+- **Context:** [`docs/spec.md`](../spec.md) § 6.1; [`docs/design.md`](../design.md) § 4, § 12;
   [`docs/research.md`](../research.md) § 3–4 (F1, F2), § 5
 
 ## Context

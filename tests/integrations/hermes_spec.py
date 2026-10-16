@@ -1,4 +1,4 @@
-"""The Hermes plugin (design § 7.2): ``register()``, and a real server driven through its upload."""
+"""The Hermes plugin (design § 8): ``register()``, and a real server driven through its upload."""
 
 from __future__ import annotations
 

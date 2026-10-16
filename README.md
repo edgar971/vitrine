@@ -1,93 +1,74 @@
 # drop
 
-**Shareable, versioned artifacts for AI agents.** drop is a small MCP server. An agent publishes
-an HTML report, a chart, a PDF or a folder of files, and gets back a link that opens in any
-browser. Links are **private** (signed, expiring, revocable) by default. They become **public**
-only after a human confirms.
+[![ci](https://github.com/edgar971/drop/actions/workflows/ci.yml/badge.svg)](https://github.com/edgar971/drop/actions/workflows/ci.yml)
+![python](https://img.shields.io/badge/python-3.15%2B-blue)
+![license](https://img.shields.io/badge/license-MIT-green)
 
-> **Status: `0.1.0` release candidate.** The server, the CLI, the container image, the deployment
-> examples and the client integrations are built (M1–M5,
-> [`docs/roadmap.md`](docs/roadmap.md)); the release itself is next.
+**Shareable, versioned artifacts for AI agents.** drop is a small, self-hosted MCP server. An
+agent publishes an HTML report, a chart, a PDF or a folder of files, and gets back a link that
+opens in any browser.
+
+Links are **private** by default — signed, expiring, revocable — and become **public** only after
+a human confirms.
 
 ## Why
 
-Agents produce artifacts all the time: reports, dashboards, diagrams, exports. Chat
-integrations can attach a file, but they can't:
+Agents produce artifacts constantly: reports, dashboards, diagrams, exports. A chat integration
+can attach the file, but it cannot:
 
 - render HTML as a page;
-- keep a stable URL while the content is revised;
-- let you choose who can see it, or revoke it later;
-- keep a list of what was shared.
+- keep one URL while the content is revised;
+- let you decide who can see it, or revoke it later;
+- tell you what was shared.
 
-Hosted products such as claude.ai Artifacts solve this inside one vendor's UI. drop is the
-self-hosted, client-agnostic equivalent: any MCP client can publish, and anyone with a browser
-can view.
-
-## At a glance
-
-| | |
-|---|---|
-| **Interface** | MCP tools and resources (Streamable HTTP), plus a few plain HTTP routes for viewing and uploads |
-| **Storage** | A directory on disk: one folder per artifact, immutable version folders and a JSON metadata file. No database. |
-| **Auth** | Agent tokens are checked against SHA-256 hashes. Viewers use unguessable public ids or HMAC-signed private links. Works without a reverse proxy. |
-| **Safety** | Private by default. Public needs human confirmation via MCP elicitation and fails closed. Agent-written HTML runs in a CSP sandbox. |
-| **Config** | `DROP_*` environment variables or a TOML file. Secrets only from the environment. |
-| **Runs as** | `uvx mcp-drop serve`, a container image (amd64 and arm64), or the Kubernetes example |
-| **Built with** | Python 3.15+, FastMCP, Starlette/uvicorn, pydantic-settings; uv, ruff, mypy, pytest |
-| **License** | MIT |
+claude.ai Artifacts and friends solve this inside one vendor's UI. drop is the self-hosted,
+client-agnostic equivalent: any MCP client can publish, and anyone with a browser can view.
 
 ## Quick start
 
-You need [`uv`](https://docs.astral.sh/uv/). `uvx` fetches Python 3.15 and drop on first use;
-nothing else is installed.
+All you need is [`uv`](https://docs.astral.sh/uv/). `uvx` fetches Python 3.15 and drop on first
+use; nothing is installed permanently.
 
 ```bash
-# 1. A secret for signing links, and a token for your agent (printed once, stored nowhere).
-export DROP_SECRET="$(uvx mcp-drop secret new)"
-uvx mcp-drop token new claude
-#   token: <give this to the client>
-#   entry: claude:<sha256>:read+write+share+publish
-
-# 2. Serve on http://localhost:8080, keeping artifacts in ./data.
-export DROP_TOKENS="claude:<sha256>:read+write+share+publish"   # the entry line
-uvx mcp-drop serve
+export DROP_SECRET="$(uvx mcp-drop secret new)"   # signs every private link
+uvx mcp-drop token new claude                     # prints a token, and the entry holding its hash
+export DROP_TOKENS="claude:<sha256>:read+write+share+publish"   # the entry it printed
+uvx mcp-drop serve                                # http://localhost:8080, artifacts in ./data
 ```
-
-Until `0.1.0` is on PyPI, use `uvx --from git+https://github.com/edgar971/drop mcp-drop` in place
-of `uvx mcp-drop`.
 
 Check it from another shell:
 
 ```bash
-TOKEN=<the token from step 1>
-curl -s localhost:8080/healthz                               # {"ok":true}
+curl -s localhost:8080/healthz                    # {"ok":true}
+
 echo '<h1>hello</h1>' > index.html
 curl -s -H "Authorization: Bearer $TOKEN" -F title=Hello -F file=@index.html \
-  localhost:8080/api/artifacts                               # {"id": …, "url": ".../s/…/", …}
+  localhost:8080/api/artifacts                    # {"id": …, "url": "http://localhost:8080/s/…/"}
 ```
 
-Open the `url` in a browser. To serve beyond localhost, set `DROP_PUBLIC_BASE_URL` to the
-address people will open, and see [`docs/operations.md`](docs/operations.md) for TLS, backups
-and the container image.
+Open the `url`: that is the whole product, a private expiring link to an HTML page.
+
+Serving beyond localhost? Set `DROP_PUBLIC_BASE_URL` to the address people will open, and read
+[operations](docs/operations.md) for TLS, backups and the container image.
 
 ## Connect a client
 
-drop speaks MCP over Streamable HTTP at `/mcp` with a bearer token. Give each client its own token
-(`mcp-drop token new <name>`), so the audit log and revocation are per client, and only the scopes
-it needs (`--scopes read,write` leaves out `share` and `publish`).
+drop speaks MCP over Streamable HTTP at `/mcp` with a bearer token. Give every client its own
+token (`mcp-drop token new <name>`) so revocation and the audit log stay per client, and only the
+scopes it needs — `--scopes read,write` leaves out `share` and `publish`.
 
 Making an artifact public asks a human through MCP elicitation. A client that cannot ask, or a
 person who declines or does not answer, leaves it private.
 
-### Claude Code
+**Claude Code**
 
 ```bash
 claude mcp add --transport http drop http://localhost:8080/mcp \
   --header "Authorization: Bearer $DROP_TOKEN"
 ```
 
-Or, shared with a project, in `.mcp.json` (Claude Code expands `${DROP_TOKEN}` from the
-environment, so the token stays out of the file):
+Or in a project's `.mcp.json` (Claude Code expands `${DROP_TOKEN}` from the environment, so the
+token never lands in the file):
 
 ```json
 {
@@ -101,9 +82,7 @@ environment, so the token stays out of the file):
 }
 ```
 
-### Hermes Agent
-
-In `~/.hermes/config.yaml`, with `DROP_TOKEN` in `~/.hermes/.env`:
+**Hermes Agent** — in `~/.hermes/config.yaml`, with `DROP_TOKEN` in `~/.hermes/.env`:
 
 ```yaml
 mcp_servers:
@@ -113,21 +92,17 @@ mcp_servers:
     elicitation: { timeout: 300 }   # how long the approve/deny prompt for public waits
 ```
 
-The optional plugin adds `artifact_publish_files`, which streams files already on disk (PDFs,
-images, a folder with assets) to drop as a private link, a `drop:drop` skill, and the `/share
-<path>…` and `/artifacts [query]` commands. It needs `DROP_URL` (the server's base URL) beside
-`DROP_TOKEN` in `~/.hermes/.env`:
+The optional plugin publishes files already on disk (PDFs, images, a folder with assets) through
+`artifact_publish_files`, and adds a `drop:drop` skill plus the `/share <path>…` and
+`/artifacts [query]` commands. It needs `DROP_URL` (the server's base URL) beside `DROP_TOKEN`:
 
 ```bash
 hermes plugins install edgar971/drop/integrations/hermes/drop --enable
 ```
 
-See [`integrations/hermes/`](integrations/hermes/).
+See [integrations/hermes](integrations/hermes/) for details.
 
-### Other MCP clients
-
-Any client that supports remote (Streamable HTTP) servers with custom headers works. Most take
-this shape:
+**Any other MCP client** that supports remote servers with headers:
 
 ```json
 {
@@ -140,35 +115,37 @@ this shape:
 }
 ```
 
-Binary files that are too large to pass inline go through `artifact_upload_url`, which returns a
-single-use URL and a ready-made `curl -T` command.
+Files too large to pass inline go through `artifact_upload_url`, which returns a single-use URL
+and a ready-made `curl -T` command.
+
+## How it works
+
+- **One process, one port, one directory.** No database, no queue, no sidecar: artifacts are
+  folders on disk, each with a JSON metadata file.
+- **Auth is built in.** Agent tokens are stored as SHA-256 hashes; viewers get either an
+  unguessable public id or an HMAC-signed private link. A reverse proxy is optional, never
+  required.
+- **Safe by default.** Private unless a human approves public, and the gate fails closed.
+  Agent-written HTML runs in a CSP sandbox, in an opaque origin.
+- **Plain HTTP for browsers.** `/a/<id>/` views a public artifact, `/s/<sig>/` serves a private
+  link, `/api/artifacts` takes uploads, `/healthz` answers probes.
+- **Configure it your way.** `DROP_*` environment variables or a TOML file; secrets only ever
+  come from the environment. Every key is in [configuration](docs/configuration.md).
 
 ## Documents
 
-| Document | Contents |
-|---|---|
-| [`docs/spec.md`](docs/spec.md) | The contract: concepts, data model, MCP tools and resources, HTTP routes, configuration reference, CLI, limits, errors |
-| [`docs/design.md`](docs/design.md) | Architecture, modules, storage protocol, request flows, extension points, project tooling and release, deployment options, client integrations |
-| [`docs/security.md`](docs/security.md) | Threat model, trust boundaries, controls, residual risks, required security tests |
-| [`docs/operations.md`](docs/operations.md) | Backup, restore, upgrades and migrations, rotation, monitoring, incident playbooks, deployments |
-| [`docs/configuration.md`](docs/configuration.md) | Every configuration key with its environment variable and default (generated) |
-| [`examples/`](examples/) | A config file, Compose with Caddy, and Kubernetes manifests |
-| [`integrations/`](integrations/) | Client plugins: the Hermes Agent plugin |
-| [`docs/roadmap.md`](docs/roadmap.md) | Milestones M0–M5 to `v0.1.0`, each with deliverables and testable exit criteria |
-| [`docs/research.md`](docs/research.md) | Prior art, options considered, platform facts checked against source, validation findings and the record of what the spike proved |
-| [`docs/spike/`](docs/spike/) | The throwaway prototype and checks the design was validated against |
-| [`docs/adr/`](docs/adr/) | The accepted decisions that are expensive to reverse |
+- [spec](docs/spec.md) — the contract: data model, MCP tools, HTTP routes, configuration, limits.
+- [design](docs/design.md) — how it is built: architecture, storage, flows, extension points.
+- [security](docs/security.md) — threat model, controls and residual risks.
+- [operations](docs/operations.md) — backup, restore, upgrades, monitoring, deployments.
+- [roadmap](docs/roadmap.md) — what is left before `0.1.0`, and what comes after.
+- [examples](examples/) — a TOML file, Compose with Caddy, Kubernetes manifests.
+- [adr](docs/adr/) — the decisions that are expensive to reverse.
 
-## Example
+## Contributing
 
-```text
-you    > make an HTML summary of last month's energy usage and send me the link
-agent  → artifact_create(title="Energy, September", files={"index.html": "…"})
-drop   ← {id: "k7m2q9x4tz3wbn6r", url: "https://drop.example.com/s/eyJ…/", version: 1}
-agent  > Here it is (private link, valid 7 days): https://drop.example.com/s/eyJ…/
-you    > add a chart, then make it public
-agent  → artifact_update(id=…, files={…})                       same id, version 2
-agent  → artifact_set_visibility(id=…, visibility="public")
-client ⇢ "Make 'Energy, September' (2 files) PUBLIC? Anyone with the link …"  [Approve] [Deny]
-drop   ← {url: "https://drop.example.com/a/k7m2q9x4tz3wbn6r/"}
-```
+Bug reports and pull requests are welcome — start with [CONTRIBUTING.md](CONTRIBUTING.md), and
+[AGENTS.md](AGENTS.md) if you work with a coding agent. Report vulnerabilities through
+[SECURITY.md](SECURITY.md) rather than a public issue.
+
+MIT licensed.

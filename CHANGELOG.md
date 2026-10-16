@@ -146,3 +146,6 @@ Each version's section is generated from its Conventional Commits by git-cliff
   sweep. Unreadable lines are now skipped and logged, and the next append starts a fresh line.
 - `serve` refused to start in a shell that also sets the client-side `DROP_URL`/`DROP_TOKEN`.
 - `just image` failed on macOS's bash 3.2 when `CA` was not set.
+- The Hermes docs asked for an `mcp_servers` key equal to the plugin's own name, which makes Hermes
+  register the server's tools without ever exposing them; the key is now `drop_mcp`, and the plugin
+  names the server's `artifact_*` tools instead of a prefix Hermes never produces.

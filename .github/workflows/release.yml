@@ -10,6 +10,10 @@ name: release
 #
 # The image goes first: a PyPI version can never be uploaded again, so it is spent only once the
 # image is out and verified.
+#
+# Image tags: every release gets its exact version. `stable` follows the newest final release; it
+# moves only after that image is smoke-tested and signed, never for a pre-release, and never
+# backwards for a patch to an older line.
 on:
   push:
     tags: ["v*"]
@@ -36,11 +40,14 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       prerelease: ${{ steps.version.outputs.prerelease }}
+      stable: ${{ steps.stable.outputs.stable }}
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Every tag, to tell whether this is the newest final release.
+          fetch-depth: 0
 
       # The tag, the package and the changelog must agree before anything leaves the repository.
       - name: Tag, pyproject.toml and CHANGELOG.md agree
@@ -69,6 +76,18 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Is this the newest final release
+        id: stable
+        env:
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          # `|| true`: before the first final release (a rehearsal), there is none to find.
+          newest="$(git tag --list 'v*' | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1)"
+          stable=false
+          if [ "$PRERELEASE" = "false" ] && [ "$TAG" = "$newest" ]; then stable=true; fi
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
 
   image:
     name: image
@@ -99,7 +118,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Only the exact version is tagged: deployments pin a version or a digest, never `latest`.
+      # Only the exact version here; `stable` moves after the smoke test and the signature.
       - name: Build and push amd64 and arm64, with an SBOM and provenance
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -128,6 +147,13 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: cosign sign --yes "$IMAGE@$DIGEST"
+
+      # A new tag on the same manifest, so the signature and the SBOM cover `stable` too.
+      - name: Move stable to this release
+        if: needs.version.outputs.stable == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: docker buildx imagetools create --tag "$IMAGE:stable" "$IMAGE@$DIGEST"
 
   pypi:
     name: pypi

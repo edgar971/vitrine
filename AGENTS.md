@@ -9,7 +9,8 @@ is `docs/security.md`. When this file and the spec disagree, the spec wins: fix 
 A self-hosted MCP server that turns agent output into **private** (signed, expiring, revocable)
 or **public** links. Status: M1–M5 done (the core, the MCP layer, the web layer assembled with
 `/mcp` by `mcp_vitrine.app.build_app`, the `mcp-vitrine` CLI, metrics, the image, `examples/` and the
-Hermes plugin); `v0.1.0` is released by pushing a `v*` tag (`.github/workflows/release.yml`).
+Hermes plugin); `v0.1.0` is released (2026-10-16). A release is cut by pushing a `v*` tag
+(`.github/workflows/release.yml`; CONTRIBUTING.md § Releasing).
 
 ## Commands
 

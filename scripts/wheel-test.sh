@@ -75,6 +75,7 @@ async def main() -> None:
         "artifact_update",
         "artifact_get",
         "artifact_list",
+        "artifact_set_meta",
         "artifact_upload_url",
         "artifact_delete",
     }

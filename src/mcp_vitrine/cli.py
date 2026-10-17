@@ -8,6 +8,7 @@ configuration or the arguments are wrong.
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import logging
 import os
@@ -35,6 +36,7 @@ from mcp_vitrine.domain.clock import SystemClock
 from mcp_vitrine.domain.errors import ConfigError, VitrineError
 from mcp_vitrine.domain.models import Scope
 from mcp_vitrine.services import maintenance
+from mcp_vitrine.services.admin import hash_password
 from mcp_vitrine.services.audit import AuditEvent, AuditLog
 from mcp_vitrine.services.container import Services
 from mcp_vitrine.services.tokens import token_hash
@@ -114,7 +116,7 @@ def _config_check(args: argparse.Namespace) -> int:
     """Validate the configuration and print the effective values, secrets redacted."""
     settings = load_settings(config_path=args.config)
     for key, value in settings.model_dump(mode="json").items():
-        shown = REDACTED if key in SECRET_KEYS else value
+        shown = REDACTED if key in SECRET_KEYS and value is not None else value
         print(f"{key} = {json.dumps(shown)}")
     tokens = ", ".join(
         f"{entry.name} ({'+'.join(sorted(_short(scope) for scope in entry.scopes))})"
@@ -154,6 +156,21 @@ def _token_hash(args: argparse.Namespace) -> int:
 def _secret_new(_args: argparse.Namespace) -> int:
     """Print a new random secret for ``VITRINE_SECRET``."""
     print(secrets.token_hex(SECRET_BYTES))
+    return OK
+
+
+def _admin_password(_args: argparse.Namespace) -> int:
+    """Ask for the dashboard password twice and print its ``VITRINE_ADMIN_PASSWORD`` line.
+
+    It is read from the terminal, never from argv, so it lands in no shell history.
+    """
+    password = getpass.getpass("Dashboard password: ")
+    if getpass.getpass("Again: ") != password:
+        _fail("the passwords differ")
+        return FAILED
+    # Single quotes: the hash holds $, which a shell would otherwise expand.
+    print(f"VITRINE_ADMIN_PASSWORD='{hash_password(password)}'")
+    print("Set it in the server's environment; the dashboard is at /_admin/.", file=sys.stderr)
     return OK
 
 
@@ -323,6 +340,12 @@ def _parser() -> argparse.ArgumentParser:
     secret_commands.add_parser("new", help="Print a new random secret.").set_defaults(
         command=_secret_new
     )
+
+    admin = commands.add_parser("admin", help="Set up the dashboard.")
+    admin_commands = admin.add_subparsers(title="commands", required=True, metavar="COMMAND")
+    admin_commands.add_parser(
+        "password", help="Hash a dashboard password for VITRINE_ADMIN_PASSWORD."
+    ).set_defaults(command=_admin_password)
 
     config_flag(command("sweep", _sweep, "Run the expiry and staging sweep once."))
 

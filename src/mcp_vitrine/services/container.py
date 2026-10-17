@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from mcp_vitrine.config import Settings, ViewLogMode
 from mcp_vitrine.domain.clock import Clock, SystemClock
+from mcp_vitrine.services.admin import AdminLogin
 from mcp_vitrine.services.artifacts import ArtifactService
 from mcp_vitrine.services.audit import AuditLog
 from mcp_vitrine.services.gate import PublicGate
@@ -29,6 +30,8 @@ class Services:
     tokens: TokenBook
     metrics: Metrics
     views: ViewLog
+    # ``None`` while ``admin_password`` is unset: the dashboard is off (spec § 7.6).
+    admin: AdminLogin | None = None
 
     @classmethod
     def from_settings(
@@ -50,6 +53,12 @@ class Services:
             retention=settings.view_retention,
             clock=clock,
         )
+        secret = settings.secret.get_secret_value().encode()
+        admin = (
+            None
+            if settings.admin_password is None
+            else AdminLogin(settings.admin_password.get_secret_value(), secret, clock)
+        )
         return cls(
             artifacts=ArtifactService(
                 store=store, links=links, audit=audit, clock=clock, metrics=metrics, views=views
@@ -60,4 +69,5 @@ class Services:
             tokens=TokenBook(settings.tokens),
             metrics=metrics,
             views=views,
+            admin=admin,
         )

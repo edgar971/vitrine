@@ -27,6 +27,7 @@ class Bucket(StrEnum):
     VIEWS = "views"
     UNLOCK = "unlock"
     UNLOCK_LINK = "unlock_link"
+    ADMIN_LOGIN = "admin_login"
 
 
 @dataclass(slots=True)
@@ -66,6 +67,7 @@ class RateLimiter:
                 Bucket.VIEWS: settings.rate_views,
                 Bucket.UNLOCK: settings.rate_unlock,
                 Bucket.UNLOCK_LINK: settings.rate_unlock_link,
+                Bucket.ADMIN_LOGIN: settings.rate_admin_login,
             },
             metrics=metrics,
         )

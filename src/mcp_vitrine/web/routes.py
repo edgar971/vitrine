@@ -70,6 +70,7 @@ from mcp_vitrine.services.audit import DenialReason
 from mcp_vitrine.services.container import Services
 from mcp_vitrine.services.limits import Bucket
 from mcp_vitrine.services.views import is_unfurler
+from mcp_vitrine.web.dashboard import build_dashboard
 from mcp_vitrine.web.jsx import STATIC_PREFIX, JsxBundle
 from mcp_vitrine.web.renderers import RENDER_LIMIT, renderer_for
 from mcp_vitrine.web.responses import (
@@ -111,6 +112,9 @@ class Access(StrEnum):
     SIGNATURE = "signature"
     BEARER = "bearer"
     MCP = "mcp"
+    # The dashboard (spec § 7.6): its session cookie, or, to earn one, the operator password.
+    SESSION = "session"
+    PASSWORD = "password"  # noqa: S105 - a class of route, not a password
 
 
 ROUTE_ACCESS: dict[str, Access] = {
@@ -129,6 +133,20 @@ ROUTE_ACCESS: dict[str, Access] = {
     "health": Access.PUBLIC,
     "static_asset": Access.PUBLIC,
     "mcp": Access.MCP,
+    "admin_static": Access.PUBLIC,
+    "admin_login_form": Access.PUBLIC,
+    "admin_login": Access.PASSWORD,
+    "admin_logout": Access.SESSION,
+    "admin_list": Access.SESSION,
+    "admin_audit": Access.SESSION,
+    "admin_artifact": Access.SESSION,
+    "admin_confirm": Access.SESSION,
+    "admin_open": Access.SESSION,
+    "admin_link": Access.SESSION,
+    "admin_revoke": Access.SESSION,
+    "admin_meta": Access.SESSION,
+    "admin_private": Access.SESSION,
+    "admin_delete": Access.SESSION,
 }
 
 
@@ -241,6 +259,7 @@ class WebRoutes:
                 methods=["GET"],
                 name="static_asset",
             ),
+            *build_dashboard(self._settings, self._services),
         ]
 
     async def view_public(self, request: Request) -> Response:

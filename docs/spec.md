@@ -420,6 +420,8 @@ cover them.
 | `GET /healthz` | none | `200 {"ok": true}` when `data_dir` is writable (probed through `data_dir/tmp`, where every write starts), else 503 |
 | `GET /metrics` on `metrics_port` | none | Prometheus text format, on a separate listener (§ 11) |
 
+The dashboard's routes under `/_admin/` are listed in § 7.6.
+
 No `/api` route takes a visibility: the one path to public is `artifact_set_visibility` (§ 6).
 Each route spends its tool's bucket (§ 7.5) and is audited as its tool is. A JSON body is
 `application/json` (else 415) of at most 16 KiB, counted while it streams; an empty body is `{}`.
@@ -573,6 +575,7 @@ Token buckets in memory: per client for authenticated calls, per source IP for v
 | `rate_views` | source IP | `1200/m` | `/a/` and `/s/` requests |
 | `rate_unlock` | link + source IP | `10/m` | wrong passcodes only |
 | `rate_unlock_link` | link | `100/h` | wrong passcodes only, from every address together |
+| `rate_admin_login` | source IP | `5/m` | wrong dashboard passwords only (§ 7.6) |
 
 Behaviour when a bucket is empty:
 
@@ -589,6 +592,59 @@ every address that ever called.
 A refusal from a client's bucket is audited (§ 11.3). A refused view is not: a viewer has no
 client name, and writing a line per refused request would turn a flood into disk writes.
 
+### 7.6 Dashboard
+
+An operator's web page under `/_admin/` for managing artifacts without an agent (ADR 0008). It
+is **off** until `admin_password` is set (§ 8.2): until then none of its routes exists, and
+every path under it answers 404.
+
+**Login.** The dashboard has its own password, set with `mcp-vitrine admin password` (§ 9) and
+held in the environment as its scrypt hash. It **MUST NOT** accept a client token as a login,
+in a header or as the password: agents hold tokens, and an agent that could sign in could act
+as the operator. Wrong passwords spend `rate_admin_login` per source IP (§ 7.5); a right one
+spends nothing, and an empty bucket answers 429 before the password is checked. A wrong
+password answers 401 with one generic message.
+
+**Session.** A right password answers `303` to `/_admin/` with the cookie `vitrine_admin`:
+`HttpOnly; SameSite=Strict; Path=/_admin`, for 12 hours. With an `https` `public_base_url` it is
+`__Secure-vitrine_admin` and `Secure`. A plain `http` base URL is accepted only on a loopback
+host, else the server refuses to start. The session is stateless, an HMAC under a key derived
+from `secret` and the password hash, so changing either ends every session. A page without a
+session answers `303` to `/_admin/login`.
+
+**Changes.** Every change is a form `POST`. It **MUST** carry an `Origin` equal to
+`public_base_url`'s origin, `Sec-Fetch-Site: same-origin` when the browser sends that header, and
+the session's CSRF token, else it answers 403 and changes nothing. The checks run in that
+order, before the body's fields are read. A body is at most 16 KiB.
+
+| Method and path | Does |
+|---|---|
+| `GET /_admin/login`, `POST /_admin/login` | The form; field `password` |
+| `POST /_admin/logout` | Drops the cookie |
+| `GET /_admin/[?q=&visibility=&project=&tag=&sort=&cursor=]` | The list: totals, search, project and tag facets, 25 a page |
+| `GET /_admin/a/{id}` | One artifact: what it is, who can open it, its live links with their views, versions, files, metadata and its newest audit events |
+| `GET /_admin/a/{id}/confirm/{private\|delete\|revoke}` | The step before a change that cannot be undone |
+| `POST /_admin/a/{id}/open` | `303` to the public URL, or to a recorded private link labelled `dashboard` that lasts an hour |
+| `POST /_admin/a/{id}/links` | Fields `label`, `expires_in` (`1d`, `7d`, `30d`), `passcode` or `generate=1`: a recorded private link, shown in the answer once, with a generated passcode. Refused on a public artifact. |
+| `POST /_admin/a/{id}/revoke` | Field `link`: one link by `lid`, or every private link |
+| `POST /_admin/a/{id}/meta` | Fields `title`, `project` (empty clears it), `tags` (comma-separated) |
+| `POST /_admin/a/{id}/private` | Makes it private (`gate` = `not_required`) |
+| `POST /_admin/a/{id}/delete` | Deletes it |
+| `GET /_admin/audit[?client=&event=&artifact=&page=]` | The audit log, newest first, 100 events a page |
+| `GET /_admin/static/{file}` | The dashboard's stylesheet, fonts and one script |
+
+**Only narrowing.** No dashboard route makes an artifact public, moves a public window or adds
+content: the one path to public stays `artifact_set_visibility` (§ 6). Every change is audited
+with `client` = `@admin` (§ 11.3).
+
+**Rendering.** Server-side HTML with no inline script or style, under
+`Content-Security-Policy: default-src 'self'; img-src 'self' data:; object-src 'none';
+base-uri 'none'; form-action 'self'; frame-ancestors 'none'`, `no-store`,
+`Referrer-Policy: same-origin` (under `no-referrer` a browser posts a form with
+`Origin: null`) and `Cross-Origin-Opener-Policy: same-origin`. Every string an agent wrote
+(titles, tags, projects, notes, labels, file names, client names) **MUST** be escaped, because the
+dashboard is not sandboxed. Artifact content is never shown in it. Times are in UTC.
+
 ## 8. Configuration
 
 ### 8.1 Sources and precedence
@@ -598,7 +654,7 @@ client name, and writing a line per refused request would turn a flood into disk
 3. A TOML file given with `--config` (top-level keys or a `[vitrine]` table)
 4. Defaults
 
-**Secrets** (`secret`, `tokens`) are accepted **only** from the environment. A config file that
+**Secrets** (`secret`, `tokens`, `admin_password`) are accepted **only** from the environment. A config file that
 sets them **MUST** be rejected at startup, so config files can be committed safely. Unknown keys
 **MUST** be rejected, which catches typos, in the file and among `VITRINE_*` variables alike. The
 client-side `VITRINE_URL` and `VITRINE_TOKEN` (what MCP clients, the Hermes plugin and the `vitrine`
@@ -632,6 +688,7 @@ settings and are ignored, so one shell can run the server and a client.
 |---|---|---|
 | `secret` | — | HMAC key for links: at least 32 bytes, required. Rotating it revokes all private links. |
 | `tokens` | — | Client tokens as `name:sha256hex[:scope+scope…]`, at least one required. Names are `[a-z0-9][a-z0-9_.-]{0,63}` and unique. Omitted scopes mean all four; `config check` warns about such entries. |
+| `admin_password` | unset | The dashboard's password as the `scrypt$n$r$p$salt$hash` line `mcp-vitrine admin password` prints, never the password itself. Unset, the dashboard is off (§ 7.6). |
 
 **Policy**
 
@@ -656,6 +713,7 @@ settings and are ignored, so one shell can run the server and a client.
 | `rate_writes` / `rate_links` / `rate_reads` | `60/m` / `120/m` / `600/m` | Per-client buckets (§ 7.5) |
 | `rate_views` | `1200/m` | Per-IP bucket for views (§ 7.5) |
 | `rate_unlock` / `rate_unlock_link` | `10/m` / `100/h` | Wrong passcodes per link and IP, and per link (§ 7.5) |
+| `rate_admin_login` | `5/m` | Wrong dashboard passwords per IP (§ 7.6) |
 | `max_links` | `500` | Live recorded links per artifact (§ 3) |
 
 **Links**
@@ -685,7 +743,8 @@ Validation at startup:
 - `upload_ttl ≤ upload_ttl_max`;
 - `max_artifact ≤ quota`;
 - `public_base_url` is an absolute `http(s)` origin;
-- `data_dir` and `data_dir/tmp` are on one filesystem.
+- `data_dir` and `data_dir/tmp` are on one filesystem;
+- `admin_password`, when set, is a hash, and `public_base_url` is `https` or on a loopback host.
 
 ### 8.3 Example
 
@@ -718,6 +777,7 @@ mcp-vitrine serve --config vitrine.toml
 | `mcp-vitrine token new <name> [--scopes read,write,share,publish]` | Print a new random token, plus its `VITRINE_TOKENS` entry. Writes nothing to disk. |
 | `mcp-vitrine token hash <token>` | Print the hash of an existing token |
 | `mcp-vitrine secret new` | Print a new random 32-byte hex secret |
+| `mcp-vitrine admin password` | Read the dashboard password twice from the terminal (at least 12 characters) and print its `VITRINE_ADMIN_PASSWORD='scrypt$…'` line. Writes nothing to disk; the password is never an argument. |
 | `mcp-vitrine sweep [--config FILE]` | Run the expiry and staging sweep once, then exit (for cron-style setups). Safe beside a running server: staging younger than 10 minutes is left alone. |
 | `mcp-vitrine audit [--id ID] [--client NAME] [--since 7d] [--json] [--config FILE]` | Print audit events, newest first; `--json` prints the stored lines |
 | `mcp-vitrine views [--id ID] [--since 7d] [--config FILE]` | Print view counts per artifact and link, most viewed first: views, visitors, bots (§ 11.4). It reads what the server flushed, so the last minute may be missing. |
@@ -832,6 +892,8 @@ state change is acknowledged.
 
 Rules:
 
+- Changes made from the dashboard (§ 7.6) carry `client` = `@admin`; like `@operator` and `@sweep`,
+  no token name can start with `@`.
 - The audit log records **who and what**, never content. It holds no titles, file names,
   signatures or tokens. Ids and client names only, so the log can be kept longer than the
   artifacts and shared with whoever reviews it.

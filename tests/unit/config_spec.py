@@ -20,6 +20,7 @@ from mcp_vitrine.config import (
 from mcp_vitrine.domain import layout
 from mcp_vitrine.domain.errors import ConfigError
 from mcp_vitrine.domain.models import PublicMode, Scope
+from tests.conftest import ADMIN_HASH, ADMIN_PASSWORD
 
 GIGABYTE = 1024**3
 
@@ -267,6 +268,44 @@ class DescribeSecrets:
             monkeypatch.setenv("VITRINE_TOKENS", "")
             with pytest.raises(ConfigError):
                 load_settings()
+
+
+class DescribeTheAdminPassword:
+    class WhenItIsUnset:
+        def it_leaves_the_dashboard_off(self) -> None:
+            assert load_settings().admin_password is None
+
+    class WhenTheEnvironmentHoldsItsHash:
+        def it_reads_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setenv("VITRINE_ADMIN_PASSWORD", ADMIN_HASH)
+            password = load_settings().admin_password
+            assert password is not None
+            assert password.get_secret_value() == ADMIN_HASH
+
+    class WhenItIsInTheTomlFile:
+        def it_refuses_to_start(self, tmp_path: Path) -> None:
+            path = _config_file(tmp_path, f"[vitrine]\nadmin_password = '{ADMIN_HASH}'\n")
+            with pytest.raises(ConfigError, match="VITRINE_ADMIN_PASSWORD"):
+                load_settings(config_path=path)
+
+    class WhenThePasswordItselfIsGiven:
+        def it_refuses_to_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setenv("VITRINE_ADMIN_PASSWORD", ADMIN_PASSWORD)
+            with pytest.raises(ConfigError, match="not the password"):
+                load_settings()
+
+    class WhenTheBaseUrlIsPlainHttpOffLoopback:
+        def it_refuses_to_start(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setenv("VITRINE_ADMIN_PASSWORD", ADMIN_HASH)
+            monkeypatch.setenv("VITRINE_PUBLIC_BASE_URL", "http://vitrine.lan:8080")
+            with pytest.raises(ConfigError, match="https"):
+                load_settings()
+
+    class WhenTheBaseUrlIsLoopback:
+        def it_starts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setenv("VITRINE_ADMIN_PASSWORD", ADMIN_HASH)
+            monkeypatch.setenv("VITRINE_PUBLIC_BASE_URL", "http://localhost:8080")
+            assert load_settings().admin_password is not None
 
 
 class DescribeValidation:

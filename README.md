@@ -124,6 +124,22 @@ What the agent can do:
 Approval goes through your MCP client's confirmation prompt. If the client cannot ask, or you
 decline or don't answer, the artifact stays private.
 
+## The dashboard
+
+An operator page at `/_admin/` lists every artifact, shows what is public, and lets you mint or
+revoke private links, edit titles, tags and projects, make something private or delete it.
+Nothing can be made public from it. It is off until you give it a password:
+
+```bash
+mcp-vitrine admin password                # asks twice, prints VITRINE_ADMIN_PASSWORD='scrypt$…'
+export VITRINE_ADMIN_PASSWORD='scrypt$…'  # the hash, never the password
+mcp-vitrine serve                         # then open http://localhost:8080/_admin/
+```
+
+It is served on the same host as everything else (`public_base_url`), which must be `https`
+unless it is on `localhost`. Client tokens cannot sign in, so don't give the password to an
+agent.
+
 ## From a shell
 
 The package also installs `vitrine`, a client for laptops, CI jobs and agents with a shell. It

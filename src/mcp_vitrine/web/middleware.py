@@ -55,7 +55,7 @@ class HostGuard:
     def __init__(self, app: ASGIApp, *, base_url: str, allowed_hosts: Iterable[str]) -> None:
         """Allow the host of ``public_base_url`` plus ``allowed_hosts``."""
         self._app = app
-        self._origin = _origin(base_url)
+        self._origin = origin_of(base_url)
         self._extra = frozenset(hostname(host) for host in allowed_hosts)
         self._hosts = self._extra | {hostname(urlsplit(base_url).netloc)}
 
@@ -77,7 +77,7 @@ class HostGuard:
 
     def _trusts(self, origin: str) -> bool:
         """Vitrine's own origin, or any origin on a host the operator listed."""
-        return _origin(origin) == self._origin or hostname(urlsplit(origin).netloc) in self._extra
+        return origin_of(origin) == self._origin or hostname(urlsplit(origin).netloc) in self._extra
 
 
 class BodyLimit:
@@ -184,7 +184,7 @@ async def _too_large(scope: Scope, receive: Receive, send: Send) -> None:
     await PlainTextResponse("request body too large", status_code=413)(scope, receive, send)
 
 
-def _origin(url: str) -> str:
+def origin_of(url: str) -> str:
     """``scheme://host[:port]`` with the default port dropped, for comparing two origins."""
     parts = urlsplit(url.strip().lower())
     default = {"http": 80, "https": 443}.get(parts.scheme)

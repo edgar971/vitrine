@@ -31,6 +31,7 @@ The contract, including the accepted formats, is [spec § 8](spec.md#8-configura
 |---|---|---|---|
 | `secret` | `VITRINE_SECRET` | required | HMAC key for links, at least 32 bytes. Rotating it revokes every private link. |
 | `tokens` | `VITRINE_TOKENS` | required | Client tokens as `name:sha256hex[:scope+scope…]`, comma-separated; at least one. Omitted scopes mean all four. |
+| `admin_password` | `VITRINE_ADMIN_PASSWORD` | unset | The dashboard's operator password as the scrypt hash `mcp-vitrine admin password` prints; unset, the dashboard is off |
 
 ## Policy
 
@@ -58,6 +59,7 @@ The contract, including the accepted formats, is [spec § 8](spec.md#8-configura
 | `rate_views` | `VITRINE_RATE_VIEWS` | `1200/m` | Per-IP view bucket |
 | `rate_unlock` | `VITRINE_RATE_UNLOCK` | `10/m` | Wrong passcodes per link and source IP; a right one spends nothing |
 | `rate_unlock_link` | `VITRINE_RATE_UNLOCK_LINK` | `100/h` | Wrong passcodes per link, from every source together |
+| `rate_admin_login` | `VITRINE_RATE_ADMIN_LOGIN` | `5/m` | Wrong dashboard passwords per source IP |
 | `max_links` | `VITRINE_MAX_LINKS` | `500` | Live recorded links per artifact |
 
 ## Links

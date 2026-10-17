@@ -10,10 +10,14 @@ from pathlib import Path
 import pytest
 
 from mcp_vitrine.config import Settings, load_settings
+from mcp_vitrine.services.admin import hash_password
 from mcp_vitrine.storage.base import StoreConfig
 
 SECRET = "0123456789abcdef0123456789abcdef"
 TOKEN_HASH = "a" * 64
+ADMIN_PASSWORD = "correct horse battery staple"
+# Hashed once: scrypt is slow on purpose, and every dashboard spec needs the same one.
+ADMIN_HASH = hash_password(ADMIN_PASSWORD)
 
 
 class FrozenClock:

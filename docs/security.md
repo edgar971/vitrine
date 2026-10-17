@@ -139,6 +139,7 @@ fails when a listed spec is renamed or removed, so this table cannot point at no
 | One path to public | `tests/mcp/gate_spec.py::DescribeTheHandshakeEraGate::WhenTheHumanNeverAnswers::it_leaves_the_artifact_private` |
 | One path to public | `tests/mcp/gate_spec.py::DescribeTheHandshakeEraGate::WhenTheClientFailsWhileAnswering::it_leaves_the_artifact_private` |
 | One path to public | `tests/http/api_spec.py::DescribeCreatingOverTheApi::WhenAVisibilityIsSent::it_refuses_the_request` |
+| One path to public | `tests/http/api_parity_spec.py::DescribePatchingOverTheApi::WhenAVisibilityIsSent::it_refuses_the_request` |
 | One path to public | `tests/mcp/public_updates_spec.py::DescribeUpdatingAPublicArtifact::WhenTheTokenCannotPublish::it_writes_nothing` |
 | One path to public | `tests/mcp/public_updates_spec.py::DescribeUpdatingAPublicArtifact::WhenTheHumanDeclines::it_writes_nothing` |
 | One path to public | `tests/mcp/public_updates_spec.py::DescribeMakingPublicWhileTheContentChanges::WhenAVersionLandsWhileTheHumanDecides::it_leaves_the_artifact_private` |

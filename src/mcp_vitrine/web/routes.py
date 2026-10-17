@@ -8,6 +8,7 @@ Like a tool, a route stays thin: it checks the caller, translates, calls a servi
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Callable
@@ -18,7 +19,15 @@ from typing import Annotated, Any
 from urllib.parse import quote
 
 from anyio import to_thread
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictStr,
+    ValidationError,
+    field_validator,
+)
 from starlette.datastructures import FormData, UploadFile
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
@@ -33,9 +42,10 @@ from mcp_vitrine.domain.errors import (
     NotFound,
     RateLimited,
     TooLarge,
+    UnsupportedType,
     VitrineError,
 )
-from mcp_vitrine.domain.ids import CLIENT_REF_MAX, is_valid_id
+from mcp_vitrine.domain.ids import CLIENT_REF_MAX, LID_PATTERN, is_valid_id
 from mcp_vitrine.domain.models import (
     PROJECT_PATTERN,
     TAG_LIMIT,
@@ -43,6 +53,7 @@ from mcp_vitrine.domain.models import (
     TITLE_MAX,
     ArtifactDraft,
     ArtifactQuery,
+    MetaChange,
     PublishedArtifact,
     Scope,
     VersionDraft,
@@ -76,6 +87,9 @@ VERSION_MARK = "@"
 # More digits than any real version number needs.
 MAX_PIN_DIGITS = 9
 UNLOCK_FIELDS = 4
+# A JSON body names a few short fields; anything near this is not a request vitrine understands.
+JSON_BODY = 16 * 1024
+JSON_TYPE = "application/json"
 # Requests a browser makes ahead of a click: not someone opening the link.
 PREFETCH = frozenset({"prefetch", "prerender"})
 
@@ -97,6 +111,11 @@ ROUTE_ACCESS: dict[str, Access] = {
     "api_create": Access.BEARER,
     "api_update": Access.BEARER,
     "api_list": Access.BEARER,
+    "api_get": Access.BEARER,
+    "api_delete": Access.BEARER,
+    "api_meta": Access.BEARER,
+    "api_link": Access.BEARER,
+    "api_revoke": Access.BEARER,
     "health": Access.PUBLIC,
     "mcp": Access.MCP,
 }
@@ -132,6 +151,50 @@ class _Fields(BaseModel):
         return value
 
 
+class _Body(BaseModel):
+    """A JSON body of the ``/api`` routes: an unknown key is a 400, never ignored."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class _MetaBody(_Body):
+    """``PATCH``: the fields of ``artifact_set_meta``. A visibility is not one of them."""
+
+    title: str | None = None
+    tags: list[str] | None = None
+    add_tags: list[str] | None = None
+    remove_tags: list[str] | None = None
+    project: str | None = None
+
+    def to_change(self) -> MetaChange:
+        """The service's change, validated by the same model the tool builds."""
+        try:
+            return MetaChange(
+                title=self.title,
+                tags=None if self.tags is None else tuple(self.tags),
+                add_tags=tuple(self.add_tags or ()),
+                remove_tags=tuple(self.remove_tags or ()),
+                project=self.project,
+            )
+        except ValidationError as error:
+            raise Invalid(_describe(error)) from None
+
+
+class _LinkBody(_Body):
+    """``POST …/links``: the arguments of ``artifact_link``."""
+
+    ttl: Annotated[str | None, Field(pattern=DURATION)] = None
+    label: Annotated[str | None, Field(max_length=TITLE_MAX)] = None
+    # Strict, so "true" as a string is a supplied passcode, not a request to generate one.
+    passcode: Annotated[StrictBool | StrictStr | None, Field(union_mode="left_to_right")] = None
+
+
+class _RevokeBody(_Body):
+    """``POST …/revoke``: one ``lid``, or nothing for every link."""
+
+    link: Annotated[str | None, Field(pattern=LID_PATTERN.pattern)] = None
+
+
 class WebRoutes:
     """The route handlers, holding the services they were built with; nothing is global."""
 
@@ -150,6 +213,13 @@ class WebRoutes:
             Route("/api/artifacts", self.api_create, methods=["POST"], name="api_create"),
             Route("/api/artifacts", self.api_list, methods=["GET"], name="api_list"),
             Route("/api/artifacts/{id}", self.api_update, methods=["PUT"], name="api_update"),
+            Route("/api/artifacts/{id}", self.api_get, methods=["GET"], name="api_get"),
+            Route("/api/artifacts/{id}", self.api_delete, methods=["DELETE"], name="api_delete"),
+            Route("/api/artifacts/{id}", self.api_meta, methods=["PATCH"], name="api_meta"),
+            Route("/api/artifacts/{id}/links", self.api_link, methods=["POST"], name="api_link"),
+            Route(
+                "/api/artifacts/{id}/revoke", self.api_revoke, methods=["POST"], name="api_revoke"
+            ),
             Route("/healthz", self.health, methods=["GET"], name="health"),
         ]
 
@@ -300,6 +370,118 @@ class WebRoutes:
         except VitrineError as error:
             return problem(error)
         return JSONResponse(page.model_dump(mode="json"), headers=security_headers())
+
+    async def api_get(self, request: Request) -> Response:
+        """``GET /api/artifacts/{id}[?version=]``: as ``artifact_get``, with no URL in it."""
+        artifact_id = request.path_params["id"]
+        caller = await self._authenticate(
+            request, Scope.READ, route="api_get", artifact=artifact_id
+        )
+        if isinstance(caller, Response):
+            return caller
+        try:
+            await self._spend(Bucket.READS, caller, route="api_get", artifact=artifact_id)
+            version = _version(request.query_params.get("version"))
+            detail = await _run(partial(self._services.artifacts.get, artifact_id, version=version))
+        except VitrineError as error:
+            return problem(error)
+        return _json_response(detail.model_dump(mode="json"))
+
+    async def api_delete(self, request: Request) -> Response:
+        """``DELETE /api/artifacts/{id}``: as ``artifact_delete``; every link stops at once."""
+        artifact_id = request.path_params["id"]
+        caller = await self._authenticate(
+            request, Scope.WRITE, route="api_delete", artifact=artifact_id
+        )
+        if isinstance(caller, Response):
+            return caller
+        try:
+            await self._spend(Bucket.WRITES, caller, route="api_delete", artifact=artifact_id)
+            await _run(partial(self._services.artifacts.delete, artifact_id, client=caller))
+        except VitrineError as error:
+            return problem(error)
+        return _json_response({"deleted": artifact_id})
+
+    async def api_meta(self, request: Request) -> Response:
+        """``PATCH /api/artifacts/{id}``: as ``artifact_set_meta``; a visibility is refused."""
+        artifact_id = request.path_params["id"]
+        caller = await self._authenticate(
+            request, Scope.WRITE, route="api_meta", artifact=artifact_id
+        )
+        if isinstance(caller, Response):
+            return caller
+        try:
+            await self._spend(Bucket.WRITES, caller, route="api_meta", artifact=artifact_id)
+            body = await _json_body(request)
+            change = _model(_MetaBody, body)
+            artifact = await _run(
+                partial(
+                    self._services.artifacts.set_meta,
+                    artifact_id,
+                    change.to_change(),
+                    client=caller,
+                )
+            )
+        except VitrineError as error:
+            return problem(error)
+        return _json_response(
+            {
+                "id": artifact.id,
+                "title": artifact.title,
+                "tags": list(artifact.tags),
+                "project": artifact.project,
+            }
+        )
+
+    async def api_link(self, request: Request) -> Response:
+        """``POST /api/artifacts/{id}/links``: as ``artifact_link``; a passcode is shown once."""
+        artifact_id = request.path_params["id"]
+        caller = await self._authenticate(
+            request, Scope.SHARE, route="api_link", artifact=artifact_id
+        )
+        if isinstance(caller, Response):
+            return caller
+        try:
+            await self._spend(Bucket.LINKS, caller, route="api_link", artifact=artifact_id)
+            fields = _model(_LinkBody, await _json_body(request))
+            link = await _run(
+                partial(
+                    self._services.artifacts.link,
+                    artifact_id,
+                    client=caller,
+                    ttl=None if fields.ttl is None else requested_duration(fields.ttl),
+                    label=fields.label or "",
+                    passcode=fields.passcode,
+                )
+            )
+        except VitrineError as error:
+            return problem(error)
+        return _json_response(link.model_dump(mode="json"), status=201)
+
+    async def api_revoke(self, request: Request) -> Response:
+        """``POST /api/artifacts/{id}/revoke``: one link by ``lid``, or every private link."""
+        artifact_id = request.path_params["id"]
+        caller = await self._authenticate(
+            request, Scope.SHARE, route="api_revoke", artifact=artifact_id
+        )
+        if isinstance(caller, Response):
+            return caller
+        try:
+            await self._spend(Bucket.LINKS, caller, route="api_revoke", artifact=artifact_id)
+            fields = _model(_RevokeBody, await _json_body(request))
+            artifact = await _run(
+                partial(
+                    self._services.artifacts.revoke_links,
+                    artifact_id,
+                    client=caller,
+                    lid=fields.link,
+                )
+            )
+        except VitrineError as error:
+            return problem(error)
+        return _json_response(
+            {"id": artifact.id, "link_epoch": artifact.link_epoch, "link": fields.link}
+        )
 
     async def health(self, request: Request) -> Response:
         """``GET /healthz``: 200 while ``data_dir`` is writable, else 503."""
@@ -510,6 +692,49 @@ def _fields(form: FormData) -> _Fields:
         return _Fields.model_validate(values)
     except ValidationError as error:
         raise Invalid(_describe(error)) from None
+
+
+async def _json_body(request: Request) -> dict[str, Any]:
+    """The JSON object a request carries, counted while it streams; an empty body is ``{}``."""
+    kind = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > JSON_BODY:
+            raise TooLarge(f"a JSON body is at most {JSON_BODY // 1024} KiB")
+    if not body:
+        return {}
+    if kind != JSON_TYPE:
+        raise UnsupportedType(f"send the body as {JSON_TYPE}")
+    try:
+        value = json.loads(body)
+    except ValueError:
+        raise Invalid("the body is not valid JSON") from None
+    if not isinstance(value, dict):
+        raise Invalid("the body must be a JSON object")
+    return value
+
+
+def _model[M: BaseModel](model: type[M], body: dict[str, Any]) -> M:
+    """Validate a JSON body, naming each refused field without echoing its value."""
+    try:
+        return model.model_validate(body)
+    except ValidationError as error:
+        raise Invalid(_describe(error)) from None
+
+
+def _version(value: str | None) -> int | None:
+    """``?version=n``: a positive number, or none for the current version."""
+    if value is None:
+        return None
+    if not (value.isascii() and value.isdigit() and len(value) <= MAX_PIN_DIGITS) or not int(value):
+        raise Invalid("version is a positive number")
+    return int(value)
+
+
+def _json_response(body: object, *, status: int = 200) -> Response:
+    """A JSON answer of the ``/api`` routes, with the headers every response carries."""
+    return JSONResponse(body, status_code=status, headers=security_headers())
 
 
 def _published(published: PublishedArtifact, *, status: int) -> Response:

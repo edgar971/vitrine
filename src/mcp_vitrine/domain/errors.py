@@ -42,6 +42,10 @@ class Invalid(VitrineError):
     """The request is malformed: an unsafe path, a bad entry, an empty version."""
 
 
+class UnsupportedType(Invalid):
+    """A body sent as a media type the route does not read (HTTP 415)."""
+
+
 class TooLarge(VitrineError):
     """A size or file-count limit would be exceeded (spec § 8.2)."""
 

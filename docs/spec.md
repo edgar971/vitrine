@@ -393,8 +393,17 @@ cover them.
 | `POST /api/artifacts` | bearer, `vitrine:write` | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?` (repeatable, or comma-separated), `project?` (empty means none), `note?`, `client_ref?`. Any other field is refused with 400, so there is no way to send a visibility. Returns `201 {id, url, version, expires_at}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
 | `PUT /api/artifacts/{id}` | bearer, `vitrine:write` | Same body, without `client_ref`. Adds a version; `merge=true` overlays; `expires_in=never` clears the expiry; an empty `project` clears it. A public target returns 403 (§ 4.4). |
 | `GET /api/artifacts` | bearer, `vitrine:read` | Same query parameters and page as `artifact_list` |
+| `GET /api/artifacts/{id}[?version=]` | bearer, `vitrine:read` | As `artifact_get`: metadata, one version's files, live links (never their URL or hash) and views |
+| `DELETE /api/artifacts/{id}` | bearer, `vitrine:write` | As `artifact_delete`. Returns `{deleted}` |
+| `PATCH /api/artifacts/{id}` | bearer, `vitrine:write` | JSON `{title?, tags?, add_tags?, remove_tags?, project?}`, as `artifact_set_meta`. Any other key, `visibility` included, is refused with 400. Returns `{id, title, tags, project}` |
+| `POST /api/artifacts/{id}/links` | bearer, `vitrine:share` | JSON `{ttl?, label?, passcode?}`, as `artifact_link`. Returns `201 {url, expires_at, lid, passcode}`; a generated passcode is in it once, a supplied one never. On a public artifact, the public URL |
+| `POST /api/artifacts/{id}/revoke` | bearer, `vitrine:share` | JSON `{link?}`: the one link with that `lid`, or every private link. Returns `{id, link_epoch, link}` |
 | `GET /healthz` | none | `200 {"ok": true}` when `data_dir` is writable (probed through `data_dir/tmp`, where every write starts), else 503 |
 | `GET /metrics` on `metrics_port` | none | Prometheus text format, on a separate listener (§ 11) |
+
+No `/api` route takes a visibility: the one path to public is `artifact_set_visibility` (§ 6).
+Each route spends its tool's bucket (§ 7.5) and is audited as its tool is. A JSON body is
+`application/json` (else 415) of at most 16 KiB, counted while it streams; an empty body is `{}`.
 
 The `@{n}` suffix keeps version pinning inside one path segment, so relative asset URLs in
 multi-file HTML keep working under every prefix.
@@ -494,8 +503,8 @@ Token buckets in memory: per client for authenticated calls, per source IP for v
 
 | Bucket | Key | Default | Counts |
 |---|---|---|---|
-| `rate_writes` | client | `60/m` | create, update, upload URL issue, upload, delete |
-| `rate_links` | client | `120/m` | `artifact_link`, `artifact_revoke_links`, `artifact_set_visibility` |
+| `rate_writes` | client | `60/m` | create, update, metadata edits, upload URL issue, upload, delete |
+| `rate_links` | client | `120/m` | `artifact_link`, `artifact_revoke_links`, `artifact_set_visibility`, and their `/api` routes |
 | `rate_reads` | client | `600/m` | get, list, resources |
 | `rate_views` | source IP | `1200/m` | `/a/` and `/s/` requests |
 | `rate_unlock` | link + source IP | `10/m` | wrong passcodes only |
@@ -662,6 +671,7 @@ they need `VITRINE_SECRET` and `VITRINE_TOKENS` too.
 | A passcode link opened without its passcode, or with a wrong one | — | 401 with the unlock form |
 | Expired artifact | tool error `expired` | 410 |
 | Unsafe path; bad entry; empty artifact; a duration that is zero or over 36500 days | tool error naming the problem | 400 |
+| An `/api` JSON body sent as another media type | — | 415 |
 | Upload URL reused; `client_ref` reused with different content; the artifact changed while the human decided | tool error `conflict` | 409 |
 | Rate limit exceeded | tool error `rate limited: retry after <n>s` | 429 + `Retry-After` |
 | Over a size or file-count limit; `max_links` live links | tool error | 413 |

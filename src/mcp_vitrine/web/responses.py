@@ -30,6 +30,7 @@ from mcp_vitrine.domain.errors import (
     RateLimited,
     Refused,
     TooLarge,
+    UnsupportedType,
     VitrineError,
 )
 from mcp_vitrine.domain.media import OCTET_STREAM, TEXT_TYPES, content_type
@@ -91,6 +92,7 @@ _STATUS: tuple[tuple[type[VitrineError], int], ...] = (
     (NotFound, 404),
     (Expired, 410),
     (Locked, 401),
+    (UnsupportedType, 415),
     (Invalid, 400),
     (Conflict, 409),
     (TooLarge, 413),

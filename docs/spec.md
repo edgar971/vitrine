@@ -77,7 +77,7 @@ body = "view"   "|" id "|" expires_unix "|" link_epoch                (private v
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "k7m2q9x4tz3wbn6r",
   "title": "Energy, September",
   "visibility": "private",
@@ -93,10 +93,25 @@ body = "view"   "|" id "|" expires_unix "|" link_epoch                (private v
   "source": "hermes",
   "client_ref": "weekly-energy-2026-09",
   "tags": ["energy"],
+  "project": "household",
   "link_epoch": 0,
-  "used_upload_nonces": []
+  "used_upload_nonces": [],
+  "links": [],
+  "fallback": null,
+  "public_until": null
 }
 ```
+
+| Field | Type | Default | Used by |
+|---|---|---|---|
+| `project` | `null` \| a name matching `[a-z0-9][a-z0-9_.-]{0,63}` | `null` | projects: one per artifact; tags stay many |
+| `links` | `[{lid, label, created_at, expires_at, passcode}]`, live links only; `passcode` is `null` or `{hash, salt, n, r, p}` (scrypt) | `[]` | per-link passcode, revoke and view counts |
+| `fallback` | `null` \| a path in the version | `null` | zip sites, SPA fallback |
+| `public_until` | `null` \| timestamp | `null` | scheduled unpublish |
+
+A field whose feature is not enabled keeps its default and has no effect. `meta.json` holds no
+secret in clear and nothing about viewers: no IPs, no passcodes. A link `label` is a name the user
+chose, like a title, and never reaches the audit log.
 
 Implementations **MUST** refuse to start on a `schema_version` they do not know. Future versions
 add migrations; they never reinterpret a field.
@@ -205,10 +220,11 @@ The HTTP API applies the same scopes: `/api` writes need `vitrine:write`, and li
 
 | Tool | Parameters | Result | Scope |
 |---|---|---|---|
-| `artifact_create` | `title`; `files: {path: text}` (UTF-8, total ≤ `max_mcp_body`); `entry?`; `expires_in?`; `tags?`; `note?`; `client_ref?` (§ 4.5) | `{id, url, version, expires_at, created}`. Always **private**; `url` is a fresh private link. `created` is false when `client_ref` matched. | `vitrine:write` |
-| `artifact_update` | `id`; `files?`; `merge=false`; `entry?`; `title?`; `expires_in?` (`"never"` clears); `tags?`; `note?` | `{id, url, version}`. The id is unchanged. With `merge`, files overlay the current version; without it they replace it. Without `files`, the current files carry over, so a metadata-only change is still a new version. On a **public** artifact the human is asked first (§ 6.1) and `url` is the public URL; a token without `vitrine:publish` is refused without asking (§ 4.4). | `vitrine:write` (+ `vitrine:publish` for a public artifact) |
+| `artifact_create` | `title`; `files: {path: text}` (UTF-8, total ≤ `max_mcp_body`); `entry?`; `expires_in?`; `tags?`; `project?`; `note?`; `client_ref?` (§ 4.5) | `{id, url, version, expires_at, created}`. Always **private**; `url` is a fresh private link. `created` is false when `client_ref` matched. | `vitrine:write` |
+| `artifact_update` | `id`; `files?`; `merge=false`; `entry?`; `title?`; `expires_in?` (`"never"` clears); `tags?`; `note?` | `{id, url, version}`. The id is unchanged. With `merge`, files overlay the current version; without it they replace it. Without `files`, the current files carry over, so a metadata-only change is still a new version; `artifact_set_meta` changes metadata without one. On a **public** artifact the human is asked first (§ 6.1) and `url` is the public URL; a token without `vitrine:publish` is refused without asking (§ 4.4). | `vitrine:write` (+ `vitrine:publish` for a public artifact) |
 | `artifact_get` | `id`; `version?` | Metadata plus `files: [{path, bytes}]` | `vitrine:read` |
-| `artifact_list` | `query?` (title or tag substring); `tag?`; `visibility?`; `source?`; `limit=20` (max 100); `cursor?` | `{items: [{id, title, visibility, version, updated_at, source, tags}], next_cursor}`, newest first. **No URLs**: links are minted on purpose with `artifact_link`. | `vitrine:read` |
+| `artifact_set_meta` | `id`; `title?`; `tags?` (replaces them); `add_tags?`; `remove_tags?`; `project?` (`""` clears it) | `{id, title, tags, project}`. Rewrites `meta.json` only: no version, no gate, no new link epoch, so every link keeps working. `tags` cannot be combined with `add_tags` or `remove_tags`, and a call must name something to change. A change to the values already there writes and audits nothing. | `vitrine:write` |
+| `artifact_list` | `query?` (search terms, below); `tag?`; `project?`; `visibility?`; `source?`; `updated_after?`; `expiring_within?` (a duration); `sort=updated` \| `created` \| `title`; `facets=false`; `limit=20` (max 100); `cursor?` | `{items: [{id, title, visibility, version, updated_at, source, tags, project}], next_cursor, facets}`. `updated` and `created` are newest first, `title` is A to Z. With `facets`, `facets` is `{projects: {name: count}, tags: {name: count}}` over the whole match, not the page; otherwise `null`. **No URLs**: links are minted on purpose with `artifact_link`. | `vitrine:read` |
 | `artifact_link` | `id`; `ttl?` | `{url, expires_at}`. A fresh private link, or the public URL if public. | `vitrine:share` |
 | `artifact_set_visibility` | `id`; `visibility` | `{id, visibility, url}`. Going public follows § 6. Every change increments the link epoch. | `vitrine:publish` |
 | `artifact_revoke_links` | `id` | `{id, link_epoch}` | `vitrine:share` |
@@ -219,6 +235,12 @@ Every tool also carries a `title` and all four MCP annotation hints (`readOnlyHi
 `destructiveHint`, `idempotentHint`, `openWorldHint`); the values are listed in
 [design § 4](design.md). Every parameter has a description and its constraints in the input
 schema.
+
+**Search.** `query` is split on whitespace into terms, and every term must match (AND),
+case-insensitively, as a substring of the title, a tag, the project, a version note or the entry
+file name. File contents are not searched. Filters combine with the terms: `updated_after` keeps
+artifacts changed after that time, and `expiring_within` those whose `expires_at` falls within
+that long from now. A cursor encodes its sort; one used with another sort is a bad request.
 
 No tool other than `artifact_set_visibility` takes a visibility, and no HTTP route accepts one.
 **There is exactly one path to public.**
@@ -327,8 +349,8 @@ cover them.
 | `GET /a/{id}@{n}/[{path}]` | none | Pinned version `n` of a public artifact. A version that is not retained returns 404. |
 | `GET /s/{sig}/[{path}]`, `GET /s/{sig}@{n}/[{path}]` | view signature | The same for any artifact the signature names |
 | `PUT /u/{sig}?filename=[&title=]` | upload signature, from a client still configured with `vitrine:write` | Raw body. Creates the pre-allocated private artifact (`201`), or adds a version that overlays the file on the current ones (`200`). Single use. Returns `{id, url, version, expires_at}`. A public target returns 403 (§ 4.4). An URL whose client was removed from `VITRINE_TOKENS`, or lost `vitrine:write`, returns 404. |
-| `POST /api/artifacts` | bearer, `vitrine:write` | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?` (repeatable, or comma-separated), `note?`, `client_ref?`. Any other field is refused with 400, so there is no way to send a visibility. Returns `201 {id, url, version, expires_at}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
-| `PUT /api/artifacts/{id}` | bearer, `vitrine:write` | Same body, without `client_ref`. Adds a version; `merge=true` overlays; `expires_in=never` clears the expiry. A public target returns 403 (§ 4.4). |
+| `POST /api/artifacts` | bearer, `vitrine:write` | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?` (repeatable, or comma-separated), `project?` (empty means none), `note?`, `client_ref?`. Any other field is refused with 400, so there is no way to send a visibility. Returns `201 {id, url, version, expires_at}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
+| `PUT /api/artifacts/{id}` | bearer, `vitrine:write` | Same body, without `client_ref`. Adds a version; `merge=true` overlays; `expires_in=never` clears the expiry; an empty `project` clears it. A public target returns 403 (§ 4.4). |
 | `GET /api/artifacts` | bearer, `vitrine:read` | Same query parameters and page as `artifact_list` |
 | `GET /healthz` | none | `200 {"ok": true}` when `data_dir` is writable (probed through `data_dir/tmp`, where every write starts), else 503 |
 | `GET /metrics` on `metrics_port` | none | Prometheus text format, on a separate listener (§ 11) |
@@ -633,6 +655,7 @@ state change is acknowledged.
 | `visibility_changed` | `from`, `to`, `gate` = `approved` \| `not_required` |
 | `publish_refused` | `gate` = `declined` \| `unsupported` \| `disabled` |
 | `links_revoked` | `link_epoch` |
+| `metadata_changed` | `fields`: the **names** of what changed (`title`, `tags`, `project`), never the values |
 | `upload_url_issued` | `expires_at` |
 | `deleted` | — |
 | `expired` | — (written by the sweep) |

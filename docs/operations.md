@@ -66,6 +66,11 @@ release that changes the on-disk format bumps `schema_version` and says so in th
 - The audit log records one `migrated` event per run that changes anything, written before the
   first file changes; a dry run, or a run with nothing to do, records nothing.
 
+| `schema_version` | Release | What `migrate` does |
+|---|---|---|
+| 1 | `0.1.x` | — |
+| 2 | `0.2.0` | Adds `links`, `fallback`, `public_until` and `project` at their defaults (spec § 4.2); nothing else changes, and every link keeps working |
+
 **Startup refuses** to run against:
 
 - data with an **older** `schema_version`, until `mcp-vitrine migrate` has run;

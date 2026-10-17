@@ -42,6 +42,13 @@ class DescribeTheAuditOfEachChange:
             await call("artifact_revoke_links", id=published["id"])
             assert _names(events)[1:] == [AuditEventName.LINKS_REVOKED]
 
+    class WhenTheMetadataChanges:
+        async def it_records_metadata_changed_once(
+            self, call: Call, published: dict[str, Any], events: Events
+        ) -> None:
+            await call("artifact_set_meta", id=published["id"], add_tags=["q3"])
+            assert _names(events)[1:] == [AuditEventName.METADATA_CHANGED]
+
     class WhenAnUploadUrlIsIssued:
         async def it_records_upload_url_issued_once(self, call: Call, events: Events) -> None:
             await call("artifact_upload_url", filename="report.pdf")

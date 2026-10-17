@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
+from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from mcp_vitrine.domain.errors import ConfigError, SchemaMismatch
+from mcp_vitrine.domain.errors import ConfigError, Invalid, SchemaMismatch
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 TAG_LIMIT = 200
+TAG_MAX = 64
+TITLE_MAX = 200
 NONCES_KEPT = 50
+PROJECT_PATTERN = r"^[a-z0-9][a-z0-9_.-]{0,63}$"
+
+type Project = Annotated[str, Field(pattern=PROJECT_PATTERN)]
+type Tag = Annotated[str, Field(max_length=TAG_MAX)]
 
 
 class Visibility(StrEnum):
@@ -95,8 +102,35 @@ class FileEntry(BaseModel):
     bytes: int = Field(ge=0)
 
 
+class Passcode(BaseModel):
+    """The scrypt hash of a link's passcode and its parameters; never the passcode itself."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    hash: str
+    salt: str
+    n: int = Field(ge=2)
+    r: int = Field(ge=1)
+    p: int = Field(ge=1)
+
+
+class LinkRecord(BaseModel):
+    """One live private link (spec § 4.2). Inert until per-link records ship."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    lid: str
+    label: str = Field(default="", max_length=TITLE_MAX)
+    created_at: AwareDatetime
+    expires_at: AwareDatetime
+    passcode: Passcode | None = None
+
+
 class Artifact(BaseModel):
-    """An artifact exactly as ``meta.json`` holds it (spec § 4.2)."""
+    """An artifact exactly as ``meta.json`` holds it (spec § 4.2).
+
+    A field whose feature is not enabled keeps its default and has no effect.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -115,6 +149,10 @@ class Artifact(BaseModel):
     tags: tuple[str, ...] = ()
     link_epoch: int = 0
     used_upload_nonces: tuple[str, ...] = ()
+    links: tuple[LinkRecord, ...] = ()
+    fallback: str | None = None
+    public_until: AwareDatetime | None = None
+    project: Project | None = None
 
     @field_validator("schema_version")
     @classmethod
@@ -156,6 +194,18 @@ class Artifact(BaseModel):
             updated_at=self.updated_at,
             source=self.source,
             tags=self.tags,
+            project=self.project,
+        )
+
+    def text(self) -> tuple[str, ...]:
+        """What a search term may match: title, tags, project, version notes, entry (§ 5.1)."""
+        notes = tuple(version.note for version in self.versions if version.note)
+        return (
+            self.title,
+            *self.tags,
+            *((self.project,) if self.project else ()),
+            *notes,
+            self.entry,
         )
 
 
@@ -171,6 +221,7 @@ class ArtifactSummary(BaseModel):
     updated_at: AwareDatetime
     source: str
     tags: tuple[str, ...] = ()
+    project: str | None = None
 
 
 class ArtifactDraft(BaseModel):
@@ -186,6 +237,7 @@ class ArtifactDraft(BaseModel):
     files: dict[str, bytes]
     entry: str | None = None
     tags: tuple[str, ...] = ()
+    project: Project | None = None
     note: str = ""
     expires_at: AwareDatetime | None = None
     client_ref: str | None = None
@@ -202,6 +254,8 @@ class VersionDraft(BaseModel):
     entry: str | None = None
     title: str | None = None
     tags: tuple[str, ...] | None = None
+    # ``""`` clears the project; ``None`` leaves it alone.
+    project: Project | Literal[""] | None = None
     note: str = ""
     expires_at: AwareDatetime | None = None
     clear_expiry: bool = False
@@ -213,6 +267,63 @@ class VersionDraft(BaseModel):
         if self.clear_expiry and self.expires_at is not None:
             raise ValueError("an update cannot clear and set expires_at at once")
         return self
+
+
+class MetaChange(BaseModel):
+    """What ``artifact_set_meta`` changes; ``None`` leaves a field alone (spec § 5.1).
+
+    Nothing here is served, so a change needs no version, no gate and no new link epoch.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    title: Annotated[str, Field(max_length=TITLE_MAX)] | None = None
+    tags: tuple[Tag, ...] | None = None
+    add_tags: tuple[Tag, ...] = ()
+    remove_tags: tuple[Tag, ...] = ()
+    # ``""`` clears the project.
+    project: Project | Literal[""] | None = None
+
+    @model_validator(mode="after")
+    def _says_one_clear_thing(self) -> MetaChange:
+        """Name something to change, and either replace the tags or add and remove some.
+
+        ``Invalid`` rather than ``ValueError``: pydantic lets it through, so a tool's caller
+        gets the message instead of a masked validation error.
+        """
+        if self.tags is not None and (self.add_tags or self.remove_tags):
+            raise Invalid("tags replaces every tag: do not combine it with add_tags or remove_tags")
+        if (self.title, self.tags, self.project) == (None, None, None) and not (
+            self.add_tags or self.remove_tags
+        ):
+            raise Invalid("name something to change: title, tags, add_tags, remove_tags or project")
+        return self
+
+    def applied_to(self, artifact: Artifact) -> dict[str, object]:
+        """The fields of ``artifact`` this change gives new values, by name; empty if none."""
+        tags = artifact.tags if self.tags is None else self.tags
+        tags = (*tags, *_new_tags(tags, self.add_tags))
+        removed = {tag.casefold() for tag in self.remove_tags}
+        tags = tuple(tag for tag in tags if tag.casefold() not in removed)
+        if len(tags) > TAG_LIMIT:
+            raise Invalid(f"an artifact holds at most {TAG_LIMIT} tags")
+        wanted: dict[str, object] = {
+            "title": artifact.title if self.title is None else self.title,
+            "tags": tags,
+            "project": artifact.project if self.project is None else (self.project or None),
+        }
+        return {name: value for name, value in wanted.items() if getattr(artifact, name) != value}
+
+
+def _new_tags(tags: tuple[str, ...], added: tuple[str, ...]) -> tuple[str, ...]:
+    """The tags of ``added`` not already present, compared as the tag filter compares them."""
+    seen = {tag.casefold() for tag in tags}
+    fresh: list[str] = []
+    for tag in added:
+        if tag.casefold() not in seen:
+            seen.add(tag.casefold())
+            fresh.append(tag)
+    return tuple(fresh)
 
 
 class ArtifactDetail(BaseModel):
@@ -237,6 +348,14 @@ class PublishedArtifact(BaseModel):
     created: bool = True
 
 
+class ListSort(StrEnum):
+    """The orders ``artifact_list`` pages in (spec § 5.1)."""
+
+    UPDATED = "updated"
+    CREATED = "created"
+    TITLE = "title"
+
+
 class ArtifactQuery(BaseModel):
     """The filters and the page ``artifact_list`` accepts (spec § 5.1)."""
 
@@ -244,19 +363,39 @@ class ArtifactQuery(BaseModel):
 
     query: str | None = None
     tag: str | None = None
+    project: str | None = None
     visibility: Visibility | None = None
     source: str | None = None
+    updated_after: AwareDatetime | None = None
+    expiring_within: timedelta | None = None
+    sort: ListSort = ListSort.UPDATED
+    facets: bool = False
     limit: int = Field(default=20, ge=1, le=100)
     cursor: str | None = None
 
+    @property
+    def terms(self) -> tuple[str, ...]:
+        """The query's terms, case-folded; every one of them must match (spec § 5.1)."""
+        return tuple(term.casefold() for term in (self.query or "").split())
+
+
+class Facets(BaseModel):
+    """How many artifacts of the whole match carry each project and each tag (spec § 5.1)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    projects: dict[str, int]
+    tags: dict[str, int]
+
 
 class ArtifactPage(BaseModel):
-    """One page of listings, newest first (spec § 5.1)."""
+    """One page of listings, in the query's order (spec § 5.1)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     items: tuple[ArtifactSummary, ...]
     next_cursor: str | None = None
+    facets: Facets | None = None
 
 
 class LinkClaims(BaseModel):

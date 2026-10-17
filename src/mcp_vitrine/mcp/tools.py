@@ -1,4 +1,4 @@
-"""The nine ``artifact_*`` tools (spec § 5.1, design § 4). Each one translates and calls a service.
+"""The ten ``artifact_*`` tools (spec § 5.1, design § 4). Each one translates and calls a service.
 
 A docstring here is the description the model reads, so it carries the policy of spec § 5.3.
 """
@@ -18,18 +18,23 @@ from fastmcp.dependencies import CurrentAccessToken, CurrentContext, Depends
 from fastmcp.exceptions import ToolError
 from fastmcp.server.auth import AccessToken, require_scopes
 from fastmcp.server.providers import LocalProvider
-from pydantic import Field
+from pydantic import AwareDatetime, Field
 
 from mcp_vitrine.config import requested_duration
 from mcp_vitrine.domain.ids import ALPHABET, CLIENT_REF_MAX, ID_LENGTH
 from mcp_vitrine.domain.models import (
+    PROJECT_PATTERN,
     TAG_LIMIT,
+    TAG_MAX,
+    TITLE_MAX,
     ArtifactDetail,
     ArtifactDraft,
     ArtifactLink,
     ArtifactPage,
     ArtifactQuery,
     GateDecision,
+    ListSort,
+    MetaChange,
     PublishedArtifact,
     Scope,
     VersionDraft,
@@ -41,6 +46,7 @@ from mcp_vitrine.mcp.deps import artifact_service, public_gate
 from mcp_vitrine.mcp.errors import domain_errors
 from mcp_vitrine.mcp.policy import tags
 from mcp_vitrine.mcp.results import (
+    ChangedMeta,
     Deleted,
     RevokedLinks,
     UpdatedArtifact,
@@ -68,7 +74,8 @@ ArtifactId = Annotated[
     ),
 ]
 Title = Annotated[
-    str, Field(description="Shown in listings and in the confirmation prompt.", max_length=200)
+    str,
+    Field(description="Shown in listings and in the confirmation prompt.", max_length=TITLE_MAX),
 ]
 Files = Annotated[
     dict[str, str],
@@ -87,9 +94,18 @@ Entry = Annotated[
         max_length=MAX_PATH_BYTES,
     ),
 ]
+TagList = list[Annotated[str, Field(max_length=TAG_MAX)]]
 Tags = Annotated[
-    list[Annotated[str, Field(max_length=64)]] | None,
+    TagList | None,
     Field(description="Labels to find the artifact by with artifact_list.", max_length=TAG_LIMIT),
+]
+Project = Annotated[
+    str | None,
+    Field(
+        description="The one project this artifact belongs to, e.g. q3-report: lowercase "
+        "letters, digits, '.', '_' and '-'.",
+        pattern=PROJECT_PATTERN,
+    ),
 ]
 Note = Annotated[
     str, Field(description="What changed in this version, kept in its history.", max_length=1000)
@@ -142,6 +158,7 @@ def artifact_create(
         ),
     ] = None,
     tags: Tags = None,
+    project: Project = None,
     note: Note = "",
     client_ref: Annotated[
         str | None,
@@ -167,6 +184,7 @@ def artifact_create(
         files={path: text.encode() for path, text in files.items()},
         entry=entry,
         tags=tuple(tags or ()),
+        project=project,
         note=note,
         expires_at=None if expires_in is None else service.expiry(requested_duration(expires_in)),
         client_ref=client_ref,
@@ -218,7 +236,8 @@ async def artifact_update(
 
     Always reuse the id of an artifact you published before rather than creating a new one.
     If the user made it public, they are asked to confirm first, because the new version is
-    public at once; if they decline, nothing changes.
+    public at once; if they decline, nothing changes. To change only the title, tags or
+    project, use artifact_set_meta: it writes no version.
     """
     draft = VersionDraft(
         files=None if files is None else {path: text.encode() for path, text in files.items()},
@@ -295,10 +314,18 @@ def artifact_get(
 @domain_errors(ToolError)
 def artifact_list(
     query: Annotated[
-        str | None, Field(description="Matches a substring of the title or a tag.", max_length=200)
+        str | None,
+        Field(
+            description="Words that must all appear, case-insensitively, in the title, a tag, "
+            "the project, a version note or the entry file name. Not the file contents.",
+            max_length=200,
+        ),
     ] = None,
     tag: Annotated[
-        str | None, Field(description="Only artifacts with this tag.", max_length=64)
+        str | None, Field(description="Only artifacts with this tag.", max_length=TAG_MAX)
+    ] = None,
+    project: Annotated[
+        str | None, Field(description="Only artifacts in this project.", pattern=PROJECT_PATTERN)
     ] = None,
     visibility: Annotated[
         Visibility | None, Field(description="Only private or only public artifacts.")
@@ -306,17 +333,104 @@ def artifact_list(
     source: Annotated[
         str | None, Field(description="Only artifacts this client published.", max_length=64)
     ] = None,
+    updated_after: Annotated[
+        AwareDatetime | None,
+        Field(description="Only artifacts changed after this time (ISO 8601, with a zone)."),
+    ] = None,
+    expiring_within: Annotated[
+        str | None,
+        Field(
+            description="Only artifacts that expire within this long: 30m, 12h, 7d.",
+            pattern=DURATION_PATTERN,
+        ),
+    ] = None,
+    sort: Annotated[
+        ListSort,
+        Field(description="updated or created (newest first), or title (A to Z)."),
+    ] = ListSort.UPDATED,
+    facets: Annotated[
+        bool,
+        Field(description="Also count the projects and tags over every match, not just the page."),
+    ] = False,
     limit: Annotated[int, Field(description="Page size.", ge=1, le=100)] = 20,
     cursor: Annotated[
-        str | None, Field(description="next_cursor from the previous page.", max_length=512)
+        str | None,
+        Field(
+            description="next_cursor from the previous page, with the same sort.", max_length=512
+        ),
     ] = None,
     service: ArtifactService = Depends(artifact_service),
 ) -> ArtifactPage:
-    """List artifacts, newest first. No links: mint one on purpose with artifact_link."""
+    """List artifacts, newest first by default. No links: mint one on purpose with artifact_link."""
     return service.list(
         ArtifactQuery(
-            query=query, tag=tag, visibility=visibility, source=source, limit=limit, cursor=cursor
+            query=query,
+            tag=tag,
+            project=project,
+            visibility=visibility,
+            source=source,
+            updated_after=updated_after,
+            expiring_within=None
+            if expiring_within is None
+            else requested_duration(expiring_within),
+            sort=sort,
+            facets=facets,
+            limit=limit,
+            cursor=cursor,
         )
+    )
+
+
+@tools.tool(
+    title="Edit artifact metadata",
+    annotations=mt.ToolAnnotations(
+        read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False
+    ),
+    tags=tags(Scope.WRITE, Bucket.WRITES),
+    auth=require_scopes(Scope.WRITE),
+    timeout=DISK_TIMEOUT,
+)
+@domain_errors(ToolError)
+def artifact_set_meta(
+    id: ArtifactId,
+    title: Annotated[str | None, Field(description="A new title.", max_length=TITLE_MAX)] = None,
+    tags: Annotated[
+        TagList | None,
+        Field(description="Replace every tag with these.", max_length=TAG_LIMIT),
+    ] = None,
+    add_tags: Annotated[
+        TagList | None,
+        Field(description="Add these tags, keeping the others.", max_length=TAG_LIMIT),
+    ] = None,
+    remove_tags: Annotated[
+        TagList | None,
+        Field(description="Remove these tags, keeping the others.", max_length=TAG_LIMIT),
+    ] = None,
+    project: Annotated[
+        str | None,
+        Field(
+            description="Move the artifact to this project; an empty string removes it from one.",
+            pattern=rf"{PROJECT_PATTERN}|^$",
+        ),
+    ] = None,
+    service: ArtifactService = Depends(artifact_service),
+    caller: AccessToken = CurrentAccessToken(),
+) -> ChangedMeta:
+    """Change an artifact's title, tags or project without writing a new version.
+
+    The content, the version and every link stay as they are, so the user is never asked, even
+    when the artifact is public. To change the files, use artifact_update.
+    """
+    change = MetaChange(
+        title=title,
+        tags=None if tags is None else tuple(tags),
+        add_tags=tuple(add_tags or ()),
+        remove_tags=tuple(remove_tags or ()),
+        project=project,
+    )
+    artifact = service.set_meta(id, change, client=_caller(caller))
+    return ChangedMeta(
+        id=artifact.id, title=artifact.title, tags=artifact.tags, project=artifact.project
     )
 
 

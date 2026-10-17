@@ -19,6 +19,15 @@ class UpdatedArtifact(_Result):
     version: int = Field(ge=1)
 
 
+class ChangedMeta(_Result):
+    """``artifact_set_meta``: the metadata as it is now; the version and the links are unchanged."""
+
+    id: str
+    title: str
+    tags: tuple[str, ...]
+    project: str | None
+
+
 class VisibilityChange(_Result):
     """``artifact_set_visibility``: the visibility now, and the URL that opens it."""
 

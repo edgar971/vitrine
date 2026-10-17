@@ -111,9 +111,10 @@ What the agent can do:
 |---|---|---|
 | `artifact_create` | `write` | Publish text files (HTML, Markdown, CSV, SVG, …) and get a private link |
 | `artifact_update` | `write` | Add a version behind the same link |
+| `artifact_set_meta` | `write` | Rename, retag or move to a project, without a new version |
 | `artifact_upload_url` | `write` | A single-use upload URL for binaries and large files |
 | `artifact_delete` | `write` | Remove an artifact and every link to it |
-| `artifact_get` / `artifact_list` | `read` | Read an artifact back, or find earlier ones |
+| `artifact_get` / `artifact_list` | `read` | Read an artifact back, or search earlier ones by words, project, tag or expiry |
 | `artifact_link` | `share` | A fresh private link, with its own expiry |
 | `artifact_revoke_links` | `share` | Revoke every private link issued so far |
 | `artifact_set_visibility` | `publish` | Make an artifact public, after you approve |

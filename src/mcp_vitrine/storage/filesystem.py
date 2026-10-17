@@ -11,10 +11,12 @@ import shutil
 import threading
 import time
 import uuid
-from collections.abc import Iterator, Mapping
+from collections import Counter
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -39,8 +41,10 @@ from mcp_vitrine.domain.models import (
     ArtifactDraft,
     ArtifactPage,
     ArtifactQuery,
-    ArtifactSummary,
+    Facets,
     FileEntry,
+    ListSort,
+    MetaChange,
     Version,
     VersionDraft,
     Visibility,
@@ -52,6 +56,7 @@ REF_ID = "id"
 REF_HASH = "request_hash"
 REF_AT = "created_at"
 UPLOAD_REUSED = "this upload URL was already used"
+EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +90,10 @@ class FileStore:
         self._refs_lock = threading.Lock()
         self._writes_lock = threading.Lock()
         layout.ensure(config.root)
+        # A running total, so the quota check under ``_writes_lock`` never walks the store; every
+        # change to ``_usage`` also moves ``_generation``, which tells a re-measure it raced one.
+        self._usage = _measure(config.root)
+        self._generation = 0
 
     def create(self, artifact_id: str, draft: ArtifactDraft, *, source: str) -> Artifact:
         """Write version 1 and its ``meta.json``; ``Conflict`` if the id is taken."""
@@ -95,9 +104,11 @@ class FileStore:
             with self._staged(draft.files) as stage:
                 at = self._clock.now()
                 entry = choose_entry(files=stage.paths, requested=draft.entry)
+                self._clear_orphan(artifact_id, 1)
                 with self._writes_lock:
                     self._refuse_oversized(stage)
                     self._place(artifact_id, stage.path)
+                    self._count(stage.new_bytes)
                 version = Version(
                     n=1, at=at, note=draft.note, bytes=stage.size, files=len(stage.entries)
                 )
@@ -113,6 +124,7 @@ class FileStore:
                     source=source,
                     client_ref=draft.client_ref,
                     tags=draft.tags,
+                    project=draft.project,
                     used_upload_nonces=_spend((), draft.upload_nonce),
                 )
                 self._write_meta(artifact)
@@ -147,9 +159,11 @@ class FileStore:
                     files=stage.paths, requested=draft.entry, previous=previous.entry
                 )
                 number = previous.version + 1
+                self._clear_orphan(artifact_id, number)
                 with self._writes_lock:
                     self._refuse_oversized(stage)
                     self._place(artifact_id, stage.path, number)
+                    self._count(stage.new_bytes)
                 version = Version(
                     n=number, at=at, note=draft.note, bytes=stage.size, files=len(stage.entries)
                 )
@@ -160,6 +174,9 @@ class FileStore:
                         "entry": entry,
                         "title": previous.title if draft.title is None else draft.title,
                         "tags": previous.tags if draft.tags is None else draft.tags,
+                        "project": previous.project
+                        if draft.project is None
+                        else (draft.project or None),
                         "expires_at": _updated_expiry(previous, draft),
                         "updated_at": at,
                         "used_upload_nonces": _spend(
@@ -181,10 +198,7 @@ class FileStore:
             pruned = artifact.model_copy(update={"versions": retained})
             self._write_meta(pruned)
             for version in dropped:
-                shutil.rmtree(
-                    layout.version_dir(self._config.root, artifact_id, version.n),
-                    ignore_errors=True,
-                )
+                self._remove_counted(layout.version_dir(self._config.root, artifact_id, version.n))
             return pruned
 
     def get(self, artifact_id: str) -> Artifact:
@@ -215,15 +229,22 @@ class FileStore:
         return target
 
     def list(self, query: ArtifactQuery) -> ArtifactPage:
-        """Scan the ``meta.json`` files, newest first, one page at a time (spec § 5.1)."""
-        summaries = [artifact.summary() for artifact in self._all() if _matches(artifact, query)]
-        summaries.sort(key=_sort_key, reverse=True)
+        """Scan the ``meta.json`` files, in the query's order, one page at a time (spec § 5.1)."""
+        now = self._clock.now()
+        matched = [artifact for artifact in self._all() if _matches(artifact, query, now)]
+        # Every order is ascending on its key: the time orders negate the timestamp, newest first.
+        matched.sort(key=partial(_sort_key, query.sort))
+        rest = matched
         if query.cursor is not None:
-            after = _decode_cursor(query.cursor)
-            summaries = [summary for summary in summaries if _sort_key(summary) < after]
-        page = summaries[: query.limit]
-        next_cursor = _encode_cursor(page[-1]) if len(summaries) > query.limit else None
-        return ArtifactPage(items=tuple(page), next_cursor=next_cursor)
+            after = _decode_cursor(query.cursor, query.sort)
+            rest = [artifact for artifact in matched if _sort_key(query.sort, artifact) > after]
+        page = rest[: query.limit]
+        return ArtifactPage(
+            items=tuple(artifact.summary() for artifact in page),
+            next_cursor=_encode_cursor(query.sort, page[-1]) if len(rest) > query.limit else None,
+            # Over the whole match, not the page, so a client can group without paging through.
+            facets=_facets(matched) if query.facets else None,
+        )
 
     def delete(self, artifact_id: str) -> None:
         """Remove the artifact and free its ``client_ref`` (spec § 4.5)."""
@@ -231,12 +252,17 @@ class FileStore:
         with self._locked(artifact_id):
             if not (directory / layout.META_FILE).exists():
                 raise NotFound()
+            # No other artifact shares an inode with this one, so every byte it holds is freed.
+            freed = _measure_tree(directory)
             try:
                 shutil.rmtree(directory)
             except OSError as error:
+                self.resync_usage()
                 raise StorageUnavailable(
                     f"cannot delete {artifact_id}: {error.strerror or error}"
                 ) from error
+            with self._writes_lock:
+                self._count(-freed)
             with self._refs_lock:
                 for path, claimed in self._ref_records():
                     if claimed is not None and claimed.get(REF_ID) == artifact_id:
@@ -266,6 +292,15 @@ class FileStore:
                 artifact, link_epoch=artifact.link_epoch + 1, updated_at=self._clock.now()
             )
 
+    def set_meta(self, artifact_id: str, change: MetaChange) -> tuple[Artifact, Artifact]:
+        """Apply a metadata change to ``meta.json`` alone: no version, no epoch (spec § 5.1)."""
+        with self._locked(artifact_id):
+            artifact = self._read_meta(artifact_id)
+            changes = change.applied_to(artifact)
+            if not changes:
+                return artifact, artifact
+            return artifact, self._update_meta(artifact, **changes, updated_at=self._clock.now())
+
     def replace_meta(self, artifact: Artifact) -> None:
         """Write ``meta.json`` as given, to compensate a mutation whose audit write failed."""
         with self._locked(artifact.id):
@@ -274,9 +309,7 @@ class FileStore:
     def vitrine_version(self, artifact_id: str, version: int) -> None:
         """Remove one version directory, leaving ``meta.json`` alone (compensation only)."""
         with self._locked(artifact_id):
-            shutil.rmtree(
-                layout.version_dir(self._config.root, artifact_id, version), ignore_errors=True
-            )
+            self._remove_counted(layout.version_dir(self._config.root, artifact_id, version))
 
     def claim_ref(self, *, client: str, ref: str, request_hash: str, artifact_id: str) -> RefClaim:
         """Claim ``client_ref`` exclusively, or report the artifact an earlier call made.
@@ -311,19 +344,26 @@ class FileStore:
                 path.unlink(missing_ok=True)
 
     def usage_bytes(self) -> int:
-        """The bytes the versions hold, hard links counted once (spec § 8.2)."""
-        seen: set[tuple[int, int]] = set()
-        total = 0
-        pattern = f"*/{layout.VERSION_PREFIX}*/**/*"
-        for path in (self._config.root / layout.ARTIFACTS_DIR).glob(pattern):
-            if path.is_symlink() or not path.is_file():
-                continue
-            info = path.stat()
-            if (info.st_dev, info.st_ino) in seen:
-                continue
-            seen.add((info.st_dev, info.st_ino))
-            total += info.st_size
-        return total
+        """The bytes the versions hold, hard links counted once (spec § 8.2).
+
+        A running total: measured once when the store opens and moved by every write and removal
+        since, so the quota check does not walk the store under the store-wide write lock.
+        """
+        return self._usage
+
+    def resync_usage(self) -> None:
+        """Measure the store again, without the write lock, and keep it if nothing moved meanwhile.
+
+        Another process (a CLI sweep beside the server) changes the disk without telling this
+        one; the periodic sweep calls this so the total follows. A measure that raced a write is
+        dropped rather than trusted, and the next sweep tries again.
+        """
+        with self._writes_lock:
+            generation = self._generation
+        measured = _measure(self._config.root)
+        with self._writes_lock:
+            if self._generation == generation:
+                self._usage = measured
 
     def count(self) -> int:
         """How many artifacts have a ``meta.json``; nothing is parsed, so scraping stays cheap."""
@@ -355,8 +395,9 @@ class FileStore:
                 continue
             for path in directory.iterdir():
                 if path.is_dir() and path.name not in referenced and _modified(path) <= cutoff:
-                    shutil.rmtree(path, ignore_errors=True)
+                    self._remove_counted(path)
                     removed += 1
+        self.resync_usage()
         return removed
 
     def sweep_refs(self) -> int:
@@ -414,14 +455,35 @@ class FileStore:
         if self.usage_bytes() + stage.new_bytes > self._config.quota:
             raise OverQuota(f"the store is limited to {self._config.quota} bytes")
 
+    def _count(self, delta: int) -> None:
+        """Move the running total; the caller holds ``_writes_lock``."""
+        self._usage = max(0, self._usage + delta)
+        self._generation += 1
+
+    def _remove_counted(self, version: Path) -> None:
+        """Remove one version directory and take the bytes only it held off the total.
+
+        A file another version hard-links is still on disk afterwards, so it frees nothing.
+        """
+        freed = sum(info.st_size for info in _file_stats(version) if info.st_nlink == 1)
+        shutil.rmtree(version, ignore_errors=True)
+        with self._writes_lock:
+            self._count(-freed)
+
+    def _clear_orphan(self, artifact_id: str, version: int) -> None:
+        """Remove a ``v<n>`` a crash left between the two renames, so this write can take it.
+
+        Outside the store-wide write lock: the artifact's lock already keeps it from coming back.
+        """
+        orphan = layout.version_dir(self._config.root, artifact_id, version)
+        if orphan.exists():
+            self._remove_counted(orphan)
+
     def _place(self, artifact_id: str, stage: Path, version: int = 1) -> None:
         """Rename the stage into ``artifacts/<id>/v<n>``; a crash before this leaves only tmp."""
         directory = layout.artifact_dir(self._config.root, artifact_id)
         directory.mkdir(parents=True, exist_ok=True)
-        target = layout.version_dir(self._config.root, artifact_id, version)
-        if target.exists():
-            shutil.rmtree(target)
-        stage.rename(target)
+        stage.rename(layout.version_dir(self._config.root, artifact_id, version))
 
     def _write_meta(self, artifact: Artifact) -> None:
         """Replace ``meta.json`` in one rename, so a reader never sees half of it (spec § 4.3)."""
@@ -561,6 +623,38 @@ def _scan_tree(directory: Path) -> tuple[FileEntry, ...]:
     return tuple(entries)
 
 
+def _file_stats(root: Path) -> Iterator[os.stat_result]:
+    """The ``stat`` of every regular file under ``root``, symlinks ignored."""
+    for path in root.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            yield path.stat()
+        except FileNotFoundError:
+            continue
+
+
+def _measure_tree(root: Path) -> int:
+    """The bytes under ``root``, hard links counted once."""
+    seen: set[tuple[int, int]] = set()
+    total = 0
+    for info in _file_stats(root):
+        if (info.st_dev, info.st_ino) not in seen:
+            seen.add((info.st_dev, info.st_ino))
+            total += info.st_size
+    return total
+
+
+def _measure(root: Path) -> int:
+    """The bytes every version directory holds, hard links counted once (spec § 8.2)."""
+    artifacts = root / layout.ARTIFACTS_DIR
+    return sum(
+        _measure_tree(version)
+        for version in artifacts.glob(f"*/{layout.VERSION_PREFIX}*")
+        if version.is_dir()
+    )
+
+
 def _modified(path: Path) -> float:
     """When an entry last changed; one that vanished meanwhile counts as old (it is gone)."""
     try:
@@ -584,47 +678,80 @@ def _updated_expiry(previous: Artifact, draft: VersionDraft) -> datetime | None:
     return previous.expires_at if draft.expires_at is None else draft.expires_at
 
 
-def _sort_key(summary: ArtifactSummary) -> tuple[datetime, str]:
-    """Newest first, with the id breaking ties, so a cursor is stable (spec § 5.1)."""
-    return summary.updated_at, summary.id
+def _sort_key(sort: ListSort, artifact: Artifact) -> tuple[int | str, str]:
+    """An ascending key for one order, with the id breaking ties, so a cursor is stable.
+
+    The time orders are newest first, so their key is the negated time, in whole microseconds:
+    a float would round two close times together.
+    """
+    match sort:
+        case ListSort.UPDATED:
+            return -_microseconds(artifact.updated_at), artifact.id
+        case ListSort.CREATED:
+            return -_microseconds(artifact.created_at), artifact.id
+        case ListSort.TITLE:
+            return artifact.title.casefold(), artifact.id
 
 
-def _matches(artifact: Artifact, query: ArtifactQuery) -> bool:
-    """Whether one artifact satisfies every filter (spec § 5.1)."""
-    if query.visibility is not None and artifact.visibility is not query.visibility:
-        return False
-    if query.source is not None and artifact.source != query.source:
-        return False
-    if query.tag is not None and query.tag.casefold() not in {
-        tag.casefold() for tag in artifact.tags
-    }:
-        return False
-    if query.query is None:
-        return True
-    needle = query.query.casefold()
-    return needle in artifact.title.casefold() or any(
-        needle in tag.casefold() for tag in artifact.tags
+def _microseconds(moment: datetime) -> int:
+    """``moment`` as an exact count of microseconds since the epoch."""
+    return (moment - EPOCH) // timedelta(microseconds=1)
+
+
+def _matches(artifact: Artifact, query: ArtifactQuery, now: datetime) -> bool:
+    """Whether one artifact satisfies every filter and every search term (spec § 5.1)."""
+    filters = (
+        query.visibility is None or artifact.visibility is query.visibility,
+        query.source is None or artifact.source == query.source,
+        query.project is None or artifact.project == query.project,
+        query.tag is None or query.tag.casefold() in {tag.casefold() for tag in artifact.tags},
+        query.updated_after is None or artifact.updated_at > query.updated_after,
+        query.expiring_within is None
+        or (artifact.expires_at is not None and artifact.expires_at <= now + query.expiring_within),
     )
+    if not all(filters):
+        return False
+    haystack = tuple(text.casefold() for text in artifact.text())
+    return all(any(term in text for text in haystack) for term in query.terms)
 
 
-def _encode_cursor(summary: ArtifactSummary) -> str:
-    """An opaque cursor: where the next page starts."""
-    raw = f"{summary.updated_at.isoformat()}|{summary.id}".encode()
+def _facets(artifacts: Iterable[Artifact]) -> Facets:
+    """Count the projects and the tags of the artifacts, each artifact once per name."""
+    projects: Counter[str] = Counter()
+    tags: Counter[str] = Counter()
+    for artifact in artifacts:
+        if artifact.project is not None:
+            projects[artifact.project] += 1
+        tags.update(set(artifact.tags))
+    return Facets(projects=dict(sorted(projects.items())), tags=dict(sorted(tags.items())))
+
+
+def _encode_cursor(sort: ListSort, artifact: Artifact) -> str:
+    """An opaque cursor: the order it belongs to, and where the next page starts."""
+    key, artifact_id = _sort_key(sort, artifact)
+    raw = json.dumps([sort.value, key, artifact_id], separators=(",", ":")).encode()
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 
-def _decode_cursor(cursor: str) -> tuple[datetime, str]:
-    """Undo :func:`_encode_cursor`, refusing anything malformed."""
+def _decode_cursor(cursor: str, sort: ListSort) -> tuple[int | str, str]:
+    """Undo :func:`_encode_cursor`, refusing anything malformed or from another order."""
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
-        stamp, artifact_id = base64.urlsafe_b64decode(padded).decode().split("|")
-        after = datetime.fromisoformat(stamp)
-    except (ValueError, binascii.Error, UnicodeDecodeError) as error:
+        decoded = json.loads(base64.urlsafe_b64decode(padded))
+    except (ValueError, binascii.Error) as error:
         raise Invalid("the cursor is not a cursor") from error
-    # A naive time cannot be compared with the stored, aware ones.
-    if after.tzinfo is None:
+    match decoded:
+        case [str() as order, int() | str() as key, str() as artifact_id] if not isinstance(
+            key, bool
+        ):
+            pass
+        case _:
+            raise Invalid("the cursor is not a cursor")
+    if order != sort.value:
+        raise Invalid(f"the cursor belongs to sort={order}, not sort={sort.value}")
+    if isinstance(key, str) is not (sort is ListSort.TITLE):
         raise Invalid("the cursor is not a cursor")
-    return after, artifact_id
+    return key, artifact_id
 
 
 def _parse_time(value: object) -> datetime | None:

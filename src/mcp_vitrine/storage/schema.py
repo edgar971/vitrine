@@ -28,8 +28,14 @@ class Plan:
     target: int
 
 
+def _add_release_fields(meta: Meta) -> Meta:
+    """1 -> 2: every field 0.2.0 needs, at the default that keeps 0.1 behaviour (spec § 4.2)."""
+    defaults: Meta = {"links": [], "fallback": None, "public_until": None, "project": None}
+    return defaults | meta
+
+
 # A release that bumps SCHEMA_VERSION adds its step here and says so in the changelog.
-CURRENT = Plan(steps={}, target=SCHEMA_VERSION)
+CURRENT = Plan(steps={1: _add_release_fields}, target=SCHEMA_VERSION)
 
 
 @dataclass(frozen=True, slots=True)

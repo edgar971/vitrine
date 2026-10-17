@@ -89,3 +89,26 @@ class DescribeMigrate:
             with pytest.raises(AuditUnavailable):
                 maintenance.migrate(root, audit=failing, clock=clock, plan=PLAN)
             assert json.loads(layout.meta_file(root, old).read_text())["schema_version"] == OLD
+
+
+@pytest.fixture
+def schema_one(store_config: StoreConfig, clock: Clock) -> str:
+    """An artifact exactly as 0.1 wrote it: schema 1, none of the 0.2 fields."""
+    artifact_id = new_id()
+    store = FileStore(store_config, clock)
+    store.create(artifact_id, ArtifactDraft(title="t", files={"a": b"a"}), source="hermes")
+    path = layout.meta_file(store_config.root, artifact_id)
+    release = {"links", "fallback", "public_until", "project"}
+    meta = {key: value for key, value in json.loads(path.read_text()).items() if key not in release}
+    path.write_text(json.dumps(meta | {"schema_version": 1}))
+    return artifact_id
+
+
+class DescribeTheReleaseMigrate:
+    class WhenTheDataIsSchemaOne:
+        def it_audits_migrated_once(
+            self, root: Path, audit: AuditLog, clock: Clock, schema_one: str
+        ) -> None:
+            maintenance.migrate(root, audit=audit, clock=clock)
+            maintenance.migrate(root, audit=audit, clock=clock)
+            assert len(_migrated(audit)) == 1

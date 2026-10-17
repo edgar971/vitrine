@@ -28,6 +28,7 @@ class AuditEventName(StrEnum):
     VISIBILITY_CHANGED = "visibility_changed"
     PUBLISH_REFUSED = "publish_refused"
     LINKS_REVOKED = "links_revoked"
+    METADATA_CHANGED = "metadata_changed"
     UPLOAD_URL_ISSUED = "upload_url_issued"
     DELETED = "deleted"
     EXPIRED = "expired"
@@ -38,6 +39,14 @@ class AuditEventName(StrEnum):
 # The ``client`` of events an operator causes from the command line. The ``@`` keeps it apart from
 # every client: no ``VITRINE_TOKENS`` name can start with one.
 OPERATOR = "@operator"
+
+
+class MetaField(StrEnum):
+    """A metadata field ``metadata_changed`` may name (spec § 11.3)."""
+
+    TITLE = "title"
+    TAGS = "tags"
+    PROJECT = "project"
 
 
 class DenialReason(StrEnum):
@@ -61,6 +70,7 @@ EXTRA_FIELDS = (
     "reason",
     "tool",
     "route",
+    "fields",
 )
 
 REQUIRED_EXTRAS: dict[AuditEventName, frozenset[str]] = {
@@ -69,6 +79,7 @@ REQUIRED_EXTRAS: dict[AuditEventName, frozenset[str]] = {
     AuditEventName.VISIBILITY_CHANGED: frozenset({"from_visibility", "to_visibility", "gate"}),
     AuditEventName.PUBLISH_REFUSED: frozenset({"gate"}),
     AuditEventName.LINKS_REVOKED: frozenset({"link_epoch"}),
+    AuditEventName.METADATA_CHANGED: frozenset({"fields"}),
     AuditEventName.UPLOAD_URL_ISSUED: frozenset({"expires_at"}),
     AuditEventName.DELETED: frozenset(),
     AuditEventName.EXPIRED: frozenset(),
@@ -109,6 +120,8 @@ class AuditEvent(BaseModel):
     reason: DenialReason | None = None
     tool: str | None = None
     route: str | None = None
+    # The names of the metadata fields that changed, never their values.
+    fields: tuple[MetaField, ...] | None = None
 
     @model_validator(mode="after")
     def _carries_the_documented_fields(self) -> AuditEvent:

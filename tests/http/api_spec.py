@@ -102,6 +102,20 @@ class DescribeCreatingOverTheApi:
             create()
             assert events()[0].event is AuditEventName.CREATED
 
+    class WhenAProjectIsSent:
+        def it_files_the_artifact_there(self, create: Create, services: Services) -> None:
+            artifact_id = create(project="q3-report").json()["id"]
+            assert services.artifacts.get(artifact_id).artifact.project == "q3-report"
+
+    class WhenTheProjectIsEmpty:
+        def it_files_the_artifact_in_none(self, create: Create, services: Services) -> None:
+            artifact_id = create(project="").json()["id"]
+            assert services.artifacts.get(artifact_id).artifact.project is None
+
+    class WhenTheProjectIsNotAName:
+        def it_answers_400(self, create: Create) -> None:
+            assert create(project="Q3 Report").status_code == 400
+
     class WhenAVisibilityIsSent:
         def it_refuses_the_request(self, create: Create) -> None:
             assert create(visibility="public").status_code == 400
@@ -211,6 +225,18 @@ class DescribeUpdatingOverTheApi:
             paths = {file.path for file in services.artifacts.get(published.id).files}
             assert {"img/chart.png", "index.html", "notes.md"} <= paths
 
+    class WhenTheProjectIsCleared:
+        def it_leaves_the_artifact_in_none(
+            self,
+            http: httpx2.Client,
+            bearer: dict[str, str],
+            services: Services,
+            create: Create,
+        ) -> None:
+            artifact_id = create(project="q3").json()["id"]
+            http.put(f"/api/artifacts/{artifact_id}", data={"project": ""}, headers=bearer)
+            assert services.artifacts.get(artifact_id).artifact.project is None
+
     class WhenTheIdIsUnknown:
         def it_answers_404(self, http: httpx2.Client, bearer: dict[str, str]) -> None:
             response = http.put("/api/artifacts/k7m2q9x4tz3wbn6r", files=[INDEX], headers=bearer)
@@ -244,6 +270,45 @@ class DescribeListingOverTheApi:
         ) -> None:
             response = http.get("/api/artifacts", params={"tag": "none"}, headers=reader)
             assert response.json()["items"] == []
+
+    class WhenFilteredByProject:
+        def it_returns_only_that_project(
+            self, http: httpx2.Client, reader: dict[str, str], create: Create
+        ) -> None:
+            inside = create(project="q3").json()["id"]
+            create()
+            response = http.get("/api/artifacts", params={"project": "q3"}, headers=reader)
+            assert [item["id"] for item in response.json()["items"]] == [inside]
+
+    class WhenFacetsAreAsked:
+        def it_counts_the_projects(
+            self, http: httpx2.Client, reader: dict[str, str], create: Create
+        ) -> None:
+            create(project="q3")
+            create(project="q3")
+            response = http.get("/api/artifacts", params={"facets": "true"}, headers=reader)
+            assert response.json()["facets"]["projects"] == {"q3": 2}
+
+    class WhenFilteredByExpiry:
+        def it_takes_a_duration(
+            self, http: httpx2.Client, reader: dict[str, str], create: Create
+        ) -> None:
+            soon = create(expires_in="1h").json()["id"]
+            create()
+            response = http.get("/api/artifacts", params={"expiring_within": "1d"}, headers=reader)
+            assert [item["id"] for item in response.json()["items"]] == [soon]
+
+    class WhenTheExpiryWindowIsNotADuration:
+        def it_answers_400(self, http: httpx2.Client, reader: dict[str, str]) -> None:
+            response = http.get(
+                "/api/artifacts", params={"expiring_within": "soon"}, headers=reader
+            )
+            assert response.status_code == 400
+
+    class WhenTheSortIsUnknown:
+        def it_answers_400(self, http: httpx2.Client, reader: dict[str, str]) -> None:
+            response = http.get("/api/artifacts", params={"sort": "size"}, headers=reader)
+            assert response.status_code == 400
 
     class WhenTheLimitIsOutOfRange:
         def it_answers_400(self, http: httpx2.Client, reader: dict[str, str]) -> None:

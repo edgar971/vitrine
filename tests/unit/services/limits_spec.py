@@ -111,6 +111,44 @@ class DescribeSpendingTokens:
                 limiter.check(Bucket.WRITES, CLIENT)
 
 
+class DescribeRefunds:
+    class WhenASpentTokenIsGivenBack:
+        def it_can_be_spent_again(self, monotonic: FakeMonotonic) -> None:
+            limiter = RateLimiter({Bucket.UNLOCK: parse_rate("1/m")}, clock=monotonic)
+            limiter.check(Bucket.UNLOCK, CLIENT)
+            limiter.refund(Bucket.UNLOCK, CLIENT)
+            limiter.check(Bucket.UNLOCK, CLIENT)
+
+    class WhenTheBucketIsAlreadyFull:
+        def it_does_not_grow_past_its_size(self, monotonic: FakeMonotonic) -> None:
+            limiter = RateLimiter({Bucket.UNLOCK: parse_rate("1/m")}, clock=monotonic)
+            limiter.refund(Bucket.UNLOCK, CLIENT)
+            limiter.check(Bucket.UNLOCK, CLIENT)
+            with pytest.raises(RateLimited):
+                limiter.check(Bucket.UNLOCK, CLIENT)
+
+
+class DescribeThePerIpBuckets:
+    class WhenAnHourHasPassed:
+        def it_drops_the_state_of_idle_addresses(
+            self, limiter: RateLimiter, monotonic: FakeMonotonic
+        ) -> None:
+            limiter.check(Bucket.VIEWS, "203.0.113.1")
+            limiter.check(Bucket.VIEWS, "203.0.113.2")
+            monotonic.advance(3600)
+            limiter.check(Bucket.VIEWS, "203.0.113.3")
+            assert limiter.tracked() == 1
+
+    class WhenAnAddressIsStillDraining:
+        def it_keeps_its_state(self, monotonic: FakeMonotonic) -> None:
+            limiter = RateLimiter({Bucket.VIEWS: parse_rate("10/h")}, clock=monotonic)
+            for _ in range(10):
+                limiter.check(Bucket.VIEWS, "203.0.113.1")
+            monotonic.advance(120)
+            limiter.check(Bucket.VIEWS, "203.0.113.2")
+            assert limiter.tracked() == 2
+
+
 class DescribeConcurrency:
     class WhenManyCallsArriveAtOnce:
         def it_grants_exactly_the_bucket_size(self, monotonic: FakeMonotonic) -> None:

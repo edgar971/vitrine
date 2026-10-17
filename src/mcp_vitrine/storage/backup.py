@@ -38,7 +38,7 @@ def backup(source: Path, dest: Path) -> BackupReport:
     """Copy ``source`` into ``dest``, which must not exist or be empty; ``dest`` is a data_dir.
 
     Artifacts first, then idempotency records, then the audit log (closed months, the open one
-    last), so the log is never behind the state it describes.
+    last), so the log is never behind the state it describes; the view counts come last.
     """
     if dest.exists() and (not dest.is_dir() or any(dest.iterdir())):
         raise Conflict(f"{dest} must be a new or empty directory")
@@ -53,7 +53,8 @@ def backup(source: Path, dest: Path) -> BackupReport:
             versions += result[0]
             copied += result[1]
     copied += _copy_refs(source / layout.REFS_DIR, dest / layout.REFS_DIR)
-    copied += _copy_audit(source / layout.AUDIT_DIR, dest / layout.AUDIT_DIR)
+    copied += _copy_lines(source / layout.AUDIT_DIR, dest / layout.AUDIT_DIR)
+    copied += _copy_lines(source / layout.VIEWS_DIR, dest / layout.VIEWS_DIR)
     return BackupReport(artifacts=artifacts, versions=versions, bytes=copied)
 
 
@@ -111,7 +112,7 @@ def _copy_refs(source: Path, target: Path) -> int:
     return copied
 
 
-def _copy_audit(source: Path, target: Path) -> int:
+def _copy_lines(source: Path, target: Path) -> int:
     """Copy each month, oldest first, up to its last complete line (a writer may be appending)."""
     copied = 0
     for path in sorted(source.glob("*.jsonl")):

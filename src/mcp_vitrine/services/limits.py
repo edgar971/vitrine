@@ -14,15 +14,19 @@ from mcp_vitrine.domain.errors import RateLimited
 from mcp_vitrine.services.metrics import Metrics, NoMetrics
 
 REJECTED_RATE = "rate_limited"
+# How often idle state is looked for; a full bucket is the same as none, so dropping it is exact.
+PRUNE_EVERY = 60.0
 
 
 class Bucket(StrEnum):
-    """The four buckets of spec § 7.5."""
+    """The buckets of spec § 7.5."""
 
     WRITES = "writes"
     LINKS = "links"
     READS = "reads"
     VIEWS = "views"
+    UNLOCK = "unlock"
+    UNLOCK_LINK = "unlock_link"
 
 
 @dataclass(slots=True)
@@ -49,16 +53,19 @@ class RateLimiter:
         self._metrics = metrics or NoMetrics()
         self._state: dict[tuple[Bucket, str], _Tokens] = {}
         self._lock = threading.Lock()
+        self._pruned_at = clock()
 
     @classmethod
     def from_settings(cls, settings: Settings, *, metrics: Metrics | None = None) -> RateLimiter:
-        """Take the four bucket rates from the effective configuration."""
+        """Take the bucket rates from the effective configuration."""
         return cls(
             {
                 Bucket.WRITES: settings.rate_writes,
                 Bucket.LINKS: settings.rate_links,
                 Bucket.READS: settings.rate_reads,
                 Bucket.VIEWS: settings.rate_views,
+                Bucket.UNLOCK: settings.rate_unlock,
+                Bucket.UNLOCK_LINK: settings.rate_unlock_link,
             },
             metrics=metrics,
         )
@@ -72,12 +79,46 @@ class RateLimiter:
         if rate is None:
             return
         with self._lock:
+            self._prune()
             state = self._refill(bucket, key, rate)
             if state.tokens < 1:
                 # Counted here, not where it is audited: a refused view is counted but not audited.
                 self._metrics.rejected(REJECTED_RATE)
                 raise RateLimited(self._retry_after(state, rate))
             state.tokens -= 1
+
+    def refund(self, bucket: Bucket, key: str) -> None:
+        """Give back the token a call spent, for a bucket that counts failures only (§ 7.5).
+
+        Spending first and refunding a success keeps the check atomic: two wrong passcodes sent at
+        once cannot both pass on the bucket's last token.
+        """
+        rate = self._rates.get(bucket)
+        if rate is None:
+            return
+        with self._lock:
+            state = self._refill(bucket, key, rate)
+            state.tokens = min(float(rate.count), state.tokens + 1)
+
+    def tracked(self) -> int:
+        """How many keys hold state, which pruning keeps to the ones in use."""
+        with self._lock:
+            return len(self._state)
+
+    def _prune(self) -> None:
+        """Drop buckets that have refilled to full: an absent bucket starts full, so it is exact.
+
+        Without this, the per-IP and per-link state grows with every address that ever called.
+        The caller holds the lock.
+        """
+        now = self._clock()
+        if now - self._pruned_at < PRUNE_EVERY:
+            return
+        self._pruned_at = now
+        for key, state in list(self._state.items()):
+            rate = self._rates.get(key[0])
+            if rate is None or state.tokens + (now - state.at) * rate.per_second() >= rate.count:
+                del self._state[key]
 
     def _refill(self, bucket: Bucket, key: str, rate: TickRate) -> _Tokens:
         """Bring one bucket up to date, then hand it back."""

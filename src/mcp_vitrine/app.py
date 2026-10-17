@@ -23,12 +23,21 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from mcp_vitrine.config import Settings
 from mcp_vitrine.mcp.server import build_mcp
 from mcp_vitrine.services.container import Services
-from mcp_vitrine.web.middleware import MCP_PATH, AccessLog, BodyLimit, HostGuard
+from mcp_vitrine.web.middleware import (
+    MCP_PATH,
+    SIGNED_PATH,
+    UNLOCK_BODY,
+    AccessLog,
+    BodyLimit,
+    HostGuard,
+)
 from mcp_vitrine.web.routes import build_routes
 
 UPLOAD_PREFIXES = ("/api", "/u")
 # A periodic sweep spares staging younger than this: a live write stages and places in seconds.
 STAGING_GRACE = timedelta(minutes=10)
+# How often the view counters reach disk; a crash loses at most this much (spec § 11.4).
+VIEW_FLUSH = timedelta(seconds=60)
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +54,9 @@ def build_app(settings: Settings, services: Services | None = None) -> Starlette
     # vitrine's HostGuard covers every route, /mcp included; FastMCP's own guard would allow only
     # the bind address, which is wrong behind a proxy.
     mcp_app = build_mcp(settings, services).http_app(path=MCP_PATH, host_origin_protection=False)
-    limits = {MCP_PATH: settings.max_mcp_body} | dict.fromkeys(UPLOAD_PREFIXES, settings.max_upload)
+    limits = {MCP_PATH: settings.max_mcp_body, SIGNED_PATH: UNLOCK_BODY} | dict.fromkeys(
+        UPLOAD_PREFIXES, settings.max_upload
+    )
     return Starlette(
         routes=[*build_routes(settings, services), Route(MCP_PATH, mcp_app, name="mcp")],
         middleware=[
@@ -74,13 +85,18 @@ def _maintained(inner: Lifespan, services: Services, interval: timedelta) -> Lif
     async def lifespan(app: Any) -> AsyncIterator[Any]:  # noqa: ANN401 - Starlette's own types
         await _sweep(services, timedelta(0))
         async with inner(app) as state:
-            task = asyncio.create_task(_sweep_every(services, interval))
+            tasks = (
+                asyncio.create_task(_sweep_every(services, interval)),
+                asyncio.create_task(_flush_every(services, VIEW_FLUSH)),
+            )
             try:
                 yield state
             finally:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+                for task in tasks:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+                await _flush(services)
 
     return lifespan
 
@@ -92,6 +108,21 @@ async def _sweep_every(services: Services, interval: timedelta) -> None:
         await _sweep(services, STAGING_GRACE)
 
 
+async def _flush_every(services: Services, interval: timedelta) -> None:
+    """Write the view counters every ``interval``; telemetry, so a failure is only logged."""
+    while True:
+        await asyncio.sleep(interval.total_seconds())
+        await _flush(services)
+
+
+async def _flush(services: Services) -> None:
+    """One flush of the view counters, off the event loop."""
+    try:
+        await to_thread.run_sync(services.views.flush)
+    except Exception:
+        logger.exception("view counts could not be written; retrying at the next flush")
+
+
 async def _sweep(services: Services, grace: timedelta) -> None:
     """One sweep off the event loop (it walks the disk and fsyncs audit lines)."""
     try:
@@ -100,9 +131,13 @@ async def _sweep(services: Services, grace: timedelta) -> None:
         logger.exception("sweep failed; retrying at the next interval")
         return
     logger.info(
-        "sweep: expired=%d staging=%d refs=%d audit_months=%d",
+        "sweep: expired=%d unpublished=%d links=%d staging=%d refs=%d audit_months=%d "
+        "view_months=%d",
         report.expired,
+        report.unpublished,
+        report.links,
         report.staging,
         report.refs,
         report.audit_months,
+        report.view_months,
     )

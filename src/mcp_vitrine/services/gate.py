@@ -9,9 +9,9 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
-from mcp_vitrine.domain.models import ArtifactDetail, GateDecision, PublicMode
+from mcp_vitrine.domain.models import ArtifactDetail, GateDecision, PublicMode, Visibility
 from mcp_vitrine.services.links import LinkService
 
 ACCEPT = "accept"
@@ -51,13 +51,32 @@ class PublicGate:
             return GateDecision.NOT_REQUIRED
         return GateDecision.DISABLED
 
-    def question(self, detail: ArtifactDetail) -> str:
-        """What the human reads: the title, the file count and the consequence (spec § 6.1)."""
+    def question(self, detail: ArtifactDetail, *, until: datetime | None = None) -> str:
+        """What the human reads: the title, the file count and the consequence (spec § 6.1).
+
+        A public window is named with its end, so the human approves how long, not only what.
+        """
         count = len(detail.files)
         files = "1 file" if count == 1 else f"{count} files"
+        if detail.artifact.visibility is Visibility.PUBLIC:
+            if until is None:
+                return (
+                    f'Keep "{detail.artifact.title}" ({files}) PUBLIC with no end date? '
+                    "Anyone with the link can view it until it is made private."
+                )
+            return (
+                f'Keep "{detail.artifact.title}" ({files}) PUBLIC until {_day(until)}? '
+                "Anyone with the link can view it until then."
+            )
+        if until is None:
+            return (
+                f'Make "{detail.artifact.title}" ({files}) PUBLIC? '
+                "Anyone with the link will be able to view it, and existing private links stop "
+                "working."
+            )
         return (
-            f'Make "{detail.artifact.title}" ({files}) PUBLIC? '
-            "Anyone with the link will be able to view it, and existing private links stop working."
+            f'Make "{detail.artifact.title}" ({files}) PUBLIC until {_day(until)}? '
+            "Anyone with the link can view it until then, and existing private links stop working."
         )
 
     def update_question(self, detail: ArtifactDetail, *, files: int | None) -> str:
@@ -74,6 +93,11 @@ class PublicGate:
         if action == ACCEPT and (content or {}).get(CONFIRM_FIELD) is not False:
             return GateDecision.APPROVED
         return GateDecision.DECLINED
+
+
+def _day(moment: datetime) -> str:
+    """An end date as a person reads it: ``24 Oct 2026 14:00 UTC``."""
+    return moment.astimezone(UTC).strftime("%d %b %Y %H:%M UTC")
 
 
 @dataclass(frozen=True, slots=True)

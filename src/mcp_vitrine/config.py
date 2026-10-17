@@ -87,6 +87,13 @@ class TokenEntry(BaseModel):
     scopes: frozenset[Scope]
 
 
+class ViewLogMode(StrEnum):
+    """``view_log`` (spec § 11.4): count views per artifact and link, or record nothing."""
+
+    COUNTS = "counts"
+    OFF = "off"
+
+
 class LogLevel(StrEnum):
     """``log_level`` (spec § 8.2)."""
 
@@ -130,6 +137,13 @@ def parse_duration(value: object) -> timedelta:
         raise ConfigError(f"{value!r} is not a duration: use 30s, 15m, 1h or 7d")
     number, unit = match.groups()
     return _positive_seconds(int(number) * _SECONDS[unit.lower()])
+
+
+def parse_optional_duration(value: object) -> timedelta | None:
+    """A duration, or ``off`` for none at all (spec § 8.1)."""
+    if value is None or value == "off":
+        return None
+    return parse_duration(value)
 
 
 def requested_duration(value: str) -> timedelta:
@@ -217,6 +231,7 @@ def unscoped_tokens(value: str) -> list[str]:
 
 ByteSize = Annotated[int, BeforeValidator(parse_size)]
 Duration = Annotated[timedelta, BeforeValidator(parse_duration)]
+OptionalDuration = Annotated[timedelta | None, BeforeValidator(parse_optional_duration)]
 Rate = Annotated[TickRate | None, BeforeValidator(parse_rate)]
 CommaSeparated = Annotated[list[str], NoDecode, BeforeValidator(parse_list)]
 Tokens = Annotated[dict[str, TokenEntry], NoDecode, BeforeValidator(parse_tokens)]
@@ -344,6 +359,17 @@ class Settings(BaseSettings):
     rate_links: Rate = setting("120/m", group=LIMITS, description="Per-client link bucket")
     rate_reads: Rate = setting("600/m", group=LIMITS, description="Per-client read bucket")
     rate_views: Rate = setting("1200/m", group=LIMITS, description="Per-IP view bucket")
+    rate_unlock: Rate = setting(
+        "10/m",
+        group=LIMITS,
+        description="Wrong passcodes per link and source IP; a right one spends nothing",
+    )
+    rate_unlock_link: Rate = setting(
+        "100/h", group=LIMITS, description="Wrong passcodes per link, from every source together"
+    )
+    max_links: int = setting(
+        500, group=LIMITS, description="Live recorded links per artifact", ge=1
+    )
 
     link_ttl: Duration = setting("7d", group=LINKS, description="Default private link lifetime")
     link_ttl_max: Duration = setting(
@@ -351,6 +377,17 @@ class Settings(BaseSettings):
     )
     upload_ttl: Duration = setting("15m", group=LINKS, description="Default upload URL lifetime")
     upload_ttl_max: Duration = setting("1h", group=LINKS, description="Longest upload URL lifetime")
+    unlock_ttl: Duration = setting(
+        "12h",
+        group=LINKS,
+        description="How long an unlocked passcode link works, at most until the link expires",
+    )
+    public_ttl_max: OptionalDuration = setting(
+        "off",
+        group=LINKS,
+        description="Longest public window: every public artifact goes private after it; "
+        "`off` for none",
+    )
 
     sweep_interval: Duration = setting(
         "1h",
@@ -359,6 +396,14 @@ class Settings(BaseSettings):
     )
     audit_retention: Duration = setting(
         "365d", group=OPERATIONS, description="Audit months older than this are deleted"
+    )
+    view_log: ViewLogMode = setting(
+        ViewLogMode.COUNTS,
+        group=OPERATIONS,
+        description="`counts` per artifact, link and hour (no IPs, no user agents), or `off`",
+    )
+    view_retention: Duration = setting(
+        "90d", group=OPERATIONS, description="View-count months older than this are deleted"
     )
     metrics_port: int = setting(
         0,

@@ -67,6 +67,7 @@ class DescribeTheLayout:
                 layout.AUDIT_DIR,
                 layout.REFS_DIR,
                 layout.TMP_DIR,
+                layout.VIEWS_DIR,
             ]
 
     class WhenAnArtifactIsStored:

@@ -18,8 +18,11 @@ class Metrics(Protocol):
     def version_created(self, client: str) -> None:
         """A create or an update landed a version."""
 
-    def viewed(self, route: str) -> None:
-        """A view (``a`` or ``s``) was served."""
+    def viewed(self, route: str, kind: str) -> None:
+        """A view (``a`` or ``s``) was served, to a person (``view``) or an unfurler (``bot``)."""
+
+    def unlocked(self, outcome: str) -> None:
+        """A passcode was sent: ``ok``, ``wrong`` or ``rate_limited``."""
 
     def gate(self, outcome: GateDecision) -> None:
         """A publish reached the public gate and got this verdict."""
@@ -34,7 +37,10 @@ class NoMetrics:
     def version_created(self, client: str) -> None:
         """Count nothing."""
 
-    def viewed(self, route: str) -> None:
+    def viewed(self, route: str, kind: str) -> None:
+        """Count nothing."""
+
+    def unlocked(self, outcome: str) -> None:
         """Count nothing."""
 
     def gate(self, outcome: GateDecision) -> None:

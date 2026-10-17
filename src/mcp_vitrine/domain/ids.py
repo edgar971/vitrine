@@ -11,6 +11,9 @@ ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"
 ID_LENGTH = 16
 BITS_PER_CHARACTER = 5
 NONCE_BYTES = 16
+LID_BYTES = 8
+# 8 bytes in unpadded base64url.
+LID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{11}$")
 CLIENT_REF_PATTERN = re.compile(r"^[A-Za-z0-9._:-]+$")
 CLIENT_REF_MAX = 128
 
@@ -32,6 +35,16 @@ def is_valid_id(value: str) -> bool:
 def new_nonce() -> str:
     """A fresh single-use upload nonce (spec § 7.3)."""
     return secrets.token_urlsafe(NONCE_BYTES)
+
+
+def new_lid() -> str:
+    """A fresh link id: 8 random bytes in base64url, unique among an artifact's links (§ 3)."""
+    return secrets.token_urlsafe(LID_BYTES)
+
+
+def is_valid_lid(value: str) -> bool:
+    """Whether ``value`` has the link-id shape."""
+    return LID_PATTERN.fullmatch(value) is not None
 
 
 def validate_client_ref(ref: str) -> str:

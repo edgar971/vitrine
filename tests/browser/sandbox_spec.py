@@ -71,3 +71,24 @@ class DescribeTheSandboxInChromium:
 
         def it_still_loads_a_relative_image(self, opened: Page) -> None:
             assert opened.evaluate("document.body.dataset.image") == "loaded"
+
+
+@pytest.fixture
+def unlocked(page: Page, base: str, services: Services, probe: PublishedArtifact) -> Page:
+    """The probe behind a passcode link, opened in Chromium by typing the passcode."""
+    link = services.artifacts.link(probe.id, client="hermes", passcode=True)
+    assert link.passcode is not None
+    page.goto(link.url)
+    page.fill("input[name=passcode]", link.passcode)
+    page.click("button[type=submit]")
+    page.wait_for_function("document.body.dataset.result && document.body.dataset.image")
+    return page
+
+
+class DescribeAPasscodeLinkInChromium:
+    class WhenThePasscodeIsTyped:
+        def it_loads_the_pages_own_assets_after_unlocking(self, unlocked: Page) -> None:
+            assert unlocked.evaluate("document.body.dataset.image") == "loaded"
+
+        def it_still_runs_in_an_opaque_origin(self, unlocked: Page) -> None:
+            assert _result(unlocked)["origin"] == "null"

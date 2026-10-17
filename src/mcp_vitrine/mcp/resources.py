@@ -17,14 +17,36 @@ from mcp_vitrine.mcp.policy import tags
 from mcp_vitrine.services.artifacts import ArtifactService
 from mcp_vitrine.services.audit import AuditEvent
 from mcp_vitrine.services.limits import Bucket
+from mcp_vitrine.services.views import HourViews
 
 JSON = "application/json"
 
 resources = LocalProvider()
 
 _EVENTS = TypeAdapter(tuple[AuditEvent, ...])
+_HOURS = TypeAdapter(tuple[HourViews, ...])
 
 ArtifactId = Annotated[str, Field(description="The artifact id.")]
+
+
+# Registered before the file template, so a request for views never reads a file by that name.
+@resources.resource(
+    "artifact://{id}/views",
+    name="artifact_views",
+    title="Artifact views",
+    description="This artifact's views hour by hour for the last 30 days: views, distinct "
+    "visitors and link unfurlers (bots). Counts only: no viewer is ever recorded.",
+    mime_type=JSON,
+    tags=tags(Scope.READ, Bucket.READS),
+    auth=require_scopes(Scope.READ),
+)
+@domain_errors(ResourceError)
+def artifact_views(
+    id: ArtifactId,
+    service: ArtifactService = Depends(artifact_service),
+) -> str:
+    """The hourly view series of one artifact, as JSON."""
+    return _HOURS.dump_json(service.view_series(id)).decode()
 
 
 # Registered before the file template, so a request for history never reads a file by that name.

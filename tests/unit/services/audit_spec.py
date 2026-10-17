@@ -83,6 +83,8 @@ class DescribeTheEventModel:
                 "tool",
                 "route",
                 "fields",
+                "lid",
+                "passcode",
             }
 
     class WhenAnEventCarriesAFieldTheSpecDoesNotList:

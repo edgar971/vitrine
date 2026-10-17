@@ -38,6 +38,7 @@ from mcp_vitrine.services import maintenance
 from mcp_vitrine.services.audit import AuditEvent, AuditLog
 from mcp_vitrine.services.container import Services
 from mcp_vitrine.services.tokens import token_hash
+from mcp_vitrine.services.views import ViewLog
 from mcp_vitrine.storage import schema
 from mcp_vitrine.storage.backup import backup
 
@@ -162,8 +163,9 @@ def _sweep(args: argparse.Namespace) -> int:
     schema.require_current(settings.data_dir)
     report = Services.from_settings(settings).artifacts.sweep(grace=STAGING_GRACE)
     print(
-        f"expired {report.expired}, staging {report.staging}, refs {report.refs}, "
-        f"audit months {report.audit_months}"
+        f"expired {report.expired}, unpublished {report.unpublished}, links {report.links}, "
+        f"staging {report.staging}, refs {report.refs}, audit months {report.audit_months}, "
+        f"view months {report.view_months}"
     )
     return OK
 
@@ -178,6 +180,26 @@ def _audit(args: argparse.Namespace) -> int:
         print(
             event.model_dump_json(by_alias=True, exclude_none=True) if args.json else _line(event)
         )
+    return OK
+
+
+def _views(args: argparse.Namespace) -> int:
+    """Print view counts per artifact and link, most viewed first; counts only, never viewers."""
+    settings = load_settings(config_path=args.config)
+    clock = SystemClock()
+    since = clock.now() - parse_duration(args.since) if args.since else None
+    log = ViewLog(settings.data_dir, enabled=True, retention=settings.view_retention, clock=clock)
+    totals: dict[tuple[str, str | None], list[int]] = {}
+    for line in log.lines(artifact=args.id, since=since):
+        counts = totals.setdefault((line.artifact, line.lid), [0, 0, 0])
+        counts[0] += line.views
+        counts[1] += line.visitors
+        counts[2] += line.bots
+    print(f"{'artifact':<16}  {'link':<11}  {'views':>7}  {'visitors':>8}  {'bots':>6}")
+    for (artifact, lid), (views, visitors, bots) in sorted(
+        totals.items(), key=lambda item: (-item[1][0], item[0][0], item[0][1] or "")
+    ):
+        print(f"{artifact:<16}  {lid or '-':<11}  {views:>7}  {visitors:>8}  {bots:>6}")
     return OK
 
 
@@ -310,6 +332,11 @@ def _parser() -> argparse.ArgumentParser:
     audit.add_argument("--client", help="only this client")
     audit.add_argument("--since", metavar="AGE", help="only events this recent, e.g. 7d or 24h")
     audit.add_argument("--json", action="store_true", help="one JSON object per line")
+
+    views = command("views", _views, "Print view counts per artifact and link.")
+    config_flag(views)
+    views.add_argument("--id", help="only this artifact")
+    views.add_argument("--since", metavar="AGE", help="only views this recent, e.g. 7d or 24h")
 
     backup_command = command("backup", _backup, "Write a restorable copy of data_dir.")
     backup_command.add_argument("dest", type=Path, help="a new or empty directory")

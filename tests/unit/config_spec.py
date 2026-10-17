@@ -10,6 +10,7 @@ import pytest
 from mcp_vitrine.config import (
     LogLevel,
     Settings,
+    ViewLogMode,
     load_settings,
     parse_duration,
     parse_rate,
@@ -113,6 +114,33 @@ class DescribeDefaults:
             assert settings.metrics_port == 0
             assert settings.log_level is LogLevel.INFO
             assert settings.forwarded_allow_ips == ["127.0.0.1"]
+
+        def it_uses_the_link_record_defaults(self) -> None:
+            settings = load_settings()
+            assert (settings.max_links, settings.unlock_ttl, settings.public_ttl_max) == (
+                500,
+                timedelta(hours=12),
+                None,
+            )
+
+        def it_counts_views_by_default(self) -> None:
+            settings = load_settings()
+            assert (settings.view_log, settings.view_retention) == (
+                ViewLogMode.COUNTS,
+                timedelta(days=90),
+            )
+
+
+class DescribeThePublicCeiling:
+    class WhenItIsSet:
+        def it_reads_a_duration(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setenv("VITRINE_PUBLIC_TTL_MAX", "30d")
+            assert load_settings().public_ttl_max == timedelta(days=30)
+
+    class WhenItIsOff:
+        def it_has_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setenv("VITRINE_PUBLIC_TTL_MAX", "off")
+            assert load_settings().public_ttl_max is None
 
 
 class DescribePrecedence:

@@ -15,6 +15,7 @@ from mcp_vitrine.domain.errors import Conflict
 from mcp_vitrine.domain.ids import new_id
 from mcp_vitrine.domain.models import ArtifactDraft, VersionDraft
 from mcp_vitrine.services.audit import AuditEvent, AuditEventName, AuditLog
+from mcp_vitrine.services.views import ViewLog
 from mcp_vitrine.storage.backup import BackupReport, backup
 from mcp_vitrine.storage.base import StoreConfig
 from mcp_vitrine.storage.filesystem import FileStore
@@ -106,6 +107,18 @@ class DescribeBackup:
             backup(store_config.root, dest)
             log = AuditLog(dest, retention=timedelta(days=365), clock=clock)
             assert [event.event for event in log.query()] == [AuditEventName.DELETED]
+
+        def it_copies_the_view_counts(
+            self, store_config: StoreConfig, artifact_id: str, dest: Path, clock: Clock
+        ) -> None:
+            views = ViewLog(
+                store_config.root, enabled=True, retention=timedelta(days=90), clock=clock
+            )
+            views.record(artifact_id, route="s", lid=None, address="203.0.113.7", user_agent="x")
+            views.flush()
+            backup(store_config.root, dest)
+            copy = ViewLog(dest, enabled=True, retention=timedelta(days=90), clock=clock)
+            assert copy.totals(artifact_id, labels={}) == views.totals(artifact_id, labels={})
 
         def it_copies_the_idempotency_records(
             self, store_config: StoreConfig, store: FileStore, dest: Path

@@ -27,6 +27,7 @@ class AuditEventName(StrEnum):
     VERSION_ADDED = "version_added"
     VISIBILITY_CHANGED = "visibility_changed"
     PUBLISH_REFUSED = "publish_refused"
+    LINK_ISSUED = "link_issued"
     LINKS_REVOKED = "links_revoked"
     METADATA_CHANGED = "metadata_changed"
     UPLOAD_URL_ISSUED = "upload_url_issued"
@@ -39,6 +40,8 @@ class AuditEventName(StrEnum):
 # The ``client`` of events an operator causes from the command line. The ``@`` keeps it apart from
 # every client: no ``VITRINE_TOKENS`` name can start with one.
 OPERATOR = "@operator"
+# The ``client`` of changes the sweep makes on its own, such as ending a public window.
+SWEEP = "@sweep"
 
 
 class MetaField(StrEnum):
@@ -71,6 +74,8 @@ EXTRA_FIELDS = (
     "tool",
     "route",
     "fields",
+    "lid",
+    "passcode",
 )
 
 REQUIRED_EXTRAS: dict[AuditEventName, frozenset[str]] = {
@@ -78,7 +83,9 @@ REQUIRED_EXTRAS: dict[AuditEventName, frozenset[str]] = {
     AuditEventName.VERSION_ADDED: frozenset({"version", "files", "bytes", "merge"}),
     AuditEventName.VISIBILITY_CHANGED: frozenset({"from_visibility", "to_visibility", "gate"}),
     AuditEventName.PUBLISH_REFUSED: frozenset({"gate"}),
-    AuditEventName.LINKS_REVOKED: frozenset({"link_epoch"}),
+    AuditEventName.LINK_ISSUED: frozenset({"lid", "expires_at", "passcode"}),
+    # Exactly one of the two, which the validator checks.
+    AuditEventName.LINKS_REVOKED: frozenset(),
     AuditEventName.METADATA_CHANGED: frozenset({"fields"}),
     AuditEventName.UPLOAD_URL_ISSUED: frozenset({"expires_at"}),
     AuditEventName.DELETED: frozenset(),
@@ -91,6 +98,7 @@ OPTIONAL_EXTRAS: dict[AuditEventName, frozenset[str]] = {
     AuditEventName.CREATED: frozenset({"client_ref"}),
     # Exactly one of the two, which the validator checks.
     AuditEventName.ACCESS_DENIED: frozenset({"tool", "route"}),
+    AuditEventName.LINKS_REVOKED: frozenset({"link_epoch", "lid"}),
 }
 
 
@@ -122,6 +130,9 @@ class AuditEvent(BaseModel):
     route: str | None = None
     # The names of the metadata fields that changed, never their values.
     fields: tuple[MetaField, ...] | None = None
+    # A link's id and whether it has a passcode: never the passcode, the label or the URL.
+    lid: str | None = None
+    passcode: bool | None = None
 
     @model_validator(mode="after")
     def _carries_the_documented_fields(self) -> AuditEvent:
@@ -133,6 +144,10 @@ class AuditEvent(BaseModel):
         unexpected = carried - required - OPTIONAL_EXTRAS.get(self.event, frozenset())
         if unexpected:
             raise ValueError(f"{self.event} does not carry {sorted(unexpected)}")
+        if self.event is AuditEventName.LINKS_REVOKED and (
+            (self.link_epoch is None) == (self.lid is None)
+        ):
+            raise ValueError("links_revoked names exactly one of link_epoch or lid")
         if self.event is AuditEventName.ACCESS_DENIED:
             if (self.tool is None) == (self.route is None):
                 raise ValueError("access_denied names exactly one of tool or route")

@@ -1,4 +1,4 @@
-"""``sweep``, ``audit``, ``backup`` and ``migrate``: commands over a data_dir (spec § 9)."""
+"""``sweep``, ``audit``, ``views``, ``backup`` and ``migrate``: commands over a data_dir (§ 9)."""
 
 from __future__ import annotations
 
@@ -45,6 +45,26 @@ def old_event(services: Services, artifact_id: str) -> None:
             link_epoch=1,
         )
     )
+
+
+class DescribeViews:
+    @pytest.fixture
+    def viewed(self, services: Services, artifact_id: str) -> str:
+        """The artifact, once viewed twice and flushed to disk, as a running server would."""
+        for _ in range(2):
+            services.views.record(
+                artifact_id, route="s", lid=None, address="203.0.113.7", user_agent="spec"
+            )
+        services.views.flush()
+        return artifact_id
+
+    class WhenAnArtifactWasViewed:
+        def it_prints_its_counts(self, run: Runner, environment: None, viewed: str) -> None:
+            assert run("views").out.splitlines()[1].split() == [viewed, "-", "2", "1", "0"]
+
+    class WhenAnotherIdIsAskedFor:
+        def it_prints_only_the_header(self, run: Runner, environment: None, viewed: str) -> None:
+            assert len(run("views", "--id", "k7m2q9x4tz3wbn6r").out.splitlines()) == 1
 
 
 class DescribeSweep:

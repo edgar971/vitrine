@@ -22,7 +22,7 @@ class PrometheusMetrics:
     """The counters of spec § 11.2, in a registry of their own so nothing else is exported."""
 
     def __init__(self) -> None:
-        """Register the four counters; the gauges join once ``measure`` names their source."""
+        """Register the counters; the gauges join once ``measure`` names their source."""
         self.registry = CollectorRegistry()
         self._versions = Counter(
             "vitrine_versions_created",
@@ -30,7 +30,12 @@ class PrometheusMetrics:
             ["client"],
             registry=self.registry,
         )
-        self._views = Counter("vitrine_views", "Views served", ["route"], registry=self.registry)
+        self._views = Counter(
+            "vitrine_views", "Views served", ["route", "kind"], registry=self.registry
+        )
+        self._unlock = Counter(
+            "vitrine_unlock", "Passcodes sent to unlock a link", ["outcome"], registry=self.registry
+        )
         self._gate = Counter(
             "vitrine_public_gate", "Public-gate verdicts", ["outcome"], registry=self.registry
         )
@@ -49,9 +54,13 @@ class PrometheusMetrics:
         """Count one version."""
         self._versions.labels(client=client).inc()
 
-    def viewed(self, route: str) -> None:
+    def viewed(self, route: str, kind: str) -> None:
         """Count one view."""
-        self._views.labels(route=route).inc()
+        self._views.labels(route=route, kind=kind).inc()
+
+    def unlocked(self, outcome: str) -> None:
+        """Count one unlock attempt."""
+        self._unlock.labels(outcome=outcome).inc()
 
     def gate(self, outcome: GateDecision) -> None:
         """Count one verdict."""

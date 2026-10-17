@@ -43,6 +43,7 @@ from mcp_vitrine.domain.models import (
     ArtifactQuery,
     Facets,
     FileEntry,
+    LinkRecord,
     ListSort,
     MetaChange,
     Version,
@@ -269,27 +270,61 @@ class FileStore:
                         path.unlink(missing_ok=True)
 
     def set_visibility(
-        self, artifact_id: str, visibility: Visibility, *, if_version: int | None = None
+        self,
+        artifact_id: str,
+        visibility: Visibility,
+        *,
+        if_version: int | None = None,
+        public_until: datetime | None = None,
     ) -> Artifact:
-        """Persist a visibility change, moving the link epoch with it (spec § 4.4)."""
+        """Persist a visibility change, moving the link epoch with it (spec § 4.4).
+
+        A change of visibility ends every private link, recorded ones included. A public artifact
+        asked to be public again only moves its window (``public_until``): the links stay.
+        """
         with self._locked(artifact_id):
             artifact = self._read_meta(artifact_id)
-            if artifact.visibility is visibility:
-                return artifact
             _check_version(artifact, if_version)
+            if artifact.visibility is visibility:
+                if visibility is Visibility.PRIVATE or artifact.public_until == public_until:
+                    return artifact
+                return self._update_meta(
+                    artifact, public_until=public_until, updated_at=self._clock.now()
+                )
             return self._update_meta(
                 artifact,
                 visibility=visibility,
+                public_until=public_until if visibility is Visibility.PUBLIC else None,
                 link_epoch=artifact.link_epoch + 1,
+                links=(),
                 updated_at=self._clock.now(),
             )
 
     def revoke_links(self, artifact_id: str) -> Artifact:
-        """Increment ``link_epoch``, revoking every private link (spec § 2)."""
+        """Increment ``link_epoch`` and drop every link record, revoking every private link."""
         with self._locked(artifact_id):
             artifact = self._read_meta(artifact_id)
             return self._update_meta(
-                artifact, link_epoch=artifact.link_epoch + 1, updated_at=self._clock.now()
+                artifact, link_epoch=artifact.link_epoch + 1, links=(), updated_at=self._clock.now()
+            )
+
+    def add_link(self, artifact_id: str, record: LinkRecord, *, limit: int) -> Artifact:
+        """Record one minted link; expired records go first, and ``limit`` live ones at most."""
+        with self._locked(artifact_id):
+            artifact = self._read_meta(artifact_id)
+            live = _live_links(artifact, self._clock.now())
+            if len(live) >= limit:
+                raise TooLarge(f"an artifact holds at most {limit} live links: revoke links first")
+            return self._update_meta(artifact, links=(*live, record))
+
+    def remove_link(self, artifact_id: str, lid: str) -> Artifact:
+        """Delete one link record, which revokes that link alone; ``NotFound`` if it is gone."""
+        with self._locked(artifact_id):
+            artifact = self._read_meta(artifact_id)
+            if artifact.link(lid) is None:
+                raise NotFound()
+            return self._update_meta(
+                artifact, links=tuple(record for record in artifact.links if record.lid != lid)
             )
 
     def set_meta(self, artifact_id: str, change: MetaChange) -> tuple[Artifact, Artifact]:
@@ -301,10 +336,17 @@ class FileStore:
                 return artifact, artifact
             return artifact, self._update_meta(artifact, **changes, updated_at=self._clock.now())
 
-    def replace_meta(self, artifact: Artifact) -> None:
-        """Write ``meta.json`` as given, to compensate a mutation whose audit write failed."""
+    def replace_meta(self, artifact: Artifact, *, if_current: Artifact | None = None) -> bool:
+        """Write ``meta.json`` as given, to compensate a mutation whose audit write failed.
+
+        With ``if_current``, only while ``meta.json`` is still exactly that: a change that landed
+        since was audited on its own, and putting an older snapshot back would undo it.
+        """
         with self._locked(artifact.id):
+            if if_current is not None and self._read_meta(artifact.id) != if_current:
+                return False
             self._write_meta(artifact)
+            return True
 
     def vitrine_version(self, artifact_id: str, version: int) -> None:
         """Remove one version directory, leaving ``meta.json`` alone (compensation only)."""
@@ -375,6 +417,28 @@ class FileStore:
         """Ids past ``expires_at``; ``ArtifactService`` deletes and audits them (spec § 4.3)."""
         now = self._clock.now()
         return tuple(sorted(artifact.id for artifact in self._all() if artifact.is_expired(now)))
+
+    def lapsed_ids(self) -> tuple[str, ...]:
+        """Ids still public on disk past ``public_until``; the service makes them private."""
+        now = self._clock.now()
+        return tuple(sorted(artifact.id for artifact in self._all() if artifact.has_lapsed(now)))
+
+    def sweep_links(self) -> int:
+        """Drop the link records past their expiry; how many went (spec § 4.3)."""
+        now = self._clock.now()
+        removed = 0
+        for stale in [
+            artifact for artifact in self._all() if _live_links(artifact, now) != artifact.links
+        ]:
+            with self._locked(stale.id):
+                try:
+                    artifact = self._read_meta(stale.id)
+                except NotFound:
+                    continue
+                live = _live_links(artifact, now)
+                removed += len(artifact.links) - len(live)
+                self._update_meta(artifact, links=live)
+        return removed
 
     def sweep_staging(self, *, grace: timedelta = timedelta(0)) -> int:
         """Remove ``tmp/`` and every version directory no ``meta.json`` references.
@@ -769,6 +833,11 @@ def _spend(spent: tuple[str, ...], nonce: str | None) -> tuple[str, ...]:
     if nonce is None:
         return spent
     return (*spent, nonce)[-NONCES_KEPT:]
+
+
+def _live_links(artifact: Artifact, now: datetime) -> tuple[LinkRecord, ...]:
+    """The records whose link has not expired yet."""
+    return tuple(record for record in artifact.links if record.expires_at > now)
 
 
 def _check_version(artifact: Artifact, expected: int | None) -> None:

@@ -18,6 +18,9 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 ACCESS_LOGGER = "mcp_vitrine.access"
 MCP_PATH = "/mcp"
+SIGNED_PATH = "/s"
+# An unlock posts one short form; nothing else under /s/ takes a body.
+UNLOCK_BODY = 1024
 REDACTED = "[redacted]"
 # Leading slashes are collapsed first: "//s/<sig>" is not a route, but it is still a credential.
 _SIGNED_SEGMENT = re.compile(r"^/+(s|u)/+[^/]+")
@@ -41,7 +44,9 @@ def redact(path: str) -> str:
 
 
 class HostGuard:
-    """421 for a ``Host`` outside the allowed set; 403 for a foreign ``Origin`` on ``/mcp``.
+    """421 for a ``Host`` outside the allowed set; 403 for a foreign ``Origin`` where it matters.
+
+    ``Origin`` is checked on ``/mcp`` and on a ``POST`` under ``/s/`` (the passcode unlock).
 
     The ``Host`` check is what defeats DNS rebinding: a page on an attacker's name that resolves
     to vitrine still sends the attacker's name (spec § 7.4, security T8).
@@ -64,7 +69,8 @@ class HostGuard:
             await PlainTextResponse("misdirected request", status_code=421)(scope, receive, send)
             return
         origin = headers.get("origin")
-        if origin is not None and _is_mcp(scope["path"]) and not self._trusts(origin):
+        guarded = _is_mcp(scope["path"]) or _is_unlock(scope)
+        if origin is not None and guarded and not self._trusts(origin):
             await PlainTextResponse("forbidden origin", status_code=403)(scope, receive, send)
             return
         await self._app(scope, receive, send)
@@ -193,6 +199,11 @@ def _origin(url: str) -> str:
 def _is_mcp(path: str) -> bool:
     """Whether a request is for the MCP endpoint."""
     return _under(path, MCP_PATH)
+
+
+def _is_unlock(scope: Scope) -> bool:
+    """Whether a request posts under ``/s/``: a passcode, which a foreign page must not send."""
+    return scope["method"] == "POST" and _under(scope["path"], SIGNED_PATH)
 
 
 def _under(path: str, prefix: str) -> bool:

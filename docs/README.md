@@ -14,7 +14,7 @@ it in production, understanding how it works, and changing it.
 │   /mcp      tools, resources, the public gate                       │
 │   /api /u   uploads              /a /s   views         /healthz     │
 ├─────────────────────────────────────────────────────────────────────┤
-│ data_dir/   artifacts/<id>/meta.json + v<n>/ · audit/ · refs/       │
+│ data_dir/   artifacts/<id>/meta.json + v<n>/ · audit/ refs/ views/  │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 

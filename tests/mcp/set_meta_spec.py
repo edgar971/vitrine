@@ -98,7 +98,10 @@ class DescribeArtifactSetMeta:
             self, call: Call, tagged: dict[str, Any], services: Services
         ) -> None:
             await call("artifact_set_meta", id=tagged["id"], title="Renamed")
-            assert services.artifacts.open_signed(_signature(tagged["url"])).title == "Renamed"
+            assert (
+                services.artifacts.open_signed(_signature(tagged["url"])).artifact.title
+                == "Renamed"
+            )
 
     class WhenTagsAreAdded:
         async def it_keeps_the_others(self, call: Call, tagged: dict[str, Any]) -> None:

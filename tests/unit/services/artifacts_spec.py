@@ -27,11 +27,18 @@ from mcp_vitrine.domain.models import (
     ArtifactQuery,
     GateDecision,
     LinkClaims,
+    MetaChange,
     VersionDraft,
     Visibility,
 )
 from mcp_vitrine.services.artifacts import ArtifactService, SweepReport, request_hash
-from mcp_vitrine.services.audit import AuditEvent, AuditEventName, AuditLog, DenialReason
+from mcp_vitrine.services.audit import (
+    AuditEvent,
+    AuditEventName,
+    AuditLog,
+    DenialReason,
+    MetaField,
+)
 from mcp_vitrine.services.links import LinkPolicy, LinkService
 from mcp_vitrine.storage.base import StoreConfig
 from mcp_vitrine.storage.filesystem import FileStore
@@ -522,6 +529,36 @@ class DescribeAuditFailures:
             with pytest.raises(AuditUnavailable):
                 broken.revoke_links(artifact_id, client=CLIENT)
             assert store.get(artifact_id).link_epoch == 0
+
+
+class DescribeSettingMetadata:
+    class WhenTheTitleAndTheProjectChange:
+        def it_audits_the_names_of_both(
+            self, service: ArtifactService, store: FileStore, audit: AuditLog
+        ) -> None:
+            artifact_id = new_id()
+            store.create(artifact_id, _draft(), source=CLIENT)
+            service.set_meta(artifact_id, MetaChange(title="T", project="q3"), client=CLIENT)
+            assert _events(audit, artifact_id)[0].fields == (MetaField.TITLE, MetaField.PROJECT)
+
+    class WhenTheArtifactHasExpired:
+        def it_answers_expired(
+            self, service: ArtifactService, store: FileStore, clock: Clock
+        ) -> None:
+            artifact_id = new_id()
+            store.create(artifact_id, _draft(expires_at=clock.now()), source=CLIENT)
+            with pytest.raises(Expired):
+                service.set_meta(artifact_id, MetaChange(title="T"), client=CLIENT)
+
+    class WhenTheChangeCannotBeAudited:
+        def it_restores_the_previous_metadata(
+            self, broken: ArtifactService, store: FileStore
+        ) -> None:
+            artifact_id = new_id()
+            store.create(artifact_id, _draft(), source=CLIENT)
+            with pytest.raises(AuditUnavailable):
+                broken.set_meta(artifact_id, MetaChange(title="Renamed"), client=CLIENT)
+            assert store.get(artifact_id).title == "Energy, September"
 
 
 class DescribeRacedCreates:

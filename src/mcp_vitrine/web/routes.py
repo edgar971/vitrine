@@ -30,7 +30,10 @@ from mcp_vitrine.domain import layout
 from mcp_vitrine.domain.errors import Invalid, NotFound, TooLarge, VitrineError
 from mcp_vitrine.domain.ids import CLIENT_REF_MAX, is_valid_id
 from mcp_vitrine.domain.models import (
+    PROJECT_PATTERN,
     TAG_LIMIT,
+    TAG_MAX,
+    TITLE_MAX,
     Artifact,
     ArtifactDraft,
     ArtifactQuery,
@@ -62,7 +65,6 @@ PARSER_MAX_FIELDS = 64
 VERSION_MARK = "@"
 # More digits than any real version number needs.
 MAX_PIN_DIGITS = 9
-TITLE_MAX = 200
 
 
 class Access(StrEnum):
@@ -94,7 +96,11 @@ class _Fields(BaseModel):
     title: Annotated[str | None, Field(max_length=TITLE_MAX)] = None
     entry: str | None = None
     expires_in: Annotated[str | None, Field(pattern=rf"{DURATION}|^{NEVER}$")] = None
-    tags: Annotated[tuple[Annotated[str, Field(max_length=64)], ...], Field(max_length=TAG_LIMIT)]
+    tags: Annotated[
+        tuple[Annotated[str, Field(max_length=TAG_MAX)], ...], Field(max_length=TAG_LIMIT)
+    ]
+    # An empty project clears it on an update, and means none on a create.
+    project: Annotated[str | None, Field(pattern=rf"{PROJECT_PATTERN}|^$")] = None
     note: Annotated[str, Field(max_length=1000)] = ""
     client_ref: Annotated[
         str | None, Field(max_length=CLIENT_REF_MAX, pattern=r"^[A-Za-z0-9._:-]+$")
@@ -180,6 +186,7 @@ class WebRoutes:
                 files=files,
                 entry=fields.entry,
                 tags=fields.tags,
+                project=fields.project or None,
                 note=fields.note,
                 expires_at=self._expiry(fields.expires_in),
                 client_ref=fields.client_ref,
@@ -209,6 +216,7 @@ class WebRoutes:
                 entry=fields.entry,
                 title=fields.title,
                 tags=fields.tags or None,
+                project=fields.project,
                 note=fields.note,
                 expires_at=None if fields.expires_in == NEVER else self._expiry(fields.expires_in),
                 clear_expiry=fields.expires_in == NEVER,
@@ -225,8 +233,11 @@ class WebRoutes:
             return caller
         try:
             await self._spend(Bucket.READS, caller, route="api_list")
+            params: dict[str, Any] = dict(request.query_params)
+            if "expiring_within" in params:
+                params["expiring_within"] = requested_duration(params["expiring_within"])
             try:
-                query = ArtifactQuery.model_validate(dict(request.query_params))
+                query = ArtifactQuery.model_validate(params)
             except ValidationError as error:
                 raise Invalid(_describe(error)) from None
             page = await _run(partial(self._services.artifacts.list, query))

@@ -126,10 +126,69 @@ class DescribeMigrate:
     class WhenNoStepLeadsFromAVersion:
         def it_refuses(self, root: Path, old: str) -> None:
             with pytest.raises(SchemaMismatch, match=f"no migration from schema_version {OLD}"):
-                schema.migrate(root, plan=schema.CURRENT)
+                schema.migrate(root, plan=schema.Plan(steps={}, target=SCHEMA_VERSION))
 
     class WhenTheDataIsNewer:
         def it_refuses_to_go_backwards(self, root: Path, current: str) -> None:
             _rewrite(root, current, schema_version=SCHEMA_VERSION + 1)
             with pytest.raises(SchemaMismatch, match="only go forward"):
                 schema.migrate(root)
+
+
+RELEASE_FIELDS: dict[str, object] = {
+    "links": [],
+    "fallback": None,
+    "public_until": None,
+    "project": None,
+}
+
+
+@pytest.fixture
+def schema_one(store: FileStore, root: Path) -> str:
+    """An artifact exactly as 0.1 wrote it: schema 1, none of the 0.2 fields."""
+    artifact_id = new_id()
+    store.create(artifact_id, ArtifactDraft(title="Then", files={"a.txt": b"a"}), source="hermes")
+    path = layout.meta_file(root, artifact_id)
+    meta = {
+        key: value
+        for key, value in json.loads(path.read_text()).items()
+        if key not in RELEASE_FIELDS
+    }
+    path.write_text(json.dumps(meta | {"schema_version": 1}))
+    return artifact_id
+
+
+def _meta(root: Path, artifact_id: str) -> dict[str, object]:
+    """One raw ``meta.json``."""
+    loaded: dict[str, object] = json.loads(layout.meta_file(root, artifact_id).read_text())
+    return loaded
+
+
+class DescribeTheReleaseMigration:
+    class WhenTheDataIsSchemaOne:
+        def it_adds_every_field_with_its_default(self, root: Path, schema_one: str) -> None:
+            schema.migrate(root)
+            meta = _meta(root, schema_one)
+            assert {key: meta[key] for key in RELEASE_FIELDS} == RELEASE_FIELDS
+
+        def it_reaches_schema_two(self, root: Path, schema_one: str) -> None:
+            schema.migrate(root)
+            assert _meta(root, schema_one)["schema_version"] == 2
+
+        def it_leaves_data_this_build_reads(
+            self, root: Path, schema_one: str, store: FileStore
+        ) -> None:
+            schema.migrate(root)
+            assert store.get(schema_one).title == "Then"
+
+        def it_is_idempotent(self, root: Path, schema_one: str) -> None:
+            schema.migrate(root)
+            before = layout.meta_file(root, schema_one).read_bytes()
+            schema.migrate(root)
+            assert layout.meta_file(root, schema_one).read_bytes() == before
+
+    class WhenAFieldIsAlreadyThere:
+        def it_keeps_its_value(self, root: Path, schema_one: str) -> None:
+            _rewrite(root, schema_one, project="kept")
+            schema.migrate(root)
+            assert _meta(root, schema_one)["project"] == "kept"

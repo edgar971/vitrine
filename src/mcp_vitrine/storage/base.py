@@ -14,6 +14,7 @@ from mcp_vitrine.domain.models import (
     ArtifactPage,
     ArtifactQuery,
     FileEntry,
+    MetaChange,
     VersionDraft,
     Visibility,
 )
@@ -117,7 +118,7 @@ class Store(Protocol):
         ...
 
     def list(self, query: ArtifactQuery) -> ArtifactPage:
-        """Scan the ``meta.json`` files, newest first, one page at a time (spec § 5.1)."""
+        """Scan the ``meta.json`` files, in the query's order, one page at a time (spec § 5.1)."""
         ...
 
     def release_ref(self, *, client: str, ref: str, artifact_id: str) -> None:
@@ -142,6 +143,14 @@ class Store(Protocol):
         """Increment ``link_epoch``, revoking every private link (spec § 2)."""
         ...
 
+    def set_meta(self, artifact_id: str, change: MetaChange) -> tuple[Artifact, Artifact]:
+        """Apply a metadata change under the artifact's lock: ``(before, after)`` (spec § 5.1).
+
+        Only ``meta.json`` changes: no version, no link epoch. A change that sets every field to
+        the value it already has writes nothing, and ``after`` is ``before``.
+        """
+        ...
+
     def replace_meta(self, artifact: Artifact) -> None:
         """Write ``meta.json`` as given, to compensate a mutation whose audit write failed."""
         ...
@@ -155,7 +164,10 @@ class Store(Protocol):
         ...
 
     def usage_bytes(self) -> int:
-        """Bytes on disk under ``artifacts/``, hard links counted once (spec § 8.2)."""
+        """Bytes on disk under ``artifacts/``, hard links counted once (spec § 8.2).
+
+        Called under the store-wide write lock on every write, so it must not walk the store.
+        """
         ...
 
     def count(self) -> int:

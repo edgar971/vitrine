@@ -16,7 +16,8 @@ from mcp_vitrine.domain import layout
 from mcp_vitrine.domain.clock import Clock
 from mcp_vitrine.domain.errors import NotFound, OverQuota, SchemaMismatch
 from mcp_vitrine.domain.ids import new_id
-from mcp_vitrine.domain.models import ArtifactDraft, VersionDraft
+from mcp_vitrine.domain.models import SCHEMA_VERSION, ArtifactDraft, VersionDraft
+from mcp_vitrine.storage import filesystem
 from mcp_vitrine.storage.base import StoreConfig
 from mcp_vitrine.storage.filesystem import FileStore
 
@@ -256,7 +257,7 @@ class DescribeTheMetaFile:
             artifact_id = _create(store)
             written = json.loads(layout.meta_file(store_config.root, artifact_id).read_text())
             assert written["id"] == artifact_id
-            assert written["schema_version"] == 1
+            assert written["schema_version"] == SCHEMA_VERSION
 
     class WhenAMetaFileIsCorrupt:
         def it_refuses_to_read_it(self, store: FileStore, store_config: StoreConfig) -> None:
@@ -311,3 +312,66 @@ class DescribeIdempotencyRecords:
 def _refuse_write(*args: object, **kwargs: object) -> None:
     """Stand in for a write that never completes."""
     raise OSError("the disk went away")
+
+
+@pytest.fixture
+def walks_under_the_lock(store: FileStore, monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """Whether the store-wide write lock was held, for every directory walk from now on."""
+    held: list[bool] = []
+    for name in ("glob", "rglob"):
+        original = getattr(Path, name)
+
+        def spy(
+            path: Path, *args: object, _original: object = original, **kwargs: object
+        ) -> object:
+            held.append(store._writes_lock.locked())
+            return _original(path, *args, **kwargs)  # type: ignore[operator]
+
+        monkeypatch.setattr(Path, name, spy)
+    return held
+
+
+class DescribeTheStore:
+    class WhenFilesAreCounted:
+        def it_does_not_glob_under_the_write_lock(
+            self, store: FileStore, walks_under_the_lock: list[bool]
+        ) -> None:
+            artifact_id = _create(store)
+            store.add_version(artifact_id, VersionDraft(files={"b.txt": b"b"}, merge=True))
+            assert True not in walks_under_the_lock
+
+    class WhenAnotherProcessFreesBytes:
+        def it_follows_after_the_next_staging_sweep(
+            self, store: FileStore, store_config: StoreConfig, clock: Clock
+        ) -> None:
+            artifact_id = _create(store, files={ENTRY: b"0123456789"})
+            FileStore(store_config, clock).delete(artifact_id)
+            store.sweep_staging()
+            assert store.usage_bytes() == 0
+
+    class WhenAWriteReplacesACrashOrphan:
+        def it_counts_only_the_version_that_landed(
+            self, store: FileStore, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            artifact_id = _create(store, files={ENTRY: b"0123456789"})
+            with monkeypatch.context() as patched:
+                _fail_on_meta_replace(patched)
+                with pytest.raises(OSError, match="the disk went away"):
+                    store.add_version(artifact_id, VersionDraft(files={ENTRY: b"orphan"}))
+            store.add_version(artifact_id, VersionDraft(files={ENTRY: b"123"}))
+            assert store.usage_bytes() == 13
+
+    class WhenAWriteLandsDuringTheMeasure:
+        def it_keeps_the_running_total(
+            self, store: FileStore, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+            original = filesystem._measure
+
+            def racing(root: Path) -> int:
+                measured = original(root)
+                _create(store, files={ENTRY: b"12345"})
+                return measured
+
+            monkeypatch.setattr(filesystem, "_measure", racing)
+            store.resync_usage()
+            assert store.usage_bytes() == 5

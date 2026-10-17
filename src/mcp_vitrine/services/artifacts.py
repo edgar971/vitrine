@@ -35,13 +35,14 @@ from mcp_vitrine.domain.models import (
     ArtifactQuery,
     GateDecision,
     LinkClaims,
+    MetaChange,
     PublishedArtifact,
     UploadGrant,
     VersionDraft,
     Visibility,
 )
 from mcp_vitrine.domain.paths import choose_entry, validate_path
-from mcp_vitrine.services.audit import AuditEvent, AuditEventName, AuditLog
+from mcp_vitrine.services.audit import AuditEvent, AuditEventName, AuditLog, MetaField
 from mcp_vitrine.services.gate import GateBinding
 from mcp_vitrine.services.links import LinkService
 from mcp_vitrine.services.metrics import Metrics, NoMetrics
@@ -181,6 +182,31 @@ class ArtifactService:
         )
         self._metrics.version_created(client)
         return self._published(self._store.prune(artifact_id))
+
+    def set_meta(self, artifact_id: str, change: MetaChange, *, client: str) -> Artifact:
+        """Change the title, the tags or the project, in ``meta.json`` alone (spec § 5.1).
+
+        Nothing that is served changes, so there is no version, no gate and no new link epoch,
+        and the existing links keep working. The audit names the fields, never their values.
+        """
+        self._usable(artifact_id)
+        before, after = self._store.set_meta(artifact_id, change)
+        changed = tuple(
+            field for field in MetaField if getattr(before, field) != getattr(after, field)
+        )
+        if not changed:
+            return after
+        self._record(
+            AuditEvent(
+                ts=self._clock.now(),
+                event=AuditEventName.METADATA_CHANGED,
+                artifact=artifact_id,
+                client=client,
+                fields=changed,
+            ),
+            rollback=partial(self._store.replace_meta, before),
+        )
+        return after
 
     def get(self, artifact_id: str, *, version: int | None = None) -> ArtifactDetail:
         """Read one version's metadata and file list; an expired artifact answers ``Expired``."""

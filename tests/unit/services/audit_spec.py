@@ -82,6 +82,7 @@ class DescribeTheEventModel:
                 "reason",
                 "tool",
                 "route",
+                "fields",
             }
 
     class WhenAnEventCarriesAFieldTheSpecDoesNotList:

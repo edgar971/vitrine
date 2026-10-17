@@ -118,6 +118,7 @@ These rules were validated against FastMCP 4.1 (see [`research.md`](research.md)
 | `artifact_update` | Update artifact | `vitrine:write` | no | no | no | no |
 | `artifact_get` | Get artifact | `vitrine:read` | yes | no | yes | no |
 | `artifact_list` | List artifacts | `vitrine:read` | yes | no | yes | no |
+| `artifact_set_meta` | Edit artifact metadata | `vitrine:write` | no | no | **yes** | no |
 | `artifact_link` | Create private link | `vitrine:share` | no | no | no | no |
 | `artifact_set_visibility` | Change visibility | `vitrine:publish` | no | no | yes | **yes** |
 | `artifact_revoke_links` | Revoke private links | `vitrine:share` | no | yes | no | no |
@@ -159,8 +160,14 @@ valid id → meta → (public, or signature with the current epoch) → not expi
 anything else → 404 (410 for expiry)
 ```
 
+**Quota accounting:** the bytes on disk are a running total, measured once when the store opens
+and moved by every write and removal, so the quota check in step 2 never walks the store under
+the store-wide write lock. The periodic sweep measures again outside the lock and keeps the result
+only if no write landed meanwhile, which also catches changes another process made.
+
 **Scale:** writers are serialised per artifact in one process. `list` scans `meta.json` files,
-which is fine to roughly 10⁴ artifacts; an index would be internal to `FileStore`. More than one
+which is fine to roughly 10⁴ artifacts, and so do search and facets; searching file contents
+would need an index, which would be internal to `FileStore`. More than one
 replica needs another `Store`, not file locks.
 
 ## 6. Flows

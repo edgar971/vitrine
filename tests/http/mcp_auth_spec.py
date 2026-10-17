@@ -105,8 +105,8 @@ class DescribeTheMcpEndpoint:
             assert _post(endpoint, {"Authorization": f"Bearer {_hash(FULL_TOKEN)}"}) == 401
 
     class WhenAFullScopeTokenConnects:
-        async def it_sees_all_nine_tools(self, endpoint: str) -> None:
-            assert len(await _tool_names(endpoint, FULL_TOKEN)) == 9
+        async def it_sees_all_ten_tools(self, endpoint: str) -> None:
+            assert len(await _tool_names(endpoint, FULL_TOKEN)) == 10
 
     class WhenAReadOnlyTokenConnects:
         async def it_sees_only_the_read_tools(self, endpoint: str) -> None:

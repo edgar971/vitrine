@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from mcp_vitrine.domain.errors import ConfigError, SchemaMismatch
 from mcp_vitrine.domain.models import (
+    SCHEMA_VERSION,
     TAG_LIMIT,
     Artifact,
     ArtifactDraft,
@@ -40,6 +41,10 @@ META_KEYS = {
     "tags",
     "link_epoch",
     "used_upload_nonces",
+    "links",
+    "fallback",
+    "public_until",
+    "project",
 }
 
 
@@ -126,7 +131,7 @@ class DescribeTheArtifact:
     class WhenTheSchemaVersionIsUnknown:
         def it_refuses_to_read_it(self) -> None:
             with pytest.raises(SchemaMismatch):
-                _artifact(schema_version=2)
+                _artifact(schema_version=SCHEMA_VERSION + 1)
 
     class WhenTheCurrentVersionIsNotTheLastOne:
         def it_refuses_the_metadata(self) -> None:

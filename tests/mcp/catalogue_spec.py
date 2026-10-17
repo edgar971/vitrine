@@ -22,6 +22,7 @@ CATALOGUE: dict[str, tuple[str, str, bool, bool, bool, bool]] = {
     "artifact_update": ("Update artifact", "vitrine:write", False, False, False, False),
     "artifact_get": ("Get artifact", "vitrine:read", True, False, True, False),
     "artifact_list": ("List artifacts", "vitrine:read", True, False, True, False),
+    "artifact_set_meta": ("Edit artifact metadata", "vitrine:write", False, False, True, False),
     "artifact_link": ("Create private link", "vitrine:share", False, False, False, False),
     "artifact_set_visibility": ("Change visibility", "vitrine:publish", False, False, True, True),
     "artifact_revoke_links": ("Revoke private links", "vitrine:share", False, True, False, False),
@@ -29,7 +30,7 @@ CATALOGUE: dict[str, tuple[str, str, bool, bool, bool, bool]] = {
     "artifact_delete": ("Delete artifact", "vitrine:write", False, True, True, False),
 }
 
-WRITERS = ("artifact_create", "artifact_update", "artifact_upload_url")
+WRITERS = ("artifact_create", "artifact_update", "artifact_upload_url", "artifact_set_meta")
 
 
 @pytest.fixture
@@ -67,7 +68,7 @@ def _spec_instructions() -> str:
 
 class DescribeTheToolCatalogue:
     class WhenAFullScopeTokenLists:
-        def it_offers_exactly_the_nine_tools(self, listed: dict[str, Tool]) -> None:
+        def it_offers_exactly_the_ten_tools(self, listed: dict[str, Tool]) -> None:
             assert sorted(listed) == sorted(CATALOGUE)
 
         @pytest.mark.parametrize("name", sorted(CATALOGUE))

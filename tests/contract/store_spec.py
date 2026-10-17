@@ -12,7 +12,17 @@ import pytest
 from mcp_vitrine.domain.clock import Clock
 from mcp_vitrine.domain.errors import Conflict, Invalid, NotFound, OverQuota, Refused, TooLarge
 from mcp_vitrine.domain.ids import new_id
-from mcp_vitrine.domain.models import ArtifactDraft, ArtifactQuery, VersionDraft, Visibility
+from mcp_vitrine.domain.models import (
+    TAG_LIMIT,
+    ArtifactDraft,
+    ArtifactQuery,
+    LinkRecord,
+    ListSort,
+    MetaChange,
+    Passcode,
+    VersionDraft,
+    Visibility,
+)
 from mcp_vitrine.storage.base import Store
 
 ENTRY = "index.html"
@@ -406,12 +416,18 @@ class DescribeListing:
             with pytest.raises(Invalid):
                 store.list(ArtifactQuery(cursor="not-a-cursor"))
 
-    class WhenTheCursorCarriesATimeWithoutAZone:
+    class WhenTheCursorIsNotAList:
+        def it_is_a_bad_request(self, store: Store) -> None:
+            cursor = base64.urlsafe_b64encode(b'{"sort":"updated"}').decode()
+            with pytest.raises(Invalid):
+                store.list(ArtifactQuery(cursor=cursor.rstrip("=")))
+
+    class WhenTheCursorCarriesAKeyOfTheWrongType:
         def it_is_a_bad_request(self, store: Store) -> None:
             _create(store)
-            cursor = base64.urlsafe_b64encode(b"2020-01-01T00:00:00|x").decode().rstrip("=")
+            cursor = base64.urlsafe_b64encode(b'["updated","2020-01-01T00:00:00","x"]').decode()
             with pytest.raises(Invalid):
-                store.list(ArtifactQuery(cursor=cursor))
+                store.list(ArtifactQuery(cursor=cursor.rstrip("=")))
 
 
 class DescribeTheQuotaOfAMerge:
@@ -712,3 +728,249 @@ class DescribeLocate:
             artifact_id = _create(store)
             with pytest.raises(Invalid):
                 store.locate(artifact_id, "../meta.json")
+
+
+class DescribeTheReleaseFields:
+    class WhenAnArtifactIsCreatedInAProject:
+        def it_keeps_the_project(self, store: Store) -> None:
+            assert store.get(_create(store, project="q3-report")).project == "q3-report"
+
+    class WhenAnArtifactIsCreatedWithoutOne:
+        def it_starts_every_release_field_at_its_default(self, store: Store) -> None:
+            artifact = store.get(_create(store))
+            assert (artifact.links, artifact.fallback, artifact.public_until, artifact.project) == (
+                (),
+                None,
+                None,
+                None,
+            )
+
+    class WhenEveryFieldIsSet:
+        def it_round_trips_them(self, store: Store, clock: Clock) -> None:
+            artifact = store.get(_create(store))
+            link = LinkRecord(
+                lid="l1",
+                label="for Ana",
+                created_at=clock.now(),
+                expires_at=clock.now() + timedelta(days=1),
+                passcode=Passcode(hash="aGFzaA", salt="c2FsdA", n=2**14, r=8, p=1),
+            )
+            full = artifact.model_copy(
+                update={
+                    "links": (link,),
+                    "fallback": ENTRY,
+                    "public_until": clock.now() + timedelta(days=2),
+                    "project": "q3",
+                }
+            )
+            store.replace_meta(full)
+            assert store.get(artifact.id) == full
+
+    class WhenAVersionMovesTheProject:
+        def it_takes_the_new_one(self, store: Store) -> None:
+            artifact_id = _create(store, project="q3")
+            store.add_version(artifact_id, VersionDraft(project="q4"))
+            assert store.get(artifact_id).project == "q4"
+
+        def it_clears_it_on_an_empty_name(self, store: Store) -> None:
+            artifact_id = _create(store, project="q3")
+            store.add_version(artifact_id, VersionDraft(project=""))
+            assert store.get(artifact_id).project is None
+
+        def it_leaves_it_alone_when_none_is_named(self, store: Store) -> None:
+            artifact_id = _create(store, project="q3")
+            store.add_version(artifact_id, VersionDraft())
+            assert store.get(artifact_id).project == "q3"
+
+
+class DescribeSettingMetadata:
+    class WhenTheTitleChanges:
+        def it_writes_it(self, store: Store) -> None:
+            artifact_id = _create(store)
+            store.set_meta(artifact_id, MetaChange(title="Renamed"))
+            assert store.get(artifact_id).title == "Renamed"
+
+        def it_writes_no_version(self, store: Store) -> None:
+            artifact_id = _create(store)
+            store.set_meta(artifact_id, MetaChange(title="Renamed"))
+            assert store.get(artifact_id).version == 1
+
+        def it_keeps_the_link_epoch(self, store: Store) -> None:
+            artifact_id = _create(store)
+            store.set_meta(artifact_id, MetaChange(title="Renamed"))
+            assert store.get(artifact_id).link_epoch == 0
+
+        def it_moves_updated_at(
+            self, store: Store, clock: Clock, advance: Callable[[timedelta], None]
+        ) -> None:
+            artifact_id = _create(store)
+            advance(timedelta(minutes=5))
+            store.set_meta(artifact_id, MetaChange(title="Renamed"))
+            assert store.get(artifact_id).updated_at == clock.now()
+
+        def it_hands_back_the_artifact_as_it_was(self, store: Store) -> None:
+            artifact_id = _create(store)
+            before, _ = store.set_meta(artifact_id, MetaChange(title="Renamed"))
+            assert before.title == "Energy, September"
+
+    class WhenNothingWouldChange:
+        def it_writes_nothing(self, store: Store, advance: Callable[[timedelta], None]) -> None:
+            artifact_id = _create(store)
+            original = store.get(artifact_id)
+            advance(timedelta(minutes=5))
+            store.set_meta(artifact_id, MetaChange(title=original.title))
+            assert store.get(artifact_id) == original
+
+    class WhenTheTagsWouldPassTheLimit:
+        def it_refuses_the_change(self, store: Store) -> None:
+            artifact_id = _create(store, tags=tuple(f"t{index}" for index in range(TAG_LIMIT)))
+            with pytest.raises(Invalid):
+                store.set_meta(artifact_id, MetaChange(add_tags=("one-more",)))
+
+    class WhenTheArtifactIsUnknown:
+        def it_is_not_found(self, store: Store) -> None:
+            with pytest.raises(NotFound):
+                store.set_meta(new_id(), MetaChange(title="Renamed"))
+
+
+class DescribeSearching:
+    class WhenTheQueryHasSeveralTerms:
+        def it_needs_every_one_of_them(self, store: Store) -> None:
+            _create(store, title="Energy, September")
+            _create(store, title="Energy, October")
+            page = store.list(ArtifactQuery(query="  energy   OCT "))
+            assert [item.title for item in page.items] == ["Energy, October"]
+
+        def it_matches_each_term_anywhere(self, store: Store) -> None:
+            _create(store, title="Energy", tags=("final",), project="household")
+            assert len(store.list(ArtifactQuery(query="final house energy")).items) == 1
+
+    class WhenATermNamesTheEntry:
+        def it_matches_the_file_name(self, store: Store) -> None:
+            _create(store, title="Chart", files={"report.html": b"x"})
+            assert len(store.list(ArtifactQuery(query="report.html")).items) == 1
+
+    class WhenFilteredByProject:
+        def it_keeps_only_that_project(self, store: Store) -> None:
+            inside = _create(store, project="q3")
+            _create(store, project="q4")
+            _create(store)
+            page = store.list(ArtifactQuery(project="q3"))
+            assert [item.id for item in page.items] == [inside]
+
+    class WhenFilteredByUpdateTime:
+        def it_keeps_only_the_later_ones(
+            self, store: Store, clock: Clock, advance: Callable[[timedelta], None]
+        ) -> None:
+            _create(store)
+            cutoff = clock.now()
+            advance(timedelta(minutes=1))
+            later = _create(store)
+            page = store.list(ArtifactQuery(updated_after=cutoff))
+            assert [item.id for item in page.items] == [later]
+
+    class WhenFilteredByExpiry:
+        def it_keeps_only_the_ones_expiring_soon(self, store: Store, clock: Clock) -> None:
+            soon = _create(store, expires_at=clock.now() + timedelta(hours=1))
+            _create(store, expires_at=clock.now() + timedelta(days=30))
+            _create(store)
+            page = store.list(ArtifactQuery(expiring_within=timedelta(days=1)))
+            assert [item.id for item in page.items] == [soon]
+
+    class WhenSortedByCreation:
+        def it_ignores_later_updates(
+            self, store: Store, advance: Callable[[timedelta], None]
+        ) -> None:
+            first = _create(store)
+            advance(timedelta(minutes=1))
+            second = _create(store)
+            advance(timedelta(minutes=1))
+            store.add_version(first, VersionDraft(note="later"))
+            page = store.list(ArtifactQuery(sort=ListSort.CREATED))
+            assert [item.id for item in page.items] == [second, first]
+
+    class WhenSortedByTitle:
+        def it_orders_them_a_to_z_ignoring_case(self, store: Store) -> None:
+            for title in ("beta", "Alpha", "gamma"):
+                _create(store, title=title)
+            page = store.list(ArtifactQuery(sort=ListSort.TITLE))
+            assert [item.title for item in page.items] == ["Alpha", "beta", "gamma"]
+
+        def it_pages_without_repeating_a_row(self, store: Store) -> None:
+            for title in ("same", "same", "same"):
+                _create(store, title=title)
+            first = store.list(ArtifactQuery(sort=ListSort.TITLE, limit=2))
+            second = store.list(
+                ArtifactQuery(sort=ListSort.TITLE, limit=2, cursor=first.next_cursor)
+            )
+            assert len({item.id for item in first.items + second.items}) == 3
+
+    class WhenTheCursorBelongsToAnotherSort:
+        def it_is_a_bad_request(self, store: Store) -> None:
+            _create(store)
+            _create(store)
+            first = store.list(ArtifactQuery(limit=1))
+            with pytest.raises(Invalid):
+                store.list(ArtifactQuery(sort=ListSort.TITLE, cursor=first.next_cursor))
+
+    class WhenFacetsAreAsked:
+        def it_counts_projects_over_the_whole_match(self, store: Store) -> None:
+            for project in ("q3", "q3", "q4"):
+                _create(store, project=project)
+            _create(store)
+            facets = store.list(ArtifactQuery(facets=True, limit=1)).facets
+            assert facets is not None
+            assert facets.projects == {"q3": 2, "q4": 1}
+
+        def it_counts_tags_over_the_whole_match(self, store: Store) -> None:
+            _create(store, tags=("energy", "final"))
+            _create(store, tags=("energy",))
+            facets = store.list(ArtifactQuery(facets=True, limit=1)).facets
+            assert facets is not None
+            assert facets.tags == {"energy": 2, "final": 1}
+
+        def it_counts_only_what_the_filters_match(self, store: Store) -> None:
+            _create(store, title="Energy", project="q3")
+            _create(store, title="Notes", project="q4")
+            facets = store.list(ArtifactQuery(query="energy", facets=True)).facets
+            assert facets is not None
+            assert facets.projects == {"q3": 1}
+
+    class WhenFacetsAreNotAsked:
+        def it_leaves_them_out(self, store: Store) -> None:
+            _create(store, project="q3")
+            assert store.list(ArtifactQuery()).facets is None
+
+
+class DescribeTheRunningUsage:
+    class WhenPruningDropsAVersion:
+        def it_frees_the_bytes_only_that_version_held(self, two_version_store: Store) -> None:
+            artifact_id = _create(two_version_store, files={ENTRY: b"0123456789"})
+            two_version_store.add_version(artifact_id, VersionDraft(files={ENTRY: b"12345"}))
+            two_version_store.add_version(artifact_id, VersionDraft(files={ENTRY: b"123"}))
+            two_version_store.prune(artifact_id)
+            assert two_version_store.usage_bytes() == 8
+
+        def it_keeps_the_bytes_a_later_version_shares(self, two_version_store: Store) -> None:
+            artifact_id = _create(two_version_store, files={ENTRY: b"0123456789"})
+            two_version_store.add_version(
+                artifact_id, VersionDraft(files={"b.txt": b"12345"}, merge=True)
+            )
+            two_version_store.add_version(
+                artifact_id, VersionDraft(files={"c.txt": b"1"}, merge=True)
+            )
+            two_version_store.prune(artifact_id)
+            assert two_version_store.usage_bytes() == 16
+
+    class WhenAVersionIsRolledBack:
+        def it_frees_its_bytes(self, store: Store) -> None:
+            artifact_id = _create(store, files={ENTRY: b"0123456789"})
+            store.add_version(artifact_id, VersionDraft(files={ENTRY: b"12345"}))
+            store.vitrine_version(artifact_id, 2)
+            assert store.usage_bytes() == 10
+
+    class WhenOnlyTheMetadataChanges:
+        def it_stays_the_same(self, store: Store) -> None:
+            artifact_id = _create(store, files={ENTRY: b"0123456789"})
+            store.set_meta(artifact_id, MetaChange(title="Renamed"))
+            assert store.usage_bytes() == 10

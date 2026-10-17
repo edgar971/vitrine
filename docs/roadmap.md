@@ -27,6 +27,10 @@ next release is tracked in [#15](https://github.com/edgar971/vitrine/issues/15).
 
 Ordered by expected value. Each item already has a seam in the [design](design.md).
 
+The publishing features planned for 0.2 to 0.4 (viewer passcodes, JSX and zip sites, scheduled
+unpublish, a dashboard, a client CLI, projects and search, view counts, notifications) are drafted
+in [proposals/0.2-publishing.md](proposals/0.2-publishing.md).
+
 1. A content preview in the public-gate prompt, so the human approves what they actually saw
    (security R3).
 2. An out-of-band approval link, for clients that cannot elicit — and for the agent that holds a

@@ -49,6 +49,7 @@ The full picture is in [design](design.md).
 | [adr](adr/) | The decisions that are expensive to reverse |
 | [research](research.md) | The platform facts and alternatives behind the design |
 | [roadmap](roadmap.md) | What shipped in `0.1.0`, and what comes after |
+| [proposals](proposals/0.2-publishing.md) | Draft specs for the features after 0.1, before they reach the spec |
 
 ## Contributing
 

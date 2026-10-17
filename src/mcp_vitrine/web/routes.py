@@ -8,18 +8,28 @@ Like a tool, a route stays thin: it checks the caller, translates, calls a servi
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Callable
 from datetime import datetime
 from enum import StrEnum
 from functools import partial
+from http import HTTPStatus
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 from urllib.parse import quote
 
 from anyio import to_thread
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from starlette.datastructures import FormData, UploadFile
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictStr,
+    ValidationError,
+    field_validator,
+)
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
@@ -33,9 +43,11 @@ from mcp_vitrine.domain.errors import (
     NotFound,
     RateLimited,
     TooLarge,
+    UnsupportedType,
     VitrineError,
 )
-from mcp_vitrine.domain.ids import CLIENT_REF_MAX, is_valid_id
+from mcp_vitrine.domain.ids import CLIENT_REF_MAX, LID_PATTERN, is_valid_id
+from mcp_vitrine.domain.media import content_type
 from mcp_vitrine.domain.models import (
     PROJECT_PATTERN,
     TAG_LIMIT,
@@ -43,16 +55,22 @@ from mcp_vitrine.domain.models import (
     TITLE_MAX,
     ArtifactDraft,
     ArtifactQuery,
+    Content,
+    MetaChange,
     PublishedArtifact,
     Scope,
+    Spooled,
     VersionDraft,
 )
-from mcp_vitrine.domain.paths import validate_path
+from mcp_vitrine.domain.paths import MAX_PATH_BYTES, validate_path
+from mcp_vitrine.services import archives
+from mcp_vitrine.services.archives import UNPACK_ZIP, ArchiveLimits, Unpacked
 from mcp_vitrine.services.artifacts import Opened
 from mcp_vitrine.services.audit import DenialReason
 from mcp_vitrine.services.container import Services
 from mcp_vitrine.services.limits import Bucket
 from mcp_vitrine.services.views import is_unfurler
+from mcp_vitrine.web.jsx import STATIC_PREFIX, JsxBundle
 from mcp_vitrine.web.renderers import RENDER_LIMIT, renderer_for
 from mcp_vitrine.web.responses import (
     Prefix,
@@ -64,18 +82,24 @@ from mcp_vitrine.web.responses import (
     unauthorized,
     unlock_form,
 )
+from mcp_vitrine.web.spool import FilePart, Spool, spooled
 
 NEVER = "never"
 DURATION = r"^\d+[smhd]?$"
 BEARER = re.compile(r"^bearer\s+(\S+)$", re.IGNORECASE)
-# The multipart parser's own file cap only has to stop pathological bodies (the body limit
-# already bounds them); max_files is counted here, so going over it is a 413, not a parse error.
-PARSER_MAX_FILES = 10_000
 PARSER_MAX_FIELDS = 64
 VERSION_MARK = "@"
 # More digits than any real version number needs.
 MAX_PIN_DIGITS = 9
 UNLOCK_FIELDS = 4
+NOT_FOUND_PAGE = "404.html"
+HTML_TYPE = "text/html"
+_HEAD_TAG = re.compile(r"<head\b[^>]*>", re.IGNORECASE)
+_BASE_TAG = re.compile(r"<base\b", re.IGNORECASE)
+IMMUTABLE = "public, max-age=31536000, immutable"
+# A JSON body names a few short fields; anything near this is not a request vitrine understands.
+JSON_BODY = 16 * 1024
+JSON_TYPE = "application/json"
 # Requests a browser makes ahead of a click: not someone opening the link.
 PREFETCH = frozenset({"prefetch", "prerender"})
 
@@ -97,7 +121,13 @@ ROUTE_ACCESS: dict[str, Access] = {
     "api_create": Access.BEARER,
     "api_update": Access.BEARER,
     "api_list": Access.BEARER,
+    "api_get": Access.BEARER,
+    "api_delete": Access.BEARER,
+    "api_meta": Access.BEARER,
+    "api_link": Access.BEARER,
+    "api_revoke": Access.BEARER,
     "health": Access.PUBLIC,
+    "static_asset": Access.PUBLIC,
     "mcp": Access.MCP,
 }
 
@@ -120,6 +150,9 @@ class _Fields(BaseModel):
         str | None, Field(max_length=CLIENT_REF_MAX, pattern=r"^[A-Za-z0-9._:-]+$")
     ] = None
     merge: bool = False
+    # An empty fallback clears it on an update.
+    fallback: Annotated[str | None, Field(max_length=MAX_PATH_BYTES)] = None
+    unpack: Annotated[str | None, Field(pattern=f"^{UNPACK_ZIP}$")] = None
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -130,6 +163,50 @@ class _Fields(BaseModel):
                 tag.strip() for item in value for tag in str(item).split(",") if tag.strip()
             )
         return value
+
+
+class _Body(BaseModel):
+    """A JSON body of the ``/api`` routes: an unknown key is a 400, never ignored."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class _MetaBody(_Body):
+    """``PATCH``: the fields of ``artifact_set_meta``. A visibility is not one of them."""
+
+    title: str | None = None
+    tags: list[str] | None = None
+    add_tags: list[str] | None = None
+    remove_tags: list[str] | None = None
+    project: str | None = None
+
+    def to_change(self) -> MetaChange:
+        """The service's change, validated by the same model the tool builds."""
+        try:
+            return MetaChange(
+                title=self.title,
+                tags=None if self.tags is None else tuple(self.tags),
+                add_tags=tuple(self.add_tags or ()),
+                remove_tags=tuple(self.remove_tags or ()),
+                project=self.project,
+            )
+        except ValidationError as error:
+            raise Invalid(_describe(error)) from None
+
+
+class _LinkBody(_Body):
+    """``POST …/links``: the arguments of ``artifact_link``."""
+
+    ttl: Annotated[str | None, Field(pattern=DURATION)] = None
+    label: Annotated[str | None, Field(max_length=TITLE_MAX)] = None
+    # Strict, so "true" as a string is a supplied passcode, not a request to generate one.
+    passcode: Annotated[StrictBool | StrictStr | None, Field(union_mode="left_to_right")] = None
+
+
+class _RevokeBody(_Body):
+    """``POST …/revoke``: one ``lid``, or nothing for every link."""
+
+    link: Annotated[str | None, Field(pattern=LID_PATTERN.pattern)] = None
 
 
 class WebRoutes:
@@ -150,7 +227,20 @@ class WebRoutes:
             Route("/api/artifacts", self.api_create, methods=["POST"], name="api_create"),
             Route("/api/artifacts", self.api_list, methods=["GET"], name="api_list"),
             Route("/api/artifacts/{id}", self.api_update, methods=["PUT"], name="api_update"),
+            Route("/api/artifacts/{id}", self.api_get, methods=["GET"], name="api_get"),
+            Route("/api/artifacts/{id}", self.api_delete, methods=["DELETE"], name="api_delete"),
+            Route("/api/artifacts/{id}", self.api_meta, methods=["PATCH"], name="api_meta"),
+            Route("/api/artifacts/{id}/links", self.api_link, methods=["POST"], name="api_link"),
+            Route(
+                "/api/artifacts/{id}/revoke", self.api_revoke, methods=["POST"], name="api_revoke"
+            ),
             Route("/healthz", self.health, methods=["GET"], name="health"),
+            Route(
+                f"{STATIC_PREFIX}/{{path:path}}",
+                self.static_asset,
+                methods=["GET"],
+                name="static_asset",
+            ),
         ]
 
     async def view_public(self, request: Request) -> Response:
@@ -203,7 +293,7 @@ class WebRoutes:
         return _see_other(f"{unlocked}{pin}", path)
 
     async def upload(self, request: Request) -> Response:
-        """``PUT /u/{sig}?filename=``: one raw file, once per URL (spec § 7.3)."""
+        """``PUT /u/{sig}?filename=`` or ``?unpack=zip``: one raw body, once per URL (§ 7.3)."""
         service = self._services.artifacts
         try:
             claims = service.upload_claims(request.path_params["sig"])
@@ -212,17 +302,36 @@ class WebRoutes:
             if client is None or not self._services.tokens.allows(client, Scope.WRITE):
                 raise NotFound()
             await self._spend(Bucket.WRITES, client, route="upload", artifact=claims.id)
-            filename = request.query_params.get("filename")
-            if not filename:
+            query = request.query_params
+            unpack = _unpack(query.get("unpack"))
+            filename = query.get("filename")
+            if not filename and not unpack:
                 raise Invalid("name the file: PUT /u/<sig>?filename=report.pdf")
-            title = request.query_params.get("title")
+            title = query.get("title")
             if title is not None and len(title) > TITLE_MAX:
                 raise Invalid(f"a title is at most {TITLE_MAX} characters")
-            body = await request.body()
-            published = await _run(partial(service.upload, claims, filename, body, title=title))
+            async with spooled(self._settings.data_dir) as spool:
+                body = await spool.body(request)
+                if not unpack:
+                    published = await _run(
+                        partial(service.upload, claims, filename or "", body, title=title)
+                    )
+                    return _published(published, status=201 if published.version == 1 else 200)
+                site = await _run(partial(self._unpack, body, spool))
+                # Read before the write, which moves the spooled files into the version.
+                extra = await _run(partial(_site, site))
+                published = await _run(
+                    partial(
+                        service.upload_site,
+                        claims,
+                        site.files,
+                        title=title,
+                        merge=query.get("merge") == "true",
+                    )
+                )
         except VitrineError as error:
             return problem(error)
-        return _published(published, status=201 if published.version == 1 else 200)
+        return _published(published, status=201 if published.version == 1 else 200, site=extra)
 
     async def api_create(self, request: Request) -> Response:
         """``POST /api/artifacts``: multipart files into a new, always private artifact."""
@@ -232,25 +341,28 @@ class WebRoutes:
         service = self._services.artifacts
         try:
             await self._spend(Bucket.WRITES, caller, route="api_create")
-            files, fields = await self._form(request)
-            if fields.title is None:
-                raise Invalid("a title is required")
-            if fields.expires_in == NEVER or fields.merge:
-                raise Invalid("expires_in=never and merge apply to an update")
-            draft = ArtifactDraft(
-                title=fields.title,
-                files=files,
-                entry=fields.entry,
-                tags=fields.tags,
-                project=fields.project or None,
-                note=fields.note,
-                expires_at=self._expiry(fields.expires_in),
-                client_ref=fields.client_ref,
-            )
-            published = await _run(partial(service.create, draft, client=caller))
+            async with spooled(self._settings.data_dir) as spool:
+                files, fields, site = await self._form(request, spool)
+                if fields.title is None:
+                    raise Invalid("a title is required")
+                if fields.expires_in == NEVER or fields.merge:
+                    raise Invalid("expires_in=never and merge apply to an update")
+                draft = ArtifactDraft(
+                    title=fields.title,
+                    files=files,
+                    entry=fields.entry,
+                    tags=fields.tags,
+                    project=fields.project or None,
+                    note=fields.note,
+                    expires_at=self._expiry(fields.expires_in),
+                    client_ref=fields.client_ref,
+                    fallback=fields.fallback or None,
+                )
+                extra = await _run(partial(_site, site, entry=fields.entry))
+                published = await _run(partial(service.create, draft, client=caller))
         except VitrineError as error:
             return problem(error)
-        return _published(published, status=201 if published.created else 200)
+        return _published(published, status=201 if published.created else 200, site=extra)
 
     async def api_update(self, request: Request) -> Response:
         """``PUT /api/artifacts/{id}``: the same body; adds a version, ``merge=true`` overlays."""
@@ -263,24 +375,29 @@ class WebRoutes:
         service = self._services.artifacts
         try:
             await self._spend(Bucket.WRITES, caller, route="api_update", artifact=artifact_id)
-            files, fields = await self._form(request)
-            if fields.client_ref is not None:
-                raise Invalid("client_ref applies to a create")
-            draft = VersionDraft(
-                files=files or None,
-                merge=fields.merge,
-                entry=fields.entry,
-                title=fields.title,
-                tags=fields.tags or None,
-                project=fields.project,
-                note=fields.note,
-                expires_at=None if fields.expires_in == NEVER else self._expiry(fields.expires_in),
-                clear_expiry=fields.expires_in == NEVER,
-            )
-            published = await _run(partial(service.update, artifact_id, draft, client=caller))
+            async with spooled(self._settings.data_dir) as spool:
+                files, fields, site = await self._form(request, spool)
+                if fields.client_ref is not None:
+                    raise Invalid("client_ref applies to a create")
+                draft = VersionDraft(
+                    files=files or None,
+                    merge=fields.merge,
+                    entry=fields.entry,
+                    title=fields.title,
+                    tags=fields.tags or None,
+                    project=fields.project,
+                    note=fields.note,
+                    expires_at=None
+                    if fields.expires_in == NEVER
+                    else self._expiry(fields.expires_in),
+                    clear_expiry=fields.expires_in == NEVER,
+                    fallback=fields.fallback,
+                )
+                extra = await _run(partial(_site, site, entry=fields.entry))
+                published = await _run(partial(service.update, artifact_id, draft, client=caller))
         except VitrineError as error:
             return problem(error)
-        return _published(published, status=200)
+        return _published(published, status=200, site=extra)
 
     async def api_list(self, request: Request) -> Response:
         """``GET /api/artifacts``: the same filters and page as ``artifact_list``."""
@@ -301,6 +418,118 @@ class WebRoutes:
             return problem(error)
         return JSONResponse(page.model_dump(mode="json"), headers=security_headers())
 
+    async def api_get(self, request: Request) -> Response:
+        """``GET /api/artifacts/{id}[?version=]``: as ``artifact_get``, with no URL in it."""
+        artifact_id = request.path_params["id"]
+        caller = await self._authenticate(
+            request, Scope.READ, route="api_get", artifact=artifact_id
+        )
+        if isinstance(caller, Response):
+            return caller
+        try:
+            await self._spend(Bucket.READS, caller, route="api_get", artifact=artifact_id)
+            version = _version(request.query_params.get("version"))
+            detail = await _run(partial(self._services.artifacts.get, artifact_id, version=version))
+        except VitrineError as error:
+            return problem(error)
+        return _json_response(detail.model_dump(mode="json"))
+
+    async def api_delete(self, request: Request) -> Response:
+        """``DELETE /api/artifacts/{id}``: as ``artifact_delete``; every link stops at once."""
+        artifact_id = request.path_params["id"]
+        caller = await self._authenticate(
+            request, Scope.WRITE, route="api_delete", artifact=artifact_id
+        )
+        if isinstance(caller, Response):
+            return caller
+        try:
+            await self._spend(Bucket.WRITES, caller, route="api_delete", artifact=artifact_id)
+            await _run(partial(self._services.artifacts.delete, artifact_id, client=caller))
+        except VitrineError as error:
+            return problem(error)
+        return _json_response({"deleted": artifact_id})
+
+    async def api_meta(self, request: Request) -> Response:
+        """``PATCH /api/artifacts/{id}``: as ``artifact_set_meta``; a visibility is refused."""
+        artifact_id = request.path_params["id"]
+        caller = await self._authenticate(
+            request, Scope.WRITE, route="api_meta", artifact=artifact_id
+        )
+        if isinstance(caller, Response):
+            return caller
+        try:
+            await self._spend(Bucket.WRITES, caller, route="api_meta", artifact=artifact_id)
+            body = await _json_body(request)
+            change = _model(_MetaBody, body)
+            artifact = await _run(
+                partial(
+                    self._services.artifacts.set_meta,
+                    artifact_id,
+                    change.to_change(),
+                    client=caller,
+                )
+            )
+        except VitrineError as error:
+            return problem(error)
+        return _json_response(
+            {
+                "id": artifact.id,
+                "title": artifact.title,
+                "tags": list(artifact.tags),
+                "project": artifact.project,
+            }
+        )
+
+    async def api_link(self, request: Request) -> Response:
+        """``POST /api/artifacts/{id}/links``: as ``artifact_link``; a passcode is shown once."""
+        artifact_id = request.path_params["id"]
+        caller = await self._authenticate(
+            request, Scope.SHARE, route="api_link", artifact=artifact_id
+        )
+        if isinstance(caller, Response):
+            return caller
+        try:
+            await self._spend(Bucket.LINKS, caller, route="api_link", artifact=artifact_id)
+            fields = _model(_LinkBody, await _json_body(request))
+            link = await _run(
+                partial(
+                    self._services.artifacts.link,
+                    artifact_id,
+                    client=caller,
+                    ttl=None if fields.ttl is None else requested_duration(fields.ttl),
+                    label=fields.label or "",
+                    passcode=fields.passcode,
+                )
+            )
+        except VitrineError as error:
+            return problem(error)
+        return _json_response(link.model_dump(mode="json"), status=201)
+
+    async def api_revoke(self, request: Request) -> Response:
+        """``POST /api/artifacts/{id}/revoke``: one link by ``lid``, or every private link."""
+        artifact_id = request.path_params["id"]
+        caller = await self._authenticate(
+            request, Scope.SHARE, route="api_revoke", artifact=artifact_id
+        )
+        if isinstance(caller, Response):
+            return caller
+        try:
+            await self._spend(Bucket.LINKS, caller, route="api_revoke", artifact=artifact_id)
+            fields = _model(_RevokeBody, await _json_body(request))
+            artifact = await _run(
+                partial(
+                    self._services.artifacts.revoke_links,
+                    artifact_id,
+                    client=caller,
+                    lid=fields.link,
+                )
+            )
+        except VitrineError as error:
+            return problem(error)
+        return _json_response(
+            {"id": artifact.id, "link_epoch": artifact.link_epoch, "link": fields.link}
+        )
+
     async def health(self, request: Request) -> Response:
         """``GET /healthz``: 200 while ``data_dir`` is writable, else 503."""
         staging = self._settings.data_dir / layout.TMP_DIR
@@ -308,6 +537,22 @@ class WebRoutes:
         return JSONResponse(
             {"ok": healthy}, status_code=200 if healthy else 503, headers=security_headers()
         )
+
+    async def static_asset(self, request: Request) -> Response:
+        """``GET /_vitrine/jsx/{bundle}/{file}``: the JSX renderer's vendored runtime (§ 7.1).
+
+        The content is vitrine's own and the URL names its version, so it is cached for good and
+        open to any origin: a rendered page runs in an opaque one, which makes its module loads
+        cross-origin.
+        """
+        found = JsxBundle.load().asset(request.path_params["path"])
+        if found is None:
+            return problem(NotFound(), view=True)
+        content, kind = found
+        headers = security_headers(IMMUTABLE)
+        headers["Access-Control-Allow-Origin"] = "*"
+        headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+        return Response(content, media_type=f"{kind}; charset=utf-8", headers=headers)
 
     async def _view(
         self, request: Request, prefix: Prefix, open_artifact: Callable[..., Opened]
@@ -335,17 +580,44 @@ class WebRoutes:
                     )
             raw = request.query_params.get("raw") == "1"
             download = request.query_params.get("download") == "1"
-            file = await _run(partial(service.locate, artifact, path, version=version))
-            render = None if raw or download else renderer_for(path, self._settings.renderers)
+            # A missing route of a site serves its fallback: a 404 page as 404, an SPA as 200.
+            status = HTTPStatus.OK
+            fallback = service.fallback_for(artifact, path, version=version)
+            depth = 0
+            try:
+                file = await _run(partial(service.locate, artifact, path, version=version))
+            except NotFound, Invalid:
+                # Invalid too: a client-side route may end in "/", which names no file.
+                if fallback is None:
+                    raise
+                file = await _run(partial(service.locate, artifact, fallback, version=version))
+                if PurePosixPath(fallback).name == NOT_FOUND_PAGE:
+                    status = HTTPStatus.NOT_FOUND
+                depth = path.count("/")
+                path = fallback
+            # An SPA's fallback is its page under another route, so it is a view of it too.
+            page_view = status is HTTPStatus.OK and path in {entry, fallback}
+            if depth and not (raw or download) and content_type(path) == HTML_TYPE:
+                # Served under a nested route, the page's relative URLs would resolve beside
+                # that route; a <base> sends them back to the site's root, where its files are.
+                page = await _run(partial(_rooted, file, depth))
+                if page is not None:
+                    self._served(request, prefix, opened, counted=page_view)
+                    return rendered(page, prefix=prefix, status=status)
+            render = (
+                None
+                if raw or download
+                else renderer_for(path, self._settings.renderers, jsx_cdn=self._settings.jsx_cdn)
+            )
             if render is not None and (await _run(file.stat)).st_size <= RENDER_LIMIT:
                 data = await _run(file.read_bytes)
-                page = rendered(await _run(partial(render, data, path)), prefix=prefix)
-                self._served(request, prefix, opened, counted=True)
-                return page
+                html = await _run(partial(render, data, path))
+                self._served(request, prefix, opened, counted=status is HTTPStatus.OK)
+                return rendered(html, prefix=prefix, status=status)
         except VitrineError as error:
             return problem(error, view=True)
-        self._served(request, prefix, opened, counted=path == entry)
-        return artifact_file(file, path, prefix=prefix, download=download)
+        self._served(request, prefix, opened, counted=page_view)
+        return artifact_file(file, path, prefix=prefix, download=download, status=status)
 
     def _served(self, request: Request, prefix: Prefix, opened: Opened, *, counted: bool) -> None:
         """Count a served file in the metrics, and a page view in the view log (§ 11.4).
@@ -426,36 +698,57 @@ class WebRoutes:
             path = ""
         return passcode, path
 
-    async def _form(self, request: Request) -> tuple[dict[str, bytes], _Fields]:
-        """Parse the multipart body; a body the parser refuses is a 400, not Starlette's own."""
-        try:
-            async with request.form(
-                max_files=PARSER_MAX_FILES, max_fields=PARSER_MAX_FIELDS
-            ) as form:
-                return await self._files(form), _fields(form)
-        except HTTPException as error:
-            raise Invalid(f"the body is not valid multipart: {error.detail}") from None
+    async def _form(
+        self, request: Request, spool: Spool
+    ) -> tuple[dict[str, Content], _Fields, Unpacked | None]:
+        """Stream the multipart body to the spool; with ``unpack=zip``, unpack its one archive."""
+        form = await spool.form(
+            request, max_files=self._settings.max_files, max_fields=PARSER_MAX_FIELDS
+        )
+        fields = _fields(form.fields)
+        if any(part.name != "file" for part in form.files):
+            raise Invalid("files are sent as parts named file")
+        if not fields.unpack:
+            return _files(form.files), fields, None
+        # Not the part's type: curl sends octet-stream and Windows x-zip-compressed. Whether it
+        # is a zip is decided by reading it.
+        if len(form.files) != 1:
+            raise Invalid("unpack=zip takes exactly one file part, the archive")
+        site = await _run(partial(self._unpack, form.files[0].content, spool))
+        return dict(site.files), fields, site
 
-    async def _files(self, form: FormData) -> dict[str, bytes]:
-        """The ``file`` parts, keyed by the relative path each part's filename carries."""
-        files: dict[str, bytes] = {}
-        for name, value in form.multi_items():
-            if name != "file":
-                continue
-            if not isinstance(value, UploadFile) or not value.filename:
-                raise Invalid("each file part needs a filename, which is its relative path")
-            if value.filename in files:
-                raise Invalid(f"{value.filename} is given twice")
-            files[value.filename] = await value.read()
-        if len(files) > self._settings.max_files:
-            raise TooLarge(f"a version holds at most {self._settings.max_files} files")
-        return files
+    def _unpack(self, archive: Spooled, spool: Spool) -> Unpacked:
+        """Inflate an archive into the spool under the version's own limits (spec § 7.3)."""
+        limits = ArchiveLimits(
+            max_files=self._settings.max_files,
+            max_bytes=self._settings.max_artifact,
+            max_ratio=self._settings.unpack_max_ratio,
+        )
+        return archives.unpack(archive.path, spool.path(), limits)
 
     def _expiry(self, expires_in: str | None) -> datetime | None:
         """The instant ``expires_in`` lands on, on the service's clock."""
         if expires_in is None:
             return None
         return self._services.artifacts.expiry(requested_duration(expires_in))
+
+
+def _rooted(file: Path, depth: int) -> str | None:
+    """A fallback page with a ``<base>`` ``depth`` levels up, or ``None`` to serve it as stored.
+
+    A page that sets its own ``<base>``, is not UTF-8 or is too large to hold is left alone.
+    """
+    if file.stat().st_size > RENDER_LIMIT:
+        return None
+    try:
+        html = file.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return None
+    if _BASE_TAG.search(html):
+        return None
+    tag = f'<base href="{"../" * depth}">'
+    head = _HEAD_TAG.search(html)
+    return html[: head.end()] + tag + html[head.end() :] if head else tag + html
 
 
 def build_routes(settings: Settings, services: Services) -> list[Route]:
@@ -492,14 +785,10 @@ def _pinned(reference: str) -> tuple[str, int | None]:
     return key, int(number)
 
 
-def _fields(form: FormData) -> _Fields:
-    """Read and bound the text fields; a file where text belongs is refused."""
+def _fields(items: list[tuple[str, str]]) -> _Fields:
+    """Read and bound the text fields; a field given twice is refused, ``tags`` aside."""
     values: dict[str, Any] = {"tags": []}
-    for name, value in form.multi_items():
-        if name == "file":
-            continue
-        if not isinstance(value, str):
-            raise Invalid(f"{name} must be a text field")
+    for name, value in items:
         if name == "tags":
             values["tags"].append(value)
         elif name in values:
@@ -512,9 +801,90 @@ def _fields(form: FormData) -> _Fields:
         raise Invalid(_describe(error)) from None
 
 
-def _published(published: PublishedArtifact, *, status: int) -> Response:
-    """``{id, url, version, expires_at}``: always a private link (spec § 7.1)."""
+def _files(parts: list[FilePart]) -> dict[str, Content]:
+    """The ``file`` parts, keyed by the relative path each part's filename carries."""
+    files: dict[str, Content] = {}
+    for part in parts:
+        if not part.filename:
+            raise Invalid("each file part needs a filename, which is its relative path")
+        if part.filename in files:
+            raise Invalid(f"{part.filename} is given twice")
+        files[part.filename] = part.content
+    return files
+
+
+def _unpack(value: str | None) -> bool:
+    """``unpack=zip``, the one archive format; anything else named is refused."""
+    if value is None:
+        return False
+    if value != UNPACK_ZIP:
+        raise Invalid(f"unpack takes {UNPACK_ZIP}")
+    return True
+
+
+def _site(site: Unpacked | None, *, entry: str | None = None) -> dict[str, Any] | None:
+    """What an unpacked archive adds to the result: its counts and its warnings."""
+    if site is None:
+        return None
+    return {
+        "files": len(site.files),
+        "skipped": site.skipped,
+        "warnings": list(archives.warnings(site.files, entry=entry)),
+    }
+
+
+async def _json_body(request: Request) -> dict[str, Any]:
+    """The JSON object a request carries, counted while it streams; an empty body is ``{}``."""
+    kind = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > JSON_BODY:
+            raise TooLarge(f"a JSON body is at most {JSON_BODY // 1024} KiB")
+    if not body:
+        return {}
+    if kind != JSON_TYPE:
+        raise UnsupportedType(f"send the body as {JSON_TYPE}")
+    try:
+        value = json.loads(body)
+    except ValueError:
+        raise Invalid("the body is not valid JSON") from None
+    if not isinstance(value, dict):
+        raise Invalid("the body must be a JSON object")
+    return value
+
+
+def _model[M: BaseModel](model: type[M], body: dict[str, Any]) -> M:
+    """Validate a JSON body, naming each refused field without echoing its value."""
+    try:
+        return model.model_validate(body)
+    except ValidationError as error:
+        raise Invalid(_describe(error)) from None
+
+
+def _version(value: str | None) -> int | None:
+    """``?version=n``: a positive number, or none for the current version."""
+    if value is None:
+        return None
+    if not (value.isascii() and value.isdigit() and len(value) <= MAX_PIN_DIGITS) or not int(value):
+        raise Invalid("version is a positive number")
+    return int(value)
+
+
+def _json_response(body: object, *, status: int = 200) -> Response:
+    """A JSON answer of the ``/api`` routes, with the headers every response carries."""
+    return JSONResponse(body, status_code=status, headers=security_headers())
+
+
+def _published(
+    published: PublishedArtifact, *, status: int, site: dict[str, Any] | None = None
+) -> Response:
+    """``{id, url, version, expires_at}``: always a private link (spec § 7.1).
+
+    An unpacked archive adds ``files``, ``skipped`` and ``warnings``.
+    """
     body = published.model_dump(mode="json", include={"id", "url", "version", "expires_at"})
+    body |= site or {}
     return JSONResponse(body, status_code=status, headers=security_headers())
 
 

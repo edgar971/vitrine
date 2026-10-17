@@ -47,11 +47,13 @@ src/mcp_vitrine/
   metrics.py      the optional metrics_port exporter
   domain/         models, errors, ids, media, paths, layout, clock — no framework, no I/O
   storage/        base (the Store protocol), filesystem (FileStore), schema, backup
-  services/       artifacts, links, passcodes, gate, audit, views, limits, tokens, metrics,
-                  maintenance, container
+  services/       artifacts, archives, links, passcodes, gate, audit, views, limits, tokens,
+                  metrics, maintenance, container
   mcp/            server, tools, resources, prompts, auth, deps, gate, middleware, policy, errors,
                   results, instructions
-  web/            routes (with ROUTE_ACCESS), responses, renderers, middleware
+  web/            routes (with ROUTE_ACCESS), responses, renderers, jsx, spool, middleware;
+                  static/jsx/, the vendored JSX runtime (`just vendor-jsx`)
+  client/         the `vitrine` command: api (httpx2 over /api), cli — HTTP only
 ```
 
 `app.py` is the composition root of both edges; `services/container.py` composes the services they
@@ -61,6 +63,7 @@ are built from.
 `config`.
 
 - `services`, `storage` and `domain` never import FastMCP or Starlette.
+- `client` imports no server layer: it is what a token holder runs, and it only speaks HTTP.
 - import-linter enforces this in CI.
 
 ## 4. MCP layer conventions

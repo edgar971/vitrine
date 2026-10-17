@@ -41,16 +41,18 @@ from mcp_vitrine.domain.models import (
     ArtifactDraft,
     ArtifactPage,
     ArtifactQuery,
+    Content,
     Facets,
     FileEntry,
     LinkRecord,
     ListSort,
     MetaChange,
+    Spooled,
     Version,
     VersionDraft,
     Visibility,
 )
-from mcp_vitrine.domain.paths import choose_entry, resolve_path
+from mcp_vitrine.domain.paths import choose_entry, resolve_path, validate_path
 from mcp_vitrine.storage.base import CHANGED, PUBLIC_UPDATE, RefClaim, StoreConfig
 
 REF_ID = "id"
@@ -105,13 +107,19 @@ class FileStore:
             with self._staged(draft.files) as stage:
                 at = self._clock.now()
                 entry = choose_entry(files=stage.paths, requested=draft.entry)
+                fallback = _fallback(stage.paths, draft.fallback)
                 self._clear_orphan(artifact_id, 1)
                 with self._writes_lock:
                     self._refuse_oversized(stage)
                     self._place(artifact_id, stage.path)
                     self._count(stage.new_bytes)
                 version = Version(
-                    n=1, at=at, note=draft.note, bytes=stage.size, files=len(stage.entries)
+                    n=1,
+                    at=at,
+                    note=draft.note,
+                    bytes=stage.size,
+                    files=len(stage.entries),
+                    fallback=fallback,
                 )
                 artifact = Artifact(
                     id=artifact_id,
@@ -126,6 +134,7 @@ class FileStore:
                     client_ref=draft.client_ref,
                     tags=draft.tags,
                     project=draft.project,
+                    fallback=fallback,
                     used_upload_nonces=_spend((), draft.upload_nonce),
                 )
                 self._write_meta(artifact)
@@ -159,6 +168,10 @@ class FileStore:
                 entry = choose_entry(
                     files=stage.paths, requested=draft.entry, previous=previous.entry
                 )
+                fallback = _fallback(
+                    stage.paths,
+                    previous.fallback if draft.fallback is None else draft.fallback or None,
+                )
                 number = previous.version + 1
                 self._clear_orphan(artifact_id, number)
                 with self._writes_lock:
@@ -166,7 +179,12 @@ class FileStore:
                     self._place(artifact_id, stage.path, number)
                     self._count(stage.new_bytes)
                 version = Version(
-                    n=number, at=at, note=draft.note, bytes=stage.size, files=len(stage.entries)
+                    n=number,
+                    at=at,
+                    note=draft.note,
+                    bytes=stage.size,
+                    files=len(stage.entries),
+                    fallback=fallback,
                 )
                 artifact = previous.model_copy(
                     update={
@@ -179,6 +197,7 @@ class FileStore:
                         if draft.project is None
                         else (draft.project or None),
                         "expires_at": _updated_expiry(previous, draft),
+                        "fallback": fallback,
                         "updated_at": at,
                         "used_upload_nonces": _spend(
                             previous.used_upload_nonces, draft.upload_nonce
@@ -484,7 +503,7 @@ class FileStore:
 
     @contextmanager
     def _staged(
-        self, files: Mapping[str, bytes], merge_from: Path | None = None
+        self, files: Mapping[str, Content], merge_from: Path | None = None
     ) -> Iterator[_Stage]:
         """Stage the files under ``tmp/``; the stage is discarded unless the block places it."""
         stage = self._config.root / layout.TMP_DIR / uuid.uuid4().hex
@@ -499,7 +518,11 @@ class FileStore:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 if target.exists():
                     target.unlink()
-                target.write_bytes(content)
+                if isinstance(content, Spooled):
+                    # A rename within data_dir: a streamed upload is never copied or read back.
+                    shutil.move(content.path, target)
+                else:
+                    target.write_bytes(content)
             entries = _scan_tree(stage)
             if not entries:
                 raise Invalid("a version needs at least one file")
@@ -733,6 +756,18 @@ def _remove(path: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
     else:
         path.unlink(missing_ok=True)
+
+
+def _fallback(files: tuple[str, ...], fallback: str | None) -> str | None:
+    """The fallback a version keeps; it must name one of its files (spec § 4.3)."""
+    if fallback is None:
+        return None
+    validate_path(fallback)
+    if fallback not in files:
+        raise Invalid(
+            f"fallback {fallback!r} is not in this version: name another, or clear it with ''"
+        )
+    return fallback
 
 
 def _updated_expiry(previous: Artifact, draft: VersionDraft) -> datetime | None:

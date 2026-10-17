@@ -16,7 +16,7 @@ from mcp_vitrine.web.renderers import (
 class DescribeTheMarkdownRenderer:
     class WhenTheTextIsCommonMark:
         def it_renders_it_as_html(self) -> None:
-            assert "<h1>Energy</h1>" in render_markdown(b"# Energy", "notes.md")
+            assert ">Energy</h1>" in render_markdown(b"# Energy", "notes.md")
 
     class WhenTheTextCarriesRawHtml:
         def it_escapes_the_script(self) -> None:
@@ -30,6 +30,43 @@ class DescribeTheMarkdownRenderer:
     class WhenALinkUsesAJavascriptUrl:
         def it_does_not_link_it(self) -> None:
             assert "href" not in render_markdown(b"[x](javascript:alert(1))", "notes.md")
+
+    class WhenATableIsWritten:
+        def it_renders_a_table(self) -> None:
+            page = render_markdown(b"| a | b |\n|---|---|\n| 1 | 2 |", "notes.md")
+            assert "<td>1</td>" in page
+
+    class WhenTextIsStruckThrough:
+        def it_renders_it_struck(self) -> None:
+            assert "<s>gone</s>" in render_markdown(b"~~gone~~", "notes.md")
+
+    class WhenATaskListIsWritten:
+        def it_renders_disabled_checkboxes(self) -> None:
+            page = render_markdown(b"- [x] done", "notes.md")
+            assert 'checked="checked" disabled="disabled" type="checkbox"' in page
+
+    class WhenAFootnoteIsWritten:
+        def it_links_the_note(self) -> None:
+            page = render_markdown(b"see[^1]\n\n[^1]: the note", "notes.md")
+            assert 'id="fn1"' in page
+
+    class WhenFrontMatterHasATitle:
+        def it_uses_it_as_the_page_title_escaped(self) -> None:
+            page = render_markdown(b'---\ntitle: "<Q3> report"\n---\n# x', "notes.md")
+            assert "<title>&lt;Q3&gt; report</title>" in page
+
+        def it_leaves_the_front_matter_out_of_the_page(self) -> None:
+            page = render_markdown(b"---\ntitle: Q3\nowner: finance\n---\n# x", "notes.md")
+            assert "finance" not in page
+
+    class WhenFrontMatterHasNoTitle:
+        def it_keeps_the_file_name(self) -> None:
+            page = render_markdown(b"---\nowner: finance\n---\n# x", "notes.md")
+            assert "<title>notes.md</title>" in page
+
+    class WhenAHeadingIsWritten:
+        def it_gets_an_anchor(self) -> None:
+            assert '<h2 id="next-steps">' in render_markdown(b"## Next steps", "notes.md")
 
     class WhenTheBytesAreNotUtf8:
         def it_still_renders(self) -> None:

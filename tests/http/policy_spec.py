@@ -79,7 +79,7 @@ class DescribeContentTypes:
 class DescribeTheRenderers:
     class WhenMarkdownIsViewed:
         def it_is_rendered_as_html(self, http: httpx2.Client, published: PublishedArtifact) -> None:
-            assert "<h1>Notes</h1>" in _get(http, published, "notes.md").text
+            assert '<h1 id="notes">Notes</h1>' in _get(http, published, "notes.md").text
 
         def it_escapes_raw_html(self, http: httpx2.Client, published: PublishedArtifact) -> None:
             assert "<script>" not in _get(http, published, "notes.md").text

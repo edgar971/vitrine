@@ -28,7 +28,7 @@ client-agnostic equivalent.
 | SQL metadata (SQLite or Postgres) | Not needed at the target scale, and a second source of truth to keep consistent with the files. Kept as a possible `Store` implementation. |
 | Client plugin only | Locks the feature to one agent framework |
 | MCP only | Binary files would travel as base64 inside tool arguments: the model has to emit every byte. Solved instead with `/api` uploads and signed upload URLs. |
-| Zip bundles | Brings in zip-bomb and zip-slip classes. Multipart multi-file upload covers the same need. |
+| Zip bundles | Brings in zip-bomb and zip-slip classes. Multipart multi-file upload covers the same need. Since reversed for agents that only have a shell: [ADR 0007](adr/0007-zip-archives-unpacked-server-side.md). |
 | **MCP server with a filesystem store, own auth, optional client plugins** | **Chosen** |
 
 ## 3. Platform facts

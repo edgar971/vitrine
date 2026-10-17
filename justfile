@@ -102,6 +102,11 @@ dev:
 wheel-test:
     scripts/wheel-test.sh
 
+# Needs Node.js and npm; the output is committed, and a spec checks it against its hashes.
+# Rebuild the JSX renderer's browser runtime from scripts/jsx/package-lock.json
+vendor-jsx:
+    uv run python scripts/vendor_jsx.py
+
 # Every commit since the last final release is conventional, and renders as the next section
 changelog range="":
     uvx git-cliff@2.14.2 {{ if range == "" { "--unreleased" } else { range } }} --strip all

@@ -37,6 +37,9 @@ way: `mcp`/`web` → `services` → `storage`/`domain`. `services`, `storage` an
 import FastMCP or Starlette, so the behaviour is testable without a server; import-linter
 enforces it.
 
+`src/mcp_vitrine/client/` is the `vitrine` command a token holder runs: it speaks only HTTP to
+`/api` and imports no server layer (an import-linter contract).
+
 `integrations/hermes/vitrine/` is the Hermes plugin. It is not part of the package: it runs on
 Hermes's interpreter (Python 3.11+), so it uses the standard library only, imports itself
 relatively, and has its own ruff target (`integrations/hermes/ruff.toml`). The specs import it as

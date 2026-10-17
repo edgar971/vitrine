@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 
 OCTET_STREAM = "application/octet-stream"
+PAGE_EXTENSIONS = frozenset({"", "html", "htm"})
 
 TEXT_TYPES: dict[str, str] = {
     "html": "text/html",
@@ -19,6 +20,9 @@ TEXT_TYPES: dict[str, str] = {
     "tsv": "text/tab-separated-values",
     "xml": "application/xml",
     "svg": "image/svg+xml",
+    # Served raw as text; the jsx renderer shows them rendered (spec § 7.2).
+    "jsx": "text/plain",
+    "tsx": "text/plain",
 }
 
 BINARY_TYPES: dict[str, str] = {
@@ -49,3 +53,14 @@ def content_type(path: str) -> str:
 def is_text(path: str) -> bool:
     """Whether ``path`` is one of the text types a resource may return (spec § 5.2)."""
     return PurePosixPath(path).suffix.removeprefix(".").lower() in TEXT_TYPES
+
+
+def is_asset(path: str) -> bool:
+    """Whether ``path`` names a file a page loads (a script, a style, an image), not a page.
+
+    A missing asset must fail loudly, so a site's fallback page is never served in its place.
+    """
+    extension = PurePosixPath(path).suffix.removeprefix(".").lower()
+    return extension not in PAGE_EXTENSIONS and (
+        extension in TEXT_TYPES or extension in BINARY_TYPES
+    )

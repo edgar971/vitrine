@@ -47,10 +47,16 @@ class DescribeTheRouteTable:
             ("POST", "/api/artifacts", 401),
             ("PUT", "/api/artifacts/k7m2q9x4tz3wbn6r", 401),
             ("GET", "/api/artifacts", 401),
+            ("GET", "/api/artifacts/k7m2q9x4tz3wbn6r", 401),
+            ("DELETE", "/api/artifacts/k7m2q9x4tz3wbn6r", 401),
+            ("PATCH", "/api/artifacts/k7m2q9x4tz3wbn6r", 401),
+            ("POST", "/api/artifacts/k7m2q9x4tz3wbn6r/links", 401),
+            ("POST", "/api/artifacts/k7m2q9x4tz3wbn6r/revoke", 401),
             ("POST", "/mcp", 401),
             ("GET", f"/s/{FORGED}/", 404),
             ("PUT", f"/u/{FORGED}?filename=a.pdf", 404),
             ("GET", "/a/k7m2q9x4tz3wbn6r/", 404),
+            ("GET", "/_vitrine/jsx/unknown/react.js", 404),
         ],
     )
     def it_refuses_a_caller_without_credentials(

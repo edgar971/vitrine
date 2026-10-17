@@ -37,7 +37,7 @@ ENV_PREFIX = "VITRINE_"
 # What MCP clients and the Hermes plugin read (README): a shell that runs both sets them.
 CLIENT_ENV_KEYS = frozenset({"VITRINE_URL", "VITRINE_TOKEN"})
 MIN_SECRET_BYTES = 32
-RENDERERS = frozenset({"md", "csv", "tsv", "json"})
+RENDERERS = frozenset({"md", "csv", "tsv", "json", "jsx"})
 # The longest lifetime a caller may ask for; past it a date stops being representable.
 MAX_REQUESTED_DURATION = timedelta(days=36500)
 
@@ -335,9 +335,15 @@ class Settings(BaseSettings):
         description="`confirm`, `disabled` or `unrestricted` (spec § 6)",
     )
     renderers: CommaSeparated = setting(
-        ["md", "csv", "tsv", "json"],
+        ["md", "csv", "tsv", "json", "jsx"],
         group=POLICY,
         description="Renderers to enable; `[]` serves everything raw",
+    )
+    jsx_cdn: str = setting(
+        "",
+        group=POLICY,
+        description="Where the `jsx` renderer loads packages it does not ship, e.g. "
+        "`https://esm.sh/`; empty: nothing is loaded from outside vitrine",
     )
 
     max_upload: ByteSize = setting(
@@ -348,6 +354,12 @@ class Settings(BaseSettings):
     )
     max_artifact: ByteSize = setting("100MB", group=LIMITS, description="Largest single version")
     max_files: int = setting(200, group=LIMITS, description="Files per version", ge=1)
+    unpack_max_ratio: int = setting(
+        200,
+        group=LIMITS,
+        description="Most an archive entry may inflate past its compressed size, once over 1 MiB",
+        ge=1,
+    )
     quota: ByteSize = setting(
         "10GB", group=LIMITS, description="Total storage; writes beyond it fail with 507"
     )
@@ -439,10 +451,18 @@ class Settings(BaseSettings):
     @field_validator("renderers")
     @classmethod
     def _renderers_are_built_in(cls, value: list[str]) -> list[str]:
-        """Only the renderers 0.1 ships exist (spec § 8.2)."""
+        """Only the renderers vitrine ships exist (spec § 8.2)."""
         unknown = sorted(set(value) - RENDERERS)
         if unknown:
             raise ValueError(f"unknown renderer(s): {', '.join(unknown)}")
+        return value
+
+    @field_validator("jsx_cdn")
+    @classmethod
+    def _jsx_cdn_is_a_base_url(cls, value: str) -> str:
+        """Empty, or an ``https`` URL ending in ``/`` that a package name is appended to."""
+        if value and (urlsplit(value).scheme != "https" or not value.endswith("/")):
+            raise ValueError("jsx_cdn is an https URL ending in /, or empty")
         return value
 
     @field_validator("log_level", mode="before")

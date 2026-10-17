@@ -124,6 +124,26 @@ What the agent can do:
 Approval goes through your MCP client's confirmation prompt. If the client cannot ask, or you
 decline or don't answer, the artifact stays private.
 
+## From a shell
+
+The package also installs `vitrine`, a client for laptops, CI jobs and agents with a shell. It
+speaks only to `/api`, with the URL and token in the environment (never as an argument):
+
+```bash
+export VITRINE_URL=http://localhost:8080 VITRINE_TOKEN=<token>
+url=$(uvx --from mcp-vitrine vitrine publish report.html)   # the URL alone goes to stdout
+vitrine publish dist/ --zip --fallback index.html          # a built single-page app
+vitrine publish report.html --update <id>                  # a new version, same link
+vitrine link <id> --label finance --passcode               # the passcode prints once, on stderr
+vitrine list --project q3 --all
+vitrine revoke <id> --link <lid>
+```
+
+Everything it publishes is private; there is no flag to make it public. An agent with only `curl`
+can still publish a built site through an upload URL: `artifact_upload_url(unpack="zip")` returns
+`zip -qr - . | curl --fail -T - <url>`. Build the site with relative asset paths
+(`vite build --base=./`).
+
 ## Beyond localhost
 
 Set `VITRINE_PUBLIC_BASE_URL` to the address people will open, for example

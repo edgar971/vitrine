@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -665,6 +666,18 @@ class DescribeTheRequestHash:
             assert request_hash(_draft()) != request_hash(
                 _draft(files={"other.html": b"<h1>hi</h1>"})
             )
+
+    class WhenTheFallbackChanges:
+        def it_differs(self) -> None:
+            assert request_hash(_draft()) != request_hash(_draft(fallback=ENTRY))
+
+    class WhenNoFallbackIsSet:
+        def it_matches_a_hash_recorded_before_fallbacks_existed(self) -> None:
+            # 0.1's formula, so a client_ref retry across the upgrade finds its first artifact.
+            before = hashlib.sha256(b"Energy, September|")
+            before.update(b"|" + ENTRY.encode() + b":")
+            before.update(hashlib.sha256(b"<h1>hi</h1>").hexdigest().encode())
+            assert request_hash(_draft()) == before.hexdigest()
 
 
 class DescribeLink:

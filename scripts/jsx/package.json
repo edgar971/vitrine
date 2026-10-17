@@ -1,0 +1,17 @@
+{
+  "name": "vitrine-jsx-vendor",
+  "private": true,
+  "version": "0.0.0",
+  "description": "The pinned browser runtime vitrine's JSX/TSX renderer serves; built by `just vendor-jsx`.",
+  "dependencies": {
+    "@tailwindcss/browser": "4.3.3",
+    "lucide-react": "1.50.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "recharts": "3.10.1",
+    "sucrase": "3.35.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

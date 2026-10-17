@@ -1,4 +1,4 @@
-"""The renderers of spec § 7.2: Markdown, CSV/TSV and JSON, each turned into escaped HTML.
+"""The renderers of spec § 7.2: Markdown, CSV/TSV, JSON and JSX/TSX, each turned into HTML.
 
 A renderer is ``(bytes, filename) -> html`` (design § 7). Its output is served under the same
 sandbox CSP as agent-written HTML, so escaping here is a second wall, not the only one.
@@ -11,10 +11,17 @@ import csv
 import io
 import json
 from collections.abc import Callable, Iterable
+from functools import partial
 from html import escape
 from pathlib import PurePosixPath
 
 from markdown_it import MarkdownIt
+from mdit_py_plugins.anchors import anchors_plugin
+from mdit_py_plugins.footnote import footnote_plugin
+from mdit_py_plugins.front_matter import front_matter_plugin
+from mdit_py_plugins.tasklists import tasklists_plugin
+
+from mcp_vitrine.web.jsx import render_jsx
 
 # Rendering is for reading, not for bulk data: a larger file is served as itself.
 RENDER_LIMIT = 2 * 1024 * 1024
@@ -28,13 +35,26 @@ _STYLE = (
     "@media (prefers-color-scheme:dark){body{background:#111;color:#eee}pre{background:#222}}"
 )
 
-# CommonMark with raw HTML off: an agent's <script> in Markdown is shown, never run (spec § 7.2).
-_MARKDOWN = MarkdownIt("commonmark", {"html": False})
+# What agents write is GitHub-flavoured, so the GFM extensions are on. Raw HTML stays off: an
+# agent's <script> in Markdown is shown, never run (spec § 7.2).
+_MARKDOWN = (
+    MarkdownIt("commonmark", {"html": False})
+    .enable(["table", "strikethrough"])
+    .use(tasklists_plugin)
+    .use(footnote_plugin)
+    .use(front_matter_plugin)
+    .use(anchors_plugin, max_level=6)
+)
+FRONT_MATTER = "front_matter"
 
 
 def render_markdown(data: bytes, filename: str) -> str:
-    """CommonMark with raw HTML disabled."""
-    return _page(filename, _MARKDOWN.render(_text(data)))
+    """GFM-style Markdown with raw HTML disabled; a front-matter ``title`` names the page."""
+    env: dict[str, object] = {}
+    tokens = _MARKDOWN.parse(_text(data), env)
+    matter = next((token.content for token in tokens if token.type == FRONT_MATTER), "")
+    body = _MARKDOWN.renderer.render(tokens, _MARKDOWN.options, env)
+    return _page(filename, body, title=_front_matter(matter).get("title"))
 
 
 def render_csv(data: bytes, filename: str) -> str:
@@ -60,13 +80,18 @@ RENDERERS: dict[str, Renderer] = {
     "csv": render_csv,
     "tsv": render_tsv,
     "json": render_json,
+    "jsx": render_jsx,
 }
+# The renderer each extension uses, by the name the operator enables it under.
+EXTENSIONS = {"md": "md", "csv": "csv", "tsv": "tsv", "json": "json", "jsx": "jsx", "tsx": "jsx"}
 
 
-def renderer_for(path: str, enabled: Iterable[str]) -> Renderer | None:
+def renderer_for(path: str, enabled: Iterable[str], *, jsx_cdn: str = "") -> Renderer | None:
     """The renderer for ``path``'s extension when the operator enabled it, else ``None``."""
-    extension = PurePosixPath(path).suffix.removeprefix(".").lower()
-    return RENDERERS.get(extension) if extension in set(enabled) else None
+    name = EXTENSIONS.get(PurePosixPath(path).suffix.removeprefix(".").lower())
+    if name is None or name not in set(enabled):
+        return None
+    return partial(render_jsx, cdn=jsx_cdn) if name == "jsx" else RENDERERS[name]
 
 
 def _text(data: bytes) -> str:
@@ -91,11 +116,31 @@ def _delimited(text: str, dialect: str) -> str:
     return "<table>" + "".join(lines) + "</table>"
 
 
-def _page(filename: str, body: str) -> str:
+def _front_matter(text: str) -> dict[str, str]:
+    """Simple ``key: value`` lines, quotes stripped; anything richer is ignored, not parsed.
+
+    Not YAML: the one field used is the title, and a YAML parser is more surface than it is worth.
+    """
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        key, colon, value = line.partition(":")
+        if colon and key.strip() and not key.startswith((" ", "\t", "-", "#")):
+            fields[key.strip().lower()] = _unquoted(value.strip())
+    return fields
+
+
+def _unquoted(value: str) -> str:
+    """A value without the one pair of matching quotes around it, if it has them."""
+    quoted = len(value) > 1 and value[0] == value[-1] and value[0] in "\"'"
+    return value[1:-1] if quoted else value
+
+
+def _page(filename: str, body: str, *, title: str | None = None) -> str:
     """A complete, self-contained document around rendered content."""
+    name = title or PurePosixPath(filename).name
     return (
         '<!doctype html><html><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        f"<title>{escape(PurePosixPath(filename).name)}</title><style>{_STYLE}</style></head>"
+        f"<title>{escape(name)}</title><style>{_STYLE}</style></head>"
         f"<body>{body}</body></html>"
     )

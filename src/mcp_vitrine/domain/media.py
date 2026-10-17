@@ -20,6 +20,9 @@ TEXT_TYPES: dict[str, str] = {
     "tsv": "text/tab-separated-values",
     "xml": "application/xml",
     "svg": "image/svg+xml",
+    # Served raw as text; the jsx renderer shows them rendered (spec § 7.2).
+    "jsx": "text/plain",
+    "tsx": "text/plain",
 }
 
 BINARY_TYPES: dict[str, str] = {

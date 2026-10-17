@@ -1,0 +1,3 @@
+# Built by `just vendor-jsx` and checked against its manifest by a spec; collapsed in reviews.
+src/mcp_vitrine/web/static/jsx/** linguist-generated=true
+scripts/jsx/package-lock.json linguist-generated=true

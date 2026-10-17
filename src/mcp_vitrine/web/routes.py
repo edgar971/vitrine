@@ -69,6 +69,7 @@ from mcp_vitrine.services.audit import DenialReason
 from mcp_vitrine.services.container import Services
 from mcp_vitrine.services.limits import Bucket
 from mcp_vitrine.services.views import is_unfurler
+from mcp_vitrine.web.jsx import STATIC_PREFIX, JsxBundle
 from mcp_vitrine.web.renderers import RENDER_LIMIT, renderer_for
 from mcp_vitrine.web.responses import (
     Prefix,
@@ -91,6 +92,7 @@ VERSION_MARK = "@"
 MAX_PIN_DIGITS = 9
 UNLOCK_FIELDS = 4
 NOT_FOUND_PAGE = "404.html"
+IMMUTABLE = "public, max-age=31536000, immutable"
 # A JSON body names a few short fields; anything near this is not a request vitrine understands.
 JSON_BODY = 16 * 1024
 JSON_TYPE = "application/json"
@@ -121,6 +123,7 @@ ROUTE_ACCESS: dict[str, Access] = {
     "api_link": Access.BEARER,
     "api_revoke": Access.BEARER,
     "health": Access.PUBLIC,
+    "static_asset": Access.PUBLIC,
     "mcp": Access.MCP,
 }
 
@@ -228,6 +231,12 @@ class WebRoutes:
                 "/api/artifacts/{id}/revoke", self.api_revoke, methods=["POST"], name="api_revoke"
             ),
             Route("/healthz", self.health, methods=["GET"], name="health"),
+            Route(
+                f"{STATIC_PREFIX}/{{path:path}}",
+                self.static_asset,
+                methods=["GET"],
+                name="static_asset",
+            ),
         ]
 
     async def view_public(self, request: Request) -> Response:
@@ -525,6 +534,22 @@ class WebRoutes:
             {"ok": healthy}, status_code=200 if healthy else 503, headers=security_headers()
         )
 
+    async def static_asset(self, request: Request) -> Response:
+        """``GET /_vitrine/jsx/{bundle}/{file}``: the JSX renderer's vendored runtime (§ 7.1).
+
+        The content is vitrine's own and the URL names its version, so it is cached for good and
+        open to any origin: a rendered page runs in an opaque one, which makes its module loads
+        cross-origin.
+        """
+        found = JsxBundle.load().asset(request.path_params["path"])
+        if found is None:
+            return problem(NotFound(), view=True)
+        content, kind = found
+        headers = security_headers(IMMUTABLE)
+        headers["Access-Control-Allow-Origin"] = "*"
+        headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+        return Response(content, media_type=f"{kind}; charset=utf-8", headers=headers)
+
     async def _view(
         self, request: Request, prefix: Prefix, open_artifact: Callable[..., Opened]
     ) -> Response:
@@ -565,7 +590,11 @@ class WebRoutes:
                 path = fallback
             # An SPA's fallback is its page under another route, so it is a view of it too.
             page_view = status is HTTPStatus.OK and path in {entry, artifact.fallback}
-            render = None if raw or download else renderer_for(path, self._settings.renderers)
+            render = (
+                None
+                if raw or download
+                else renderer_for(path, self._settings.renderers, jsx_cdn=self._settings.jsx_cdn)
+            )
             if render is not None and (await _run(file.stat)).st_size <= RENDER_LIMIT:
                 data = await _run(file.read_bytes)
                 html = await _run(partial(render, data, path))

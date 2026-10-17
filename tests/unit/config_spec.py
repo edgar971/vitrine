@@ -143,6 +143,23 @@ class DescribeThePublicCeiling:
             assert load_settings().public_ttl_max is None
 
 
+class DescribeTheJsxCdn:
+    class WhenItIsUnset:
+        def it_loads_nothing_from_outside(self) -> None:
+            assert load_settings().jsx_cdn == ""
+
+    class WhenItIsAnHttpsBase:
+        def it_keeps_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setenv("VITRINE_JSX_CDN", "https://esm.sh/")
+            assert load_settings().jsx_cdn == "https://esm.sh/"
+
+    @pytest.mark.parametrize("value", ["http://esm.sh/", "https://esm.sh", "esm.sh/"])
+    def it_refuses_anything_else(self, monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+        monkeypatch.setenv("VITRINE_JSX_CDN", value)
+        with pytest.raises(ConfigError):
+            load_settings()
+
+
 class DescribePrecedence:
     class WhenOnlyTheConfigFileSetsAKey:
         def it_takes_the_file_value(self, tmp_path: Path) -> None:

@@ -18,6 +18,12 @@ just check              # every gate CI runs
 --check`, `ruff check`, `mypy --strict`, `lint-imports`, `pytest` with the coverage gate, and
 `pip-audit`. `just test-browser` runs the Playwright specs, which the default run skips.
 
+The JSX renderer's browser runtime (React, Sucrase, Tailwind, recharts, lucide-react) is committed
+under `src/mcp_vitrine/web/static/jsx/`, built from the lockfile in `scripts/jsx/`. To change a
+version, edit `scripts/jsx/package.json`, refresh its lockfile with `npm install --ignore-scripts`
+there, and run `just vendor-jsx`, which needs Node.js and npm (nothing else does). A spec checks
+every vendored file against the hashes it records, so a hand edit fails CI.
+
 ## The rules that are not negotiable
 
 They come from [`AGENTS.md`](AGENTS.md) and [`docs/security.md`](docs/security.md) § 6:

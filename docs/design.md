@@ -51,7 +51,8 @@ src/mcp_vitrine/
                   metrics, maintenance, container
   mcp/            server, tools, resources, prompts, auth, deps, gate, middleware, policy, errors,
                   results, instructions
-  web/            routes (with ROUTE_ACCESS), responses, renderers, spool, middleware
+  web/            routes (with ROUTE_ACCESS), responses, renderers, jsx, spool, middleware;
+                  static/jsx/, the vendored JSX runtime (`just vendor-jsx`)
   client/         the `vitrine` command: api (httpx2 over /api), cli — HTTP only
 ```
 

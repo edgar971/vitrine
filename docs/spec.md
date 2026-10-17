@@ -407,6 +407,7 @@ cover them.
 | `PATCH /api/artifacts/{id}` | bearer, `vitrine:write` | JSON `{title?, tags?, add_tags?, remove_tags?, project?}`, as `artifact_set_meta`. Any other key, `visibility` included, is refused with 400. Returns `{id, title, tags, project}` |
 | `POST /api/artifacts/{id}/links` | bearer, `vitrine:share` | JSON `{ttl?, label?, passcode?}`, as `artifact_link`. Returns `201 {url, expires_at, lid, passcode}`; a generated passcode is in it once, a supplied one never. On a public artifact, the public URL |
 | `POST /api/artifacts/{id}/revoke` | bearer, `vitrine:share` | JSON `{link?}`: the one link with that `lid`, or every private link. Returns `{id, link_epoch, link}` |
+| `GET /_vitrine/jsx/{bundle}/{file}` | none | The `jsx` renderer's vendored runtime: only the files its manifest lists, as `text/javascript`, with `Cache-Control: public, max-age=31536000, immutable` (the bundle id is a digest of the files) and `Access-Control-Allow-Origin: *`, because a rendered page's opaque origin makes its module loads cross-origin. Anything else is 404. |
 | `GET /healthz` | none | `200 {"ok": true}` when `data_dir` is writable (probed through `data_dir/tmp`, where every write starts), else 503 |
 | `GET /metrics` on `metrics_port` | none | Prometheus text format, on a separate listener (§ 11) |
 
@@ -442,9 +443,11 @@ audited (§ 11.3).
 Set from an extension allowlist:
 
 ```
-html htm css js mjs json md txt csv tsv xml png jpg jpeg gif webp avif svg ico pdf
+html htm css js mjs json md txt csv tsv xml jsx tsx png jpg jpeg gif webp avif svg ico pdf
 mp4 webm mp3 wav ogg woff woff2
 ```
+
+`jsx` and `tsx` are served raw as `text/plain; charset=utf-8`.
 
 Anything else **MUST** be served as `application/octet-stream` with
 `Content-Disposition: attachment`.
@@ -456,8 +459,25 @@ Anything else **MUST** be served as `application/octet-stream` with
 | `md` | CommonMark with raw HTML disabled, plus tables, strikethrough, task lists (disabled checkboxes), footnotes and an `id` anchor on each heading. Front matter (`---` lines at the top) is not shown; a simple `title: …` line in it becomes the page title. |
 | `csv`, `tsv` | Table |
 | `json` | Indented, escaped |
+| `jsx`, `tsx` | A shell page that transpiles the file in the browser and mounts its default export (below) |
 
 All renderer output is HTML. A file over 2 MiB is served as itself rather than rendered.
+
+**JSX and TSX**
+
+- The file's default export is a React component; the entry rule applies unchanged, so an
+  `App.tsx` that is the only file opens rendered.
+- The shell inlines the source as an escaped JSON string; it is never fetched, since `/s/` does
+  not answer CORS. Every script it loads is vitrine's own, under `/_vitrine/jsx/{bundle}/`
+  (§ 7.1), pinned by Subresource Integrity: React and ReactDOM, the Sucrase transpiler (JSX and
+  TypeScript), Tailwind's browser build, `recharts` and `lucide-react`. Nothing leaves vitrine, so
+  it works offline and on `127.0.0.1`.
+- Those packages resolve through an import map. Any other bare specifier shows "package not
+  available offline: name", unless the operator set `jsx_cdn`: it then resolves to
+  `{jsx_cdn}{name}?external=react,react-dom`. A relative import shows a message: publish a
+  multi-file app as a built site.
+- A syntax error, a missing default export or a render that throws shows an escaped message,
+  never a blank page.
 
 **Headers on every artifact response**
 
@@ -609,7 +629,8 @@ settings and are ignored, so one shell can run the server and a client.
 | Key | Default | Description |
 |---|---|---|
 | `public_mode` | `confirm` | `confirm`, `disabled` or `unrestricted` (§ 6) |
-| `renderers` | `[md, csv, tsv, json]` | Renderers to enable; `[]` serves everything raw |
+| `renderers` | `[md, csv, tsv, json, jsx]` | Renderers to enable; `[]` serves everything raw |
+| `jsx_cdn` | empty | An `https` base URL ending in `/` (e.g. `https://esm.sh/`) the `jsx` renderer loads packages it does not ship from; empty: nothing is loaded from outside vitrine |
 
 **Limits**
 

@@ -37,7 +37,8 @@ The contract, including the accepted formats, is [spec § 8](spec.md#8-configura
 | Key | Environment | Default | Description |
 |---|---|---|---|
 | `public_mode` | `VITRINE_PUBLIC_MODE` | `confirm` | `confirm`, `disabled` or `unrestricted` (spec § 6) |
-| `renderers` | `VITRINE_RENDERERS` | `["md", "csv", "tsv", "json"]` | Renderers to enable; `[]` serves everything raw |
+| `renderers` | `VITRINE_RENDERERS` | `["md", "csv", "tsv", "json", "jsx"]` | Renderers to enable; `[]` serves everything raw |
+| `jsx_cdn` | `VITRINE_JSX_CDN` | `` | Where the `jsx` renderer loads packages it does not ship, e.g. `https://esm.sh/`; empty: nothing is loaded from outside vitrine |
 
 ## Limits
 

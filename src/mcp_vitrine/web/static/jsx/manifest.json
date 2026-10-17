@@ -1,0 +1,174 @@
+{
+  "bundle": "c76850dbf312",
+  "imports": {
+    "react": "react.js",
+    "react-dom": "react-dom.js",
+    "react-dom/client": "react-dom-client.js",
+    "react/jsx-runtime": "jsx-runtime.js",
+    "recharts": "recharts.js",
+    "lucide-react": "lucide-react.js"
+  },
+  "files": {
+    "LICENSES.txt": "sha384-/C9aUQC2mxXK/wgcnxBA7mDPB4QMWPgvANPRkynQRNcjJhWVr4HHwXWfBRkXtyav",
+    "jsx-runtime.js": "sha384-VtfvMsvFFtF/FpeunmztI3UseaDHHzeifP/LxOSv9BTsfP+dFmgkaIvBriEqcvRI",
+    "lucide-react.js": "sha384-oYGLPYa7fVduvh/IasZHX4Yel0henxJgKf55qBqjxj+7MMAY/Sz6vkoAuTh+NqpC",
+    "mount.js": "sha384-vl5kxYJTgkHcd9kDQ4XP/96sKlc74jGJUZo+n2AJve84zQZr2xPAat23LICkXpB5",
+    "react-dom-client.js": "sha384-YhatNZjJSoRzW8ImYdJIPGB+HhXUgtFQUm9kA819T1GEhOzQLamROL2jB01CpGOw",
+    "react-dom.js": "sha384-L97hgXC8dC3W9emAG02PgcRCfyu/sMAvphnSub3R1QoS3q1JB3sg6sNiv2KM3xcf",
+    "react.js": "sha384-so8Z8YqaczYxZAqLrJDfSe/ScGxsS+Fz1FAhjaFWXFyHa/UujGH4sZaepkdX/Gmp",
+    "recharts.js": "sha384-Oqg+KbvOZGeyPJO6jArV9XFrbSOy2Wox7QLXRW9Ruc7PYt7HKn5PZRjPkWDgVfnE",
+    "runtime.js": "sha384-Rn/9x2LyvD2aAow2G01BQ5zI7q9s2YX/6KC/Ri6AaQBQT82pymWdcGLEH7lXJEyq",
+    "tailwind.js": "sha384-2ql948lIdLcGEE0/qxNiudyTjgauA3RDJERu5xW75kFCvSl5a9odyQYCb6tEjnmB",
+    "transpiler.js": "sha384-jGKQxzjAne6KEVg+kY+NgV1gSqsGFojH1TPM3496xbQB8qjua+5DHUgaZcsjuTGF"
+  },
+  "packages": {
+    "@jridgewell/gen-mapping": {
+      "version": "0.3.13",
+      "license": "MIT"
+    },
+    "@jridgewell/resolve-uri": {
+      "version": "3.1.2",
+      "license": "MIT"
+    },
+    "@jridgewell/sourcemap-codec": {
+      "version": "1.6.0",
+      "license": "MIT"
+    },
+    "@jridgewell/trace-mapping": {
+      "version": "0.3.31",
+      "license": "MIT"
+    },
+    "@reduxjs/toolkit": {
+      "version": "2.13.0",
+      "license": "MIT"
+    },
+    "@tailwindcss/browser": {
+      "version": "4.3.3",
+      "license": "MIT"
+    },
+    "clsx": {
+      "version": "2.1.1",
+      "license": "MIT"
+    },
+    "d3-array": {
+      "version": "3.2.4",
+      "license": "ISC"
+    },
+    "d3-color": {
+      "version": "3.1.0",
+      "license": "ISC"
+    },
+    "d3-format": {
+      "version": "3.1.2",
+      "license": "ISC"
+    },
+    "d3-interpolate": {
+      "version": "3.0.1",
+      "license": "ISC"
+    },
+    "d3-path": {
+      "version": "3.1.0",
+      "license": "ISC"
+    },
+    "d3-scale": {
+      "version": "4.0.2",
+      "license": "ISC"
+    },
+    "d3-shape": {
+      "version": "3.2.0",
+      "license": "ISC"
+    },
+    "d3-time": {
+      "version": "3.1.0",
+      "license": "ISC"
+    },
+    "d3-time-format": {
+      "version": "4.1.0",
+      "license": "ISC"
+    },
+    "decimal.js-light": {
+      "version": "2.5.1",
+      "license": "MIT"
+    },
+    "es-toolkit": {
+      "version": "1.52.0",
+      "license": "MIT"
+    },
+    "eventemitter3": {
+      "version": "5.0.4",
+      "license": "MIT"
+    },
+    "immer": {
+      "version": "11.1.21",
+      "license": "MIT"
+    },
+    "internmap": {
+      "version": "2.0.3",
+      "license": "ISC"
+    },
+    "lines-and-columns": {
+      "version": "1.2.4",
+      "license": "MIT"
+    },
+    "lucide-react": {
+      "version": "1.50.0",
+      "license": "ISC"
+    },
+    "react": {
+      "version": "19.3.1",
+      "license": "MIT"
+    },
+    "react-dom": {
+      "version": "19.3.1",
+      "license": "MIT"
+    },
+    "react-is": {
+      "version": "19.3.1",
+      "license": "MIT"
+    },
+    "react-redux": {
+      "version": "9.3.0",
+      "license": "MIT"
+    },
+    "recharts": {
+      "version": "3.10.1",
+      "license": "MIT"
+    },
+    "redux": {
+      "version": "5.0.1",
+      "license": "MIT"
+    },
+    "redux-thunk": {
+      "version": "3.1.0",
+      "license": "MIT"
+    },
+    "reselect": {
+      "version": "5.2.0",
+      "license": "MIT"
+    },
+    "scheduler": {
+      "version": "0.28.0",
+      "license": "MIT"
+    },
+    "sucrase": {
+      "version": "3.35.1",
+      "license": "MIT"
+    },
+    "tiny-invariant": {
+      "version": "1.3.3",
+      "license": "MIT"
+    },
+    "ts-interface-checker": {
+      "version": "0.1.13",
+      "license": "Apache-2.0"
+    },
+    "use-sync-external-store": {
+      "version": "1.7.0",
+      "license": "MIT"
+    },
+    "victory-vendor": {
+      "version": "37.3.6",
+      "license": "MIT AND ISC"
+    }
+  }
+}

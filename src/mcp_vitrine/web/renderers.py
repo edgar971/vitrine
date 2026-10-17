@@ -1,4 +1,4 @@
-"""The renderers of spec § 7.2: Markdown, CSV/TSV and JSON, each turned into escaped HTML.
+"""The renderers of spec § 7.2: Markdown, CSV/TSV, JSON and JSX/TSX, each turned into HTML.
 
 A renderer is ``(bytes, filename) -> html`` (design § 7). Its output is served under the same
 sandbox CSP as agent-written HTML, so escaping here is a second wall, not the only one.
@@ -11,6 +11,7 @@ import csv
 import io
 import json
 from collections.abc import Callable, Iterable
+from functools import partial
 from html import escape
 from pathlib import PurePosixPath
 
@@ -19,6 +20,8 @@ from mdit_py_plugins.anchors import anchors_plugin
 from mdit_py_plugins.footnote import footnote_plugin
 from mdit_py_plugins.front_matter import front_matter_plugin
 from mdit_py_plugins.tasklists import tasklists_plugin
+
+from mcp_vitrine.web.jsx import render_jsx
 
 # Rendering is for reading, not for bulk data: a larger file is served as itself.
 RENDER_LIMIT = 2 * 1024 * 1024
@@ -77,13 +80,18 @@ RENDERERS: dict[str, Renderer] = {
     "csv": render_csv,
     "tsv": render_tsv,
     "json": render_json,
+    "jsx": render_jsx,
 }
+# The renderer each extension uses, by the name the operator enables it under.
+EXTENSIONS = {"md": "md", "csv": "csv", "tsv": "tsv", "json": "json", "jsx": "jsx", "tsx": "jsx"}
 
 
-def renderer_for(path: str, enabled: Iterable[str]) -> Renderer | None:
+def renderer_for(path: str, enabled: Iterable[str], *, jsx_cdn: str = "") -> Renderer | None:
     """The renderer for ``path``'s extension when the operator enabled it, else ``None``."""
-    extension = PurePosixPath(path).suffix.removeprefix(".").lower()
-    return RENDERERS.get(extension) if extension in set(enabled) else None
+    name = EXTENSIONS.get(PurePosixPath(path).suffix.removeprefix(".").lower())
+    if name is None or name not in set(enabled):
+        return None
+    return partial(render_jsx, cdn=jsx_cdn) if name == "jsx" else RENDERERS[name]
 
 
 def _text(data: bytes) -> str:

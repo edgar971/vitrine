@@ -56,6 +56,7 @@ class DescribeTheRouteTable:
             ("GET", f"/s/{FORGED}/", 404),
             ("PUT", f"/u/{FORGED}?filename=a.pdf", 404),
             ("GET", "/a/k7m2q9x4tz3wbn6r/", 404),
+            ("GET", "/_vitrine/jsx/unknown/react.js", 404),
         ],
     )
     def it_refuses_a_caller_without_credentials(

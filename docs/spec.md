@@ -102,8 +102,10 @@ body = "view"     "|" id "|" expires_unix "|" link_epoch [ "|" lid ]   (private 
   "entry": "index.html",
   "version": 2,
   "versions": [
-    {"n": 1, "at": "2026-10-15T10:00:00Z", "note": "", "bytes": 18234, "files": 1},
-    {"n": 2, "at": "2026-10-15T10:20:00Z", "note": "added chart", "bytes": 90211, "files": 2}
+    {"n": 1, "at": "2026-10-15T10:00:00Z", "note": "", "bytes": 18234, "files": 1,
+     "fallback": null},
+    {"n": 2, "at": "2026-10-15T10:20:00Z", "note": "added chart", "bytes": 90211, "files": 2,
+     "fallback": null}
   ],
   "created_at": "2026-10-15T10:00:00Z",
   "updated_at": "2026-10-15T10:20:00Z",
@@ -155,8 +157,15 @@ The same rule **MUST** apply when writing and when resolving a request path.
 
 - `fallback` is `null` or a path in the version, set on create or update (`""` clears it). It
   **MUST** name a file in the version; an update whose files no longer hold it is refused.
-- A request for a path the version does not hold serves the fallback instead: with status 404
-  when the file is named `404.html`, else with 200 (a single-page app's `index.html`).
+- A request for a path the version does not hold, or for one no file could have (a client-side
+  route ending in `/`), serves the fallback instead: with status 404 when the file is named
+  `404.html`, else with 200 (a single-page app's `index.html`).
+- Each version keeps the fallback it was written with (`versions[].fallback`), and a pinned view
+  (`@n`) uses that version's, so a later update never changes how an earlier version answers.
+- Served under a nested route (`/s/{sig}/users/42`), an HTML fallback gets a
+  `<base href="../">` with one `../` per level, placed first in its `<head>`, so its relative
+  URLs resolve at the site's root. A page that sets its own `<base>`, is not UTF-8 or is over the
+  render limit is served as stored. This is the only change vitrine makes to agent HTML.
 - It **MUST NOT** apply to a path with an asset extension (any allowlisted type other than
   `html` and `htm`), so a missing script or image fails loudly instead of answering with HTML.
 
@@ -399,7 +408,7 @@ cover them.
 | `GET /s/{sig}/[{path}]`, `GET /s/{sig}@{n}/[{path}]` | view or unlocked signature | The same for any artifact the signature names. A recorded link with a passcode answers **401 with the unlock form** instead, for every path: vitrine's own page, with no title, no file names and nothing from the artifact. |
 | `POST /s/{sig}[@{n}]/unlock` | view signature | Form fields `passcode` and `path`. A right passcode answers `303` to `/s/{usig}[@{n}]/{path}` (an `unlocked` signature, § 3), so relative assets resolve under it. A wrong one answers 401 with the form and one generic message. A link without a passcode answers `303` to itself. A bad signature or an expired artifact answers as the `GET` would (404 / 410). The body is at most 1 KiB, and a foreign `Origin` (`null` included) is refused with 403. |
 | `PUT /u/{sig}?filename=[&title=]`, `PUT /u/{sig}?unpack=zip[&title=][&merge=true]` | upload signature, from a client still configured with `vitrine:write` | Raw body. Creates the pre-allocated private artifact (`201`), or adds a version that overlays the file on the current ones (`200`). With `unpack=zip` the body is a zip archive (§ 7.3) whose files are the version: they replace the current ones unless `merge=true`, and the result adds `{files, skipped, warnings}`. Single use. Returns `{id, url, version, expires_at}`. A public target returns 403 (§ 4.4). An URL whose client was removed from `VITRINE_TOKENS`, or lost `vitrine:write`, returns 404. |
-| `POST /api/artifacts` | bearer, `vitrine:write` | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?` (repeatable, or comma-separated), `project?` (empty means none), `note?`, `fallback?`, `client_ref?`, `unpack?`. With `unpack=zip`, the body holds exactly one `file` part of type `application/zip`, unpacked as § 7.3, and the result adds `{files, skipped, warnings}`. Any other field is refused with 400, so there is no way to send a visibility. Returns `201 {id, url, version, expires_at}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
+| `POST /api/artifacts` | bearer, `vitrine:write` | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?` (repeatable, or comma-separated), `project?` (empty means none), `note?`, `fallback?`, `client_ref?`, `unpack?`. With `unpack=zip`, the body holds exactly one `file` part, the archive (whatever type the client labels it; it is read as a zip), unpacked as § 7.3, and the result adds `{files, skipped, warnings}`. Any other field is refused with 400, so there is no way to send a visibility. Returns `201 {id, url, version, expires_at}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
 | `PUT /api/artifacts/{id}` | bearer, `vitrine:write` | Same body, without `client_ref`; a form of fields alone may be `application/x-www-form-urlencoded`. Adds a version; `merge=true` overlays; `expires_in=never` clears the expiry; an empty `project` or `fallback` clears it. A public target returns 403 (§ 4.4). |
 | `GET /api/artifacts` | bearer, `vitrine:read` | Same query parameters and page as `artifact_list` |
 | `GET /api/artifacts/{id}[?version=]` | bearer, `vitrine:read` | As `artifact_get`: metadata, one version's files, live links (never their URL or hash) and views |
@@ -515,9 +524,9 @@ Every rule fails the **whole** upload, and nothing is written:
 
 | Rule | Status |
 |---|---|
-| Entries (directories aside) ≤ `max_files` | 413 |
-| Inflated **while streaming**, the running total ≤ `max_artifact`; declared sizes are not trusted, and one that lies fails its CRC | 413 / 400 |
-| Each entry inflates at most `unpack_max_ratio` times its compressed size, once past 1 MiB | 413 |
+| Entries kept (directories and skipped junk aside) ≤ `max_files` | 413 |
+| Inflated **while streaming**, the running total ≤ `max_artifact`; declared sizes are not trusted while inflating, and an entry whose declared size or CRC does not match what it inflated to is refused | 413 / 400 |
+| Each entry inflates at most `unpack_max_ratio` times the compressed bytes actually read for it (not its declared compressed size), once past 1 MiB | 413 |
 | Only `stored` and `deflate`; encrypted entries refused | 400 |
 | The § 4.3 path rule, after stripping one top-level folder every entry shares (`..`, absolute and backslash names refused) | 400 |
 | A symlink entry (`S_IFLNK` in the external attributes) refused | 400 |
@@ -528,7 +537,7 @@ Every rule fails the **whole** upload, and nothing is written:
   `skipped`. A nested archive is stored as a file, never unpacked.
 - Quota applies to the inflated bytes.
 - A site built for `/` requests `/assets/x.js`, outside the artifact; vitrine does not rewrite agent
-  HTML. `warnings` names an entry HTML that holds `src="/` or `href="/`: build with
+  HTML (but for the fallback's `<base>`, § 4.3). `warnings` names an entry HTML that holds `src="/` or `href="/`: build with
   `vite build --base=./`, `"homepage": "."` for Create React App, or `assetPrefix: "./"` for a
   static Next export.
 

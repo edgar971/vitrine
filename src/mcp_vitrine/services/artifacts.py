@@ -528,14 +528,23 @@ class ArtifactService:
         except Invalid:
             raise NotFound() from None
 
-    def fallback_for(self, artifact: ArtifactMeta, path: str) -> str | None:
+    def fallback_for(
+        self, artifact: ArtifactMeta, path: str, *, version: int | None = None
+    ) -> str | None:
         """The file a missing ``path`` serves instead, or ``None`` (spec § 4.3).
 
+        A pinned version answers with the fallback it was published with, not the current one.
         Never for an asset: a missing script answering with HTML would fail quietly.
         """
-        if artifact.fallback is None or is_asset(path):
+        if version is None or version == artifact.version:
+            fallback = artifact.fallback
+        else:
+            fallback = next(
+                (kept.fallback for kept in artifact.versions if kept.n == version), None
+            )
+        if fallback is None or is_asset(path):
             return None
-        return artifact.fallback
+        return fallback
 
     def locate(self, artifact: ArtifactMeta, path: str, *, version: int | None = None) -> Path:
         """The file a view streams, from the version the artifact was opened at."""
@@ -818,8 +827,10 @@ def request_hash(draft: ArtifactDraft) -> str:
     digest.update(draft.title.encode())
     digest.update(b"|")
     digest.update((draft.entry or "").encode())
-    digest.update(b"|")
-    digest.update((draft.fallback or "").encode())
+    # Only when set, so a retry of a create made before fallbacks existed still matches.
+    if draft.fallback:
+        digest.update(b"|fallback:")
+        digest.update(draft.fallback.encode())
     for path in sorted(draft.files):
         digest.update(b"|")
         digest.update(path.encode())

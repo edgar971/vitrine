@@ -16,7 +16,7 @@ from datetime import datetime
 from enum import StrEnum
 from functools import partial
 from http import HTTPStatus
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Any
 from urllib.parse import quote
 
@@ -47,6 +47,7 @@ from mcp_vitrine.domain.errors import (
     VitrineError,
 )
 from mcp_vitrine.domain.ids import CLIENT_REF_MAX, LID_PATTERN, is_valid_id
+from mcp_vitrine.domain.media import content_type
 from mcp_vitrine.domain.models import (
     PROJECT_PATTERN,
     TAG_LIMIT,
@@ -63,7 +64,7 @@ from mcp_vitrine.domain.models import (
 )
 from mcp_vitrine.domain.paths import MAX_PATH_BYTES, validate_path
 from mcp_vitrine.services import archives
-from mcp_vitrine.services.archives import UNPACK_ZIP, ZIP_TYPE, ArchiveLimits, Unpacked
+from mcp_vitrine.services.archives import UNPACK_ZIP, ArchiveLimits, Unpacked
 from mcp_vitrine.services.artifacts import Opened
 from mcp_vitrine.services.audit import DenialReason
 from mcp_vitrine.services.container import Services
@@ -92,6 +93,9 @@ VERSION_MARK = "@"
 MAX_PIN_DIGITS = 9
 UNLOCK_FIELDS = 4
 NOT_FOUND_PAGE = "404.html"
+HTML_TYPE = "text/html"
+_HEAD_TAG = re.compile(r"<head\b[^>]*>", re.IGNORECASE)
+_BASE_TAG = re.compile(r"<base\b", re.IGNORECASE)
 IMMUTABLE = "public, max-age=31536000, immutable"
 # A JSON body names a few short fields; anything near this is not a request vitrine understands.
 JSON_BODY = 16 * 1024
@@ -578,18 +582,28 @@ class WebRoutes:
             download = request.query_params.get("download") == "1"
             # A missing route of a site serves its fallback: a 404 page as 404, an SPA as 200.
             status = HTTPStatus.OK
+            fallback = service.fallback_for(artifact, path, version=version)
+            depth = 0
             try:
                 file = await _run(partial(service.locate, artifact, path, version=version))
-            except NotFound:
-                fallback = service.fallback_for(artifact, path)
+            except NotFound, Invalid:
+                # Invalid too: a client-side route may end in "/", which names no file.
                 if fallback is None:
                     raise
                 file = await _run(partial(service.locate, artifact, fallback, version=version))
                 if PurePosixPath(fallback).name == NOT_FOUND_PAGE:
                     status = HTTPStatus.NOT_FOUND
+                depth = path.count("/")
                 path = fallback
             # An SPA's fallback is its page under another route, so it is a view of it too.
-            page_view = status is HTTPStatus.OK and path in {entry, artifact.fallback}
+            page_view = status is HTTPStatus.OK and path in {entry, fallback}
+            if depth and not (raw or download) and content_type(path) == HTML_TYPE:
+                # Served under a nested route, the page's relative URLs would resolve beside
+                # that route; a <base> sends them back to the site's root, where its files are.
+                page = await _run(partial(_rooted, file, depth))
+                if page is not None:
+                    self._served(request, prefix, opened, counted=page_view)
+                    return rendered(page, prefix=prefix, status=status)
             render = (
                 None
                 if raw or download
@@ -696,8 +710,10 @@ class WebRoutes:
             raise Invalid("files are sent as parts named file")
         if not fields.unpack:
             return _files(form.files), fields, None
-        if len(form.files) != 1 or form.files[0].content_type != ZIP_TYPE:
-            raise Invalid(f"unpack=zip takes exactly one file part of type {ZIP_TYPE}")
+        # Not the part's type: curl sends octet-stream and Windows x-zip-compressed. Whether it
+        # is a zip is decided by reading it.
+        if len(form.files) != 1:
+            raise Invalid("unpack=zip takes exactly one file part, the archive")
         site = await _run(partial(self._unpack, form.files[0].content, spool))
         return dict(site.files), fields, site
 
@@ -715,6 +731,24 @@ class WebRoutes:
         if expires_in is None:
             return None
         return self._services.artifacts.expiry(requested_duration(expires_in))
+
+
+def _rooted(file: Path, depth: int) -> str | None:
+    """A fallback page with a ``<base>`` ``depth`` levels up, or ``None`` to serve it as stored.
+
+    A page that sets its own ``<base>``, is not UTF-8 or is too large to hold is left alone.
+    """
+    if file.stat().st_size > RENDER_LIMIT:
+        return None
+    try:
+        html = file.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return None
+    if _BASE_TAG.search(html):
+        return None
+    tag = f'<base href="{"../" * depth}">'
+    head = _HEAD_TAG.search(html)
+    return html[: head.end()] + tag + html[head.end() :] if head else tag + html
 
 
 def build_routes(settings: Settings, services: Services) -> list[Route]:

@@ -42,6 +42,8 @@ agent that has only `curl`, and a client-side check is not a control the server 
 - New parsing surface, owned by `services/archives.py` and specified control by control in
   `tests/unit/services/archives_spec.py`, with a fuzz that no path escapes the version root.
 - A site built for `/` requests `/assets/x.js`, outside `/a/{id}/`. vitrine does not rewrite agent
-  HTML; the result warns, and the docs say how to build with a relative base.
+  HTML; the result warns, and the docs say how to build with a relative base. The one exception
+  is a fallback page served under a nested route, which gets a `<base>` back to the site's root,
+  because otherwise that relative base would resolve beside the route (spec § 4.3).
 - A site's `fallback` (an SPA's `index.html` or a `404.html`) answers missing routes, never a
   missing asset.

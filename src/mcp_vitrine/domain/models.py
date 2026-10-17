@@ -98,6 +98,8 @@ class Version(BaseModel):
     note: str = ""
     bytes: int = Field(ge=0)
     files: int = Field(ge=0)
+    # Each version keeps its own, so a pinned link serves the site as it was published.
+    fallback: str | None = None
 
 
 class FileEntry(BaseModel):
@@ -351,9 +353,10 @@ class MetaChange(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     title: Annotated[str, Field(max_length=TITLE_MAX)] | None = None
-    tags: tuple[Tag, ...] | None = None
-    add_tags: tuple[Tag, ...] = ()
-    remove_tags: tuple[Tag, ...] = ()
+    # Bounded here, not only in the tool's schema, so PATCH /api takes the same lists.
+    tags: Annotated[tuple[Tag, ...], Field(max_length=TAG_LIMIT)] | None = None
+    add_tags: Annotated[tuple[Tag, ...], Field(max_length=TAG_LIMIT)] = ()
+    remove_tags: Annotated[tuple[Tag, ...], Field(max_length=TAG_LIMIT)] = ()
     # ``""`` clears the project.
     project: Project | Literal[""] | None = None
 

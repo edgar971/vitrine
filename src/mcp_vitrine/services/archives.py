@@ -9,19 +9,26 @@ from __future__ import annotations
 
 import re
 import stat
+import struct
 import uuid
 import zipfile
 import zlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 from mcp_vitrine.domain.errors import Invalid, TooLarge
 from mcp_vitrine.domain.models import Content, Spooled
 from mcp_vitrine.domain.paths import FORBIDDEN_CHARACTERS, choose_entry, validate_path
 
-ZIP_TYPE = "application/zip"
 UNPACK_ZIP = "zip"
+UNREADABLE = "the body is not a readable zip archive"
+# A local file header (APPNOTE 4.3.7): its signature, its fixed size, and where the file name
+# and extra field lengths sit in it, two little-endian shorts.
+LOCAL_HEADER = b"PK\x03\x04"
+LOCAL_HEADER_SIZE = 30
+LOCAL_LENGTHS_AT = 26
 CHUNK = 64 * 1024
 # A ratio only means something once an entry is large enough to hurt.
 RATIO_FLOOR = 1024 * 1024
@@ -64,15 +71,16 @@ def unpack(archive: Path, into: Path, limits: ArchiveLimits) -> Unpacked:
     try:
         with zipfile.ZipFile(archive) as reader:
             members, skipped = _members(reader.infolist(), limits)
-            into.mkdir(parents=True, exist_ok=True)
-            files: dict[str, Content] = {}
-            total = 0
+        into.mkdir(parents=True, exist_ok=True)
+        files: dict[str, Content] = {}
+        total = 0
+        with archive.open("rb") as raw:
             for path, info in members:
                 target = into / uuid.uuid4().hex
-                total += _inflate(reader, info, target, limits, already=total)
+                total += _inflate(raw, info, target, limits, already=total)
                 files[path] = Spooled(target)
-    except zipfile.BadZipFile, zipfile.LargeZipFile, EOFError, zlib.error:
-        raise Invalid("the body is not a readable zip archive") from None
+    except zipfile.BadZipFile, zipfile.LargeZipFile, EOFError, zlib.error, struct.error:
+        raise Invalid(UNREADABLE) from None
     return Unpacked(files=files, skipped=skipped)
 
 
@@ -98,8 +106,6 @@ def _members(
 ) -> tuple[list[tuple[str, zipfile.ZipInfo]], int]:
     """The entries to unpack, by their path in the version, and the count of skipped junk."""
     entries = [info for info in infos if not info.is_dir()]
-    if len(entries) > limits.max_files:
-        raise TooLarge(f"a version holds at most {limits.max_files} files")
     for info in entries:
         _refuse_entry(info)
     names = [info.filename for info in entries]
@@ -119,6 +125,9 @@ def _members(
         members.append((path, info))
     if not members:
         raise Invalid("the archive holds no files")
+    # After the junk is dropped: a Finder zip doubles its entries with __MACOSX/ copies.
+    if len(members) > limits.max_files:
+        raise TooLarge(f"a version holds at most {limits.max_files} files")
     return members, skipped
 
 
@@ -157,24 +166,63 @@ def _is_junk(path: str) -> bool:
 
 
 def _inflate(
-    reader: zipfile.ZipFile,
+    archive: BinaryIO,
     info: zipfile.ZipInfo,
     target: Path,
     limits: ArchiveLimits,
     *,
     already: int,
 ) -> int:
-    """Inflate one entry, counting every byte; the header's sizes are never believed."""
-    written = 0
-    compressed = max(info.compress_size, 1)
-    with reader.open(info) as source, target.open("xb") as sink:
-        while chunk := source.read(CHUNK):
+    """Inflate one entry from the raw archive, counting every byte in and out.
+
+    Neither size the archive declares is believed while inflating: the ratio is taken over the
+    compressed bytes actually consumed, so claiming a larger compressed size cannot hide a bomb.
+    The declared size and CRC are checked once the stream ends, so a header that lies fails.
+    """
+    archive.seek(_data_offset(archive, info))
+    deflated = info.compress_type == zipfile.ZIP_DEFLATED
+    decompressor = zlib.decompressobj(-zlib.MAX_WBITS)
+    written = consumed = crc = 0
+    pending = b""
+    with target.open("xb") as sink:
+        while not (decompressor.eof if deflated else consumed >= info.compress_size):
+            if not pending:
+                wanted = CHUNK if deflated else min(CHUNK, info.compress_size - consumed)
+                pending = archive.read(wanted)
+                if not pending:
+                    raise Invalid(UNREADABLE)
+            if deflated:
+                fed = len(pending)
+                # Bounded output per call: 64 KB of deflate can inflate to 64 MB.
+                chunk = decompressor.decompress(pending, CHUNK)
+                pending = decompressor.unconsumed_tail
+                consumed += fed - len(pending) - len(decompressor.unused_data)
+            else:
+                chunk, pending = pending, b""
+                consumed += len(chunk)
             written += len(chunk)
             if already + written > limits.max_bytes:
                 raise TooLarge(f"the archive inflates past {limits.max_bytes} bytes")
-            if written > RATIO_FLOOR and written / compressed > limits.max_ratio:
+            if written > RATIO_FLOOR and written / max(consumed, 1) > limits.max_ratio:
                 raise TooLarge(
                     f"{info.filename} inflates more than {limits.max_ratio} times its size"
                 )
+            crc = zlib.crc32(chunk, crc)
             sink.write(chunk)
+    if written != info.file_size or crc != info.CRC:
+        raise Invalid(UNREADABLE)
     return written
+
+
+def _data_offset(archive: BinaryIO, info: zipfile.ZipInfo) -> int:
+    """Where an entry's data starts: after its local header and that header's own lengths.
+
+    The local name and extra field may differ in length from the central directory's copy.
+    """
+    start: int = info.header_offset
+    archive.seek(start)
+    header = archive.read(LOCAL_HEADER_SIZE)
+    if len(header) != LOCAL_HEADER_SIZE or header[:4] != LOCAL_HEADER:
+        raise Invalid(UNREADABLE)
+    lengths: tuple[int, int] = struct.unpack_from("<HH", header, LOCAL_LENGTHS_AT)
+    return start + LOCAL_HEADER_SIZE + sum(lengths)

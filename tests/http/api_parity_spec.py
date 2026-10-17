@@ -8,6 +8,7 @@ import httpx2
 import pytest
 
 from mcp_vitrine.domain.models import (
+    TAG_LIMIT,
     ArtifactDraft,
     GateDecision,
     PublishedArtifact,
@@ -261,6 +262,14 @@ class DescribePatchingOverTheApi:
             self, http: httpx2.Client, bearer: dict[str, str], artifact: PublishedArtifact
         ) -> None:
             response = http.patch(f"/api/artifacts/{artifact.id}", json=["x"], headers=bearer)
+            assert response.status_code == 400
+
+    class WhenATagListIsLongerThanTheToolAllows:
+        def it_answers_400(
+            self, http: httpx2.Client, bearer: dict[str, str], artifact: PublishedArtifact
+        ) -> None:
+            body = {"remove_tags": [f"t{n}" for n in range(TAG_LIMIT + 1)]}
+            response = http.patch(f"/api/artifacts/{artifact.id}", json=body, headers=bearer)
             assert response.status_code == 400
 
     class WhenTheBodyIsOver16KiB:

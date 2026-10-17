@@ -137,6 +137,11 @@ class DescribeUnpackingAnArchive:
         with pytest.raises(Invalid):
             unpack(source, into, LIMITS)
 
+    def it_does_not_count_skipped_junk_against_max_files(self, tmp_path: Path, into: Path) -> None:
+        site = {f"f{n}.html": b"x" for n in range(LIMITS.max_files)}
+        junk = {f"__MACOSX/._f{n}.html": b"j" for n in range(LIMITS.max_files)}
+        assert len(unpack(archive(tmp_path / "a.zip", site | junk), into, LIMITS).files) == 20
+
     def it_refuses_more_entries_than_max_files(self, tmp_path: Path, into: Path) -> None:
         entries = {f"f{n}.html": b"x" for n in range(LIMITS.max_files + 1)}
         with pytest.raises(TooLarge):
@@ -153,6 +158,19 @@ class DescribeUnpackingAnArchive:
 
     def it_refuses_an_entry_past_the_ratio(self, tmp_path: Path, into: Path) -> None:
         bomb = archive(tmp_path / "a.zip", {"index.html": b"\0" * (3 * 1024 * 1024)})
+        with pytest.raises(TooLarge):
+            unpack(bomb, into, LIMITS)
+
+    def it_refuses_an_entry_past_the_ratio_whatever_size_it_claims(
+        self, tmp_path: Path, into: Path
+    ) -> None:
+        bomb = archive(tmp_path / "a.zip", {"index.html": b"\0" * (3 * 1024 * 1024)})
+        data = bytearray(bomb.read_bytes())
+        # The central directory's compressed size (offset 20 of its header) claims 1 MB, so a
+        # ratio taken from it would be 3, far under the limit; the real stream is ~3 KB.
+        central = data.rindex(b"PK\x01\x02")
+        data[central + 20 : central + 24] = struct.pack("<I", 1024 * 1024)
+        bomb.write_bytes(bytes(data))
         with pytest.raises(TooLarge):
             unpack(bomb, into, LIMITS)
 

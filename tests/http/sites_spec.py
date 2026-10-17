@@ -158,11 +158,24 @@ class DescribeCreatingASiteOverTheApi:
             detail = services.artifacts.get(response.json()["id"])
             assert (len(detail.files), detail.artifact.fallback) == (3, "404.html")
 
-    class WhenThePartIsNotAZipType:
+    class WhenTheClientLabelsTheZipAnotherType:
+        @pytest.mark.parametrize(
+            "kind", ["application/octet-stream", "application/x-zip-compressed"]
+        )
+        def it_unpacks_it(self, http: httpx2.Client, bearer: dict[str, str], kind: str) -> None:
+            response = http.post(
+                "/api/artifacts",
+                files=[("file", ("site.zip", zipped(SITE), kind))],
+                data={"title": "App", "unpack": "zip"},
+                headers=bearer,
+            )
+            assert response.status_code == 201
+
+    class WhenThePartIsNotAZip:
         def it_answers_400(self, http: httpx2.Client, bearer: dict[str, str]) -> None:
             response = http.post(
                 "/api/artifacts",
-                files=[("file", ("site.zip", zipped(SITE), "application/octet-stream"))],
+                files=[("file", ("site.zip", b"<h1>not a zip</h1>", "application/zip"))],
                 data={"title": "App", "unpack": "zip"},
                 headers=bearer,
             )
@@ -206,7 +219,7 @@ class DescribeTheFallback:
     def it_serves_the_fallback_for_a_missing_route(
         self, http: httpx2.Client, site: PublishedArtifact
     ) -> None:
-        response = http.get(f"/s/{signature(site.url)}/settings/profile")
+        response = http.get(f"/s/{signature(site.url)}/settings")
         assert (response.status_code, response.text) == (200, "<h1>app</h1>")
 
     def it_keeps_the_sandbox_on_the_fallback(
@@ -224,6 +237,65 @@ class DescribeTheFallback:
         self, http: httpx2.Client, site: PublishedArtifact
     ) -> None:
         assert http.get(f"/s/{signature(site.url)}/app.js").text == "1"
+
+    class WhenTheRouteIsNested:
+        def it_sends_relative_urls_back_to_the_site_root(
+            self, http: httpx2.Client, site: PublishedArtifact
+        ) -> None:
+            response = http.get(f"/s/{signature(site.url)}/users/42/edit")
+            assert response.text == '<base href="../../"><h1>app</h1>'
+
+        def it_puts_the_base_inside_the_head(self, http: httpx2.Client, services: Services) -> None:
+            published = services.artifacts.create(
+                ArtifactDraft(
+                    title="App",
+                    files={"index.html": b"<html><head><title>a</title></head></html>"},
+                    fallback="index.html",
+                ),
+                client=CLIENT,
+            )
+            response = http.get(f"/s/{signature(published.url)}/users/42")
+            assert response.text.startswith('<html><head><base href="../">')
+
+        def it_keeps_the_sandbox(self, http: httpx2.Client, site: PublishedArtifact) -> None:
+            response = http.get(f"/s/{signature(site.url)}/users/42")
+            assert "sandbox" in response.headers["content-security-policy"]
+
+    class WhenThePageSetsItsOwnBase:
+        def it_serves_the_page_as_stored(self, http: httpx2.Client, services: Services) -> None:
+            page = b'<head><base href="/app/"></head>'
+            published = services.artifacts.create(
+                ArtifactDraft(title="App", files={"index.html": page}, fallback="index.html"),
+                client=CLIENT,
+            )
+            assert http.get(f"/s/{signature(published.url)}/users/42").content == page
+
+    class WhenTheRouteEndsInASlash:
+        def it_serves_the_fallback(self, http: httpx2.Client, site: PublishedArtifact) -> None:
+            assert http.get(f"/s/{signature(site.url)}/settings/").status_code == 200
+
+    class WhenAPinnedVersionHadNoFallback:
+        def it_answers_404_as_it_did_then(
+            self, http: httpx2.Client, bearer: dict[str, str], services: Services
+        ) -> None:
+            published = services.artifacts.create(
+                ArtifactDraft(title="App", files={"index.html": b"<h1>v1</h1>"}), client=CLIENT
+            )
+            http.put(
+                f"/api/artifacts/{published.id}", data={"fallback": "index.html"}, headers=bearer
+            )
+            assert http.get(f"/s/{signature(published.url)}@1/nope").status_code == 404
+
+        def it_serves_the_fallback_on_the_version_that_set_it(
+            self, http: httpx2.Client, bearer: dict[str, str], services: Services
+        ) -> None:
+            published = services.artifacts.create(
+                ArtifactDraft(title="App", files={"index.html": b"<h1>v1</h1>"}), client=CLIENT
+            )
+            http.put(
+                f"/api/artifacts/{published.id}", data={"fallback": "index.html"}, headers=bearer
+            )
+            assert http.get(f"/s/{signature(published.url)}@2/nope").status_code == 200
 
     class WhenTheFallbackIsA404Page:
         def it_answers_404_with_the_page(

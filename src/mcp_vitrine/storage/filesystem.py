@@ -114,7 +114,12 @@ class FileStore:
                     self._place(artifact_id, stage.path)
                     self._count(stage.new_bytes)
                 version = Version(
-                    n=1, at=at, note=draft.note, bytes=stage.size, files=len(stage.entries)
+                    n=1,
+                    at=at,
+                    note=draft.note,
+                    bytes=stage.size,
+                    files=len(stage.entries),
+                    fallback=fallback,
                 )
                 artifact = Artifact(
                     id=artifact_id,
@@ -174,7 +179,12 @@ class FileStore:
                     self._place(artifact_id, stage.path, number)
                     self._count(stage.new_bytes)
                 version = Version(
-                    n=number, at=at, note=draft.note, bytes=stage.size, files=len(stage.entries)
+                    n=number,
+                    at=at,
+                    note=draft.note,
+                    bytes=stage.size,
+                    files=len(stage.entries),
+                    fallback=fallback,
                 )
                 artifact = previous.model_copy(
                     update={

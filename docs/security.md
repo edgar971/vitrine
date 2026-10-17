@@ -62,6 +62,8 @@ cell names the closest one. **Spec** rows came after the spike, where the code i
 | T21 | A client's token is removed, but what it minted still works | Upload URLs carry their client and are refused once that client is gone or lost `vitrine:write`. Private view links are bearer capabilities: they last until they expire (`link_ttl_max`), their record is revoked (`artifact_revoke_links(link=lid)`), `artifact_revoke_links` or a visibility change bumps the epoch, or the secret is rotated. | Upload refusal in `tests/http/public_updates_spec.py`; view links are a documented limit |
 | T22 | A forwarded or unfurled private link exposes the artifact: it is pasted into a ticket, or a chat unfurler (Slackbot, Discordbot, …) fetches it and shows a preview to the whole channel | A recorded link can carry a **passcode**: without it, every path answers 401 with vitrine's own form, which shows nothing from the artifact, so a preview shows the form. The passcode is kept as an scrypt hash only, never logged or audited; it is given to the user apart from the link. Wrong passcodes are rate-limited per link and address (`rate_unlock`) and per link (`rate_unlock_link`), and an empty bucket answers 429 without checking. The unlock `POST` refuses a foreign `Origin` and bodies over 1 KiB. One link can be revoked on its own, which ends its unlocked URLs too. | Validated (`tests/http/passcodes_spec.py`, `tests/browser/sandbox_spec.py`) |
 | T23 | View counts track viewers | Counts and ids only: a visitor is an HMAC under a key that lives in memory and changes every hour, and only the number of distinct values is written. No IP address or user agent reaches disk. Views are not audit events, the files hold no content, months older than `view_retention` are deleted, and `view_log = off` records nothing. | Validated (`tests/http/view_counts_spec.py`, `tests/unit/services/views_spec.py`) |
+| T24 | A dashboard session is stolen, forged, brute-forced or ridden by another page | The dashboard is off until `admin_password` is set, and it never takes a client token as a login, so an agent cannot sign in. The password is kept as an scrypt hash, in the environment only; wrong ones spend `rate_admin_login` per address. The session is an HMAC under a key derived from `secret` and the password hash (changing either ends every session), in a cookie that is `HttpOnly`, `SameSite=Strict`, scoped to `/_admin` and `Secure` over https; plain http is refused off loopback. Every change must carry vitrine's `Origin`, a same-origin `Sec-Fetch-Site` where sent, and the session's CSRF token. Agent HTML runs in an opaque origin, so its requests never carry the cookie. The dashboard only narrows: no route of it makes anything public. | Validated (`tests/http/dashboard_spec.py`, `tests/browser/dashboard_spec.py`, `tests/unit/services/admin_spec.py`) |
+| T25 | Stored XSS through agent-written metadata: a title, tag, project, note, label or file name that is script runs in the operator's unsandboxed dashboard | Every agent-written string is escaped where the page is built (`web/pages.py`). The dashboard's CSP is `default-src 'self'` with no inline script or style, so an injection that slipped through would still not run. Artifact content is never shown in the dashboard; "Open" mints a private link in a new tab, under the sandbox (T7), and `Cross-Origin-Opener-Policy: same-origin` keeps that tab from reaching back. | Validated (`tests/http/dashboard_spec.py`) |
 
 ## 4. Secrets
 
@@ -69,9 +71,10 @@ cell names the closest one. **Spec** rows came after the spike, where the code i
 |---|---|---|
 | `VITRINE_SECRET` | Server environment (a Kubernetes Secret, a Docker secret, …) | At least 32 bytes. `mcp-vitrine secret new` generates one. |
 | `VITRINE_TOKENS` | Server environment | **Hashes only**, so a leak of the server's configuration reveals no usable token |
+| `VITRINE_ADMIN_PASSWORD` | Server environment | The dashboard password's scrypt hash, never the password; `mcp-vitrine admin password` reads the password from the terminal and prints the line. Never give the password to an agent. |
 | Plaintext tokens | Each client's own configuration | `mcp-vitrine token new <name>` prints the token and its hash line, and writes nothing to disk |
 
-`mcp-vitrine config check` prints the effective configuration with both secrets redacted.
+`mcp-vitrine config check` prints the effective configuration with every secret redacted.
 
 ## 5. Residual risks
 
@@ -121,6 +124,10 @@ cell names the closest one. **Spec** rows came after the spike, where the code i
     (T23).
 18. **Compensation:** undoing a change whose audit failed never undoes a change that landed beside
     it (`tests/unit/services/link_records_spec.py`).
+19. **Dashboard:** a client token never signs in, a foreign `Origin` or a missing CSRF token
+    changes nothing, wrong passwords are rate-limited, agent-written metadata is escaped, an
+    artifact page never sends the session cookie, and no dashboard action makes anything public
+    (T24, T25).
 
 ### Invariants and the specs that hold them
 
@@ -148,6 +155,7 @@ fails when a listed spec is renamed or removed, so this table cannot point at no
 | One path to public | `tests/http/public_updates_spec.py::DescribeUpdatingAPublicArtifactOverTheApi::it_writes_nothing` |
 | One path to public | `tests/http/public_updates_spec.py::DescribeUploadingToAPublicArtifact::it_writes_nothing` |
 | One path to public | `tests/integrations/hermes_spec.py::DescribeRegistering::it_offers_no_way_to_ask_for_visibility` |
+| One path to public | `tests/http/dashboard_spec.py::DescribeTheDashboard::it_offers_no_action_that_makes_an_artifact_public` |
 | Every HTTP route authenticates itself | `tests/http/routes_spec.py::DescribeTheRouteTable::WhenTheAppIsAssembled::it_classifies_every_route` |
 | Every HTTP route authenticates itself | `tests/http/routes_spec.py::DescribeTheRouteTable::it_refuses_a_caller_without_credentials` |
 | Signed link segments and tokens are never logged | `tests/http/logs_spec.py::DescribeTheAccessLog::WhenASignedLinkIsViewed::it_never_logs_the_signature` |

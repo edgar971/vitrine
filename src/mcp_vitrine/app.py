@@ -23,6 +23,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from mcp_vitrine.config import Settings
 from mcp_vitrine.mcp.server import build_mcp
 from mcp_vitrine.services.container import Services
+from mcp_vitrine.web.dashboard import FORM_BODY
 from mcp_vitrine.web.middleware import (
     MCP_PATH,
     SIGNED_PATH,
@@ -31,6 +32,7 @@ from mcp_vitrine.web.middleware import (
     BodyLimit,
     HostGuard,
 )
+from mcp_vitrine.web.pages import ADMIN_PREFIX
 from mcp_vitrine.web.routes import build_routes
 
 UPLOAD_PREFIXES = ("/api", "/u")
@@ -54,9 +56,11 @@ def build_app(settings: Settings, services: Services | None = None) -> Starlette
     # vitrine's HostGuard covers every route, /mcp included; FastMCP's own guard would allow only
     # the bind address, which is wrong behind a proxy.
     mcp_app = build_mcp(settings, services).http_app(path=MCP_PATH, host_origin_protection=False)
-    limits = {MCP_PATH: settings.max_mcp_body, SIGNED_PATH: UNLOCK_BODY} | dict.fromkeys(
-        UPLOAD_PREFIXES, settings.max_upload
-    )
+    limits = {
+        MCP_PATH: settings.max_mcp_body,
+        SIGNED_PATH: UNLOCK_BODY,
+        ADMIN_PREFIX: FORM_BODY,
+    } | dict.fromkeys(UPLOAD_PREFIXES, settings.max_upload)
     return Starlette(
         routes=[*build_routes(settings, services), Route(MCP_PATH, mcp_app, name="mcp")],
         middleware=[

@@ -25,11 +25,11 @@ easy to extend.**
 ├────────────────────────────┬──────────────────────────────┬──────────────────┤
 │ mcp/  (FastMCP)            │ web/  (Starlette routes)     │ metrics (own     │
 │  LocalProviders: tools,    │  /a /s views, /api, /u,      │ port, optional)  │
-│  resources, prompts;       │  /healthz                    │                  │
+│  resources, prompts;       │  /healthz, /_admin dashboard │                  │
 │  instructions; scopes      │                              │                  │
 ├────────────────────────────┴──────────────────────────────┴──────────────────┤
 │ services/  ArtifactService · LinkService · PublicGate · AuditLog · Limits ·  │
-│            ViewLog · passcodes                                               │
+│            ViewLog · passcodes · AdminLogin                                  │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ domain/  models, errors      storage/  Store protocol → FileStore → data_dir │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -41,18 +41,20 @@ easy to extend.**
 src/mcp_vitrine/
   app.py          build_app(settings) → one Starlette app: web routes + /mcp, one middleware
                   stack, and the lifespan that sweeps at startup and every sweep_interval
-  cli.py          serve · config check · token · secret · sweep · audit · views · backup · migrate
+  cli.py          serve · config check · token · secret · admin · sweep · audit · views · backup ·
+                  migrate
   config.py       Settings (pydantic-settings): env + TOML, secrets env-only
   reference.py    docs/configuration.md, rendered from Settings (`just docs`)
   metrics.py      the optional metrics_port exporter
   domain/         models, errors, ids, media, paths, layout, clock — no framework, no I/O
   storage/        base (the Store protocol), filesystem (FileStore), schema, backup
   services/       artifacts, archives, links, passcodes, gate, audit, views, limits, tokens,
-                  metrics, maintenance, container
+                  admin, metrics, maintenance, container
   mcp/            server, tools, resources, prompts, auth, deps, gate, middleware, policy, errors,
                   results, instructions
-  web/            routes (with ROUTE_ACCESS), responses, renderers, jsx, spool, middleware;
-                  static/jsx/, the vendored JSX runtime (`just vendor-jsx`)
+  web/            routes (with ROUTE_ACCESS), responses, renderers, jsx, spool, middleware,
+                  dashboard and pages (the /_admin dashboard); static/jsx/, the vendored JSX
+                  runtime (`just vendor-jsx`); static/admin/, the dashboard's CSS, fonts, script
   client/         the `vitrine` command: api (httpx2 over /api), cli — HTTP only
 ```
 
@@ -207,6 +209,26 @@ go public      client ─ artifact_set_visibility ─► gate.confirm(mode, ctx)
 view           browser ─ GET /s/<sig>/x ─► guard ─► verify ─► resolve ─► headers + body
 ```
 
+**The dashboard** (spec § 7.6, ADR 0008) is a third edge beside MCP and `/api`, and the thinnest:
+`web/dashboard.py` checks the caller, calls the same `ArtifactService` methods the tools call
+with `client = "@admin"`, and hands the result to `web/pages.py`, which builds the HTML and is
+the one place agent-written text is escaped. Login and sessions live in `services/admin.py`
+(`AdminLogin`), framework-free like every service, so they are tested without a server.
+
+```
+GET  page   cookie ─► AdminLogin.session ─► service read ─► pages.* ─► HTML (CSP, no-store)
+            no session ─► 303 /_admin/login
+POST change Origin + Sec-Fetch-Site ─► session ─► CSRF field ─► service write (audited @admin)
+            ─► 303 back with ?done=<notice>; a new link is the one answer that is a page (201)
+POST login  Origin ─► rate_admin_login ─► scrypt verify (off the loop) ─► Set-Cookie, refund
+```
+
+The pages are f-strings through one escaping helper rather than a template engine: there are
+six of them, no layout inheritance is needed, and a reader can see every place a value lands.
+The only script is `static/admin/copy.js`, the Copy button for a link shown once; without it the
+field is still there to select. The fonts ship in the wheel because the CSP allows no other
+origin.
+
 ## 7. Extension points
 
 | Seam | Ships with | Natural next |
@@ -214,7 +236,7 @@ view           browser ─ GET /s/<sig>/x ─► guard ─► verify ─► reso
 | `Store` protocol | `FileStore` | S3-compatible store for more than one replica |
 | Renderer `(bytes, filename) -> html` | md, csv, tsv, json | ipynb, mermaid, diff |
 | `TokenVerifier` | hashed static tokens with scopes | OAuth/OIDC (`RemoteAuthProvider`) for multi-user deployments |
-| `PublicGate` | elicitation, two eras | Out-of-band approval link for clients without elicitation |
+| `PublicGate` | elicitation, two eras | Out-of-band approval in the dashboard (phase 2) for clients without elicitation |
 | Providers | `tools`, `resources`, `prompts` | Further prompts as their own provider |
 | Audit sink | `audit/*.jsonl` files | Also forward events to syslog or a webhook |
 

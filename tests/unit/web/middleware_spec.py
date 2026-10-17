@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mcp_vitrine.web.middleware import hostname, redact
+from mcp_vitrine.web.middleware import hostname, origin_of, redact
 
 SIGNATURE = "dmlld3xrN20.MAC"
 
@@ -41,3 +41,13 @@ class DescribeHostname:
     class WhenTheHostEndsInADot:
         def it_drops_the_dot(self) -> None:
             assert hostname("vitrine.example.com.") == "vitrine.example.com"
+
+
+class DescribeTheOriginOfAUrl:
+    class WhenItNamesTheDefaultPort:
+        def it_is_the_origin_without_it(self) -> None:
+            assert origin_of("https://Vitrine.example.com:443") == "https://vitrine.example.com"
+
+    class WhenItNamesAnotherPort:
+        def it_keeps_the_port(self) -> None:
+            assert origin_of("http://127.0.0.1:8080/") == "http://127.0.0.1:8080"

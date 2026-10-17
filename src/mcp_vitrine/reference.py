@@ -79,6 +79,8 @@ def _default(field: FieldInfo) -> str:
     value = field.default
     if value is PydanticUndefined:
         return "required"
+    if value is None:
+        return "unset"
     if isinstance(value, Enum):
         value = value.value
     if isinstance(value, list):

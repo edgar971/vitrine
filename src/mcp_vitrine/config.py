@@ -31,7 +31,7 @@ from mcp_vitrine.domain import layout
 from mcp_vitrine.domain.errors import ConfigError, Invalid
 from mcp_vitrine.domain.models import PublicMode, Scope
 
-SECRET_KEYS = ("secret", "tokens")
+SECRET_KEYS = ("secret", "tokens", "admin_password")
 CONFIG_TABLE = "vitrine"
 ENV_PREFIX = "VITRINE_"
 # What MCP clients and the Hermes plugin read (README): a shell that runs both sets them.
@@ -47,6 +47,10 @@ _DURATION = re.compile(r"^(\d{1,12})([smhd]?)$", re.IGNORECASE)
 _RATE = re.compile(r"^(\d+)/([smh])$", re.IGNORECASE)
 _TOKEN_NAME = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+# What `mcp-vitrine admin password` prints: scrypt$n$r$p$salt$hash, base64url without padding.
+_ADMIN_HASH = re.compile(
+    r"^scrypt\$\d{1,10}\$\d{1,4}\$\d{1,4}\$[A-Za-z0-9_-]{16,}\$[A-Za-z0-9_-]{32,}$"
+)
 
 _SCALE = {
     "": 1,
@@ -328,6 +332,14 @@ class Settings(BaseSettings):
             "Omitted scopes mean all four."
         ),
     )
+    admin_password: SecretStr | None = setting(
+        None,
+        group=SECRETS,
+        description=(
+            "The dashboard's operator password as the scrypt hash `mcp-vitrine admin password` "
+            "prints; unset, the dashboard is off"
+        ),
+    )
 
     public_mode: PublicMode = setting(
         PublicMode.CONFIRM,
@@ -378,6 +390,9 @@ class Settings(BaseSettings):
     )
     rate_unlock_link: Rate = setting(
         "100/h", group=LIMITS, description="Wrong passcodes per link, from every source together"
+    )
+    rate_admin_login: Rate = setting(
+        "5/m", group=LIMITS, description="Wrong dashboard passwords per source IP"
     )
     max_links: int = setting(
         500, group=LIMITS, description="Live recorded links per artifact", ge=1
@@ -437,6 +452,17 @@ class Settings(BaseSettings):
             raise ValueError(f"the secret must be at least {MIN_SECRET_BYTES} bytes")
         return value
 
+    @field_validator("admin_password")
+    @classmethod
+    def _admin_password_is_a_hash(cls, value: SecretStr | None) -> SecretStr | None:
+        """Only the hash is accepted, so a password pasted as itself fails at startup (§ 8.2)."""
+        if value is not None and _ADMIN_HASH.fullmatch(value.get_secret_value()) is None:
+            raise ValueError(
+                "admin_password is the scrypt$… hash `mcp-vitrine admin password` prints, "
+                "not the password"
+            )
+        return value
+
     @field_validator("public_base_url")
     @classmethod
     def _public_base_url_is_an_origin(cls, value: str) -> str:
@@ -480,6 +506,16 @@ class Settings(BaseSettings):
             raise ValueError("upload_ttl cannot exceed upload_ttl_max")
         if self.max_artifact > self.quota:
             raise ValueError("max_artifact cannot exceed quota")
+        base = urlsplit(self.public_base_url)
+        if (
+            self.admin_password is not None
+            and base.scheme == "http"
+            and not _is_loopback(base.hostname or "")
+        ):
+            raise ValueError(
+                "the dashboard needs an https public_base_url, or a loopback one such as "
+                "http://127.0.0.1:8080"
+            )
         return self
 
 

@@ -17,8 +17,16 @@ from mcp_vitrine.config import Settings
 from mcp_vitrine.domain import layout
 from mcp_vitrine.services.container import Services
 from mcp_vitrine.web.routes import ROUTE_ACCESS, Access
+from tests.conftest import ADMIN_HASH
 
 FORGED = "dmlld3xrN20.AAAAAAAAAAAAAAAAAAAAAA"
+DASHBOARD_ACTIONS = ("open", "links", "revoke", "meta", "private", "delete")
+
+
+@pytest.fixture
+def overrides() -> dict[str, str]:
+    """The dashboard on, so its routes are in the table too."""
+    return {"VITRINE_ADMIN_PASSWORD": ADMIN_HASH}
 
 
 @pytest.fixture
@@ -57,12 +65,38 @@ class DescribeTheRouteTable:
             ("PUT", f"/u/{FORGED}?filename=a.pdf", 404),
             ("GET", "/a/k7m2q9x4tz3wbn6r/", 404),
             ("GET", "/_vitrine/jsx/unknown/react.js", 404),
+            ("GET", "/_admin/static/unknown.css", 404),
+            ("POST", "/_admin/login", 403),
+            ("POST", "/_admin/logout", 403),
+            *(("POST", f"/_admin/a/k7m2q9x4tz3wbn6r/{name}", 403) for name in DASHBOARD_ACTIONS),
         ],
     )
     def it_refuses_a_caller_without_credentials(
         self, http: httpx2.Client, method: str, path: str, status: int
     ) -> None:
         assert http.request(method, path).status_code == status
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/_admin/",
+            "/_admin/audit",
+            "/_admin/a/k7m2q9x4tz3wbn6r",
+            "/_admin/a/k7m2q9x4tz3wbn6r/confirm/delete",
+        ],
+    )
+    def it_sends_a_browser_without_a_session_to_the_login(
+        self, http: httpx2.Client, path: str
+    ) -> None:
+        assert http.get(path).headers["location"] == "/_admin/login"
+
+    @pytest.mark.parametrize(
+        "path", [f"/_admin/a/k7m2q9x4tz3wbn6r/{name}" for name in DASHBOARD_ACTIONS]
+    )
+    def it_refuses_a_dashboard_change_without_a_session(
+        self, http: httpx2.Client, base: str, path: str
+    ) -> None:
+        assert http.post(path, headers={"Origin": base}).headers["location"] == "/_admin/login"
 
     def it_names_the_classes_it_holds(self) -> None:
         assert set(ROUTE_ACCESS.values()) == set(Access)

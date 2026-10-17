@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from mcp_vitrine.config import parse_tokens
+from mcp_vitrine.config import load_settings, parse_tokens
 from tests.cli.conftest import Runner
-from tests.conftest import SECRET
+from tests.conftest import ADMIN_PASSWORD, SECRET
 
 
 def _field(output: str, name: str) -> str:
@@ -112,3 +113,45 @@ class DescribeConfigCheck:
             config = tmp_path / "vitrine.toml"
             config.write_text('secret = "do-not-print-me-0123456789abcdef"\n')
             assert "do-not-print-me" not in run("config", "check", "--config", str(config)).err
+
+
+@pytest.fixture
+def typed(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Answer the password prompts with ``answers``, in order."""
+
+    def answer(*answers: str) -> None:
+        replies = iter(answers)
+        monkeypatch.setattr("getpass.getpass", lambda _prompt="": next(replies))
+
+    return answer
+
+
+class DescribeAdminPassword:
+    class WhenTheSamePasswordIsTypedTwice:
+        def it_prints_a_hash_the_server_accepts(
+            self,
+            run: Runner,
+            typed: Callable[..., None],
+            monkeypatch: pytest.MonkeyPatch,
+            environment: None,
+        ) -> None:
+            typed(ADMIN_PASSWORD, ADMIN_PASSWORD)
+            line = run("admin", "password").out.strip()
+            monkeypatch.setenv("VITRINE_ADMIN_PASSWORD", line.split("=", 1)[1].strip("'"))
+            assert load_settings().admin_password is not None
+
+        def it_never_prints_the_password(self, run: Runner, typed: Callable[..., None]) -> None:
+            typed(ADMIN_PASSWORD, ADMIN_PASSWORD)
+            result = run("admin", "password")
+            assert ADMIN_PASSWORD not in result.out + result.err
+
+    class WhenTheTwoDiffer:
+        def it_fails_without_a_hash(self, run: Runner, typed: Callable[..., None]) -> None:
+            typed(ADMIN_PASSWORD, ADMIN_PASSWORD + "!")
+            result = run("admin", "password")
+            assert (result.status, result.out) == (1, "")
+
+    class WhenThePasswordIsTooShort:
+        def it_fails(self, run: Runner, typed: Callable[..., None]) -> None:
+            typed("short", "short")
+            assert run("admin", "password").status == 1

@@ -26,6 +26,7 @@ classifiers = [
 ]
 dependencies = [
   "fastmcp>=4.1,<4.2",
+  "httpx2>=2.13",
   "markdown-it-py>=4.2",
   "mdit-py-plugins>=0.5",
   "pydantic>=2.14",
@@ -41,6 +42,7 @@ metrics = ["prometheus-client>=0.26"]
 
 [project.scripts]
 mcp-vitrine = "mcp_vitrine.cli:main"
+vitrine = "mcp_vitrine.client.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/edgar971/vitrine"
@@ -191,3 +193,16 @@ name = "core is framework-free"
 type = "forbidden"
 source_modules = ["mcp_vitrine.domain", "mcp_vitrine.storage", "mcp_vitrine.services"]
 forbidden_modules = ["fastmcp", "starlette", "uvicorn"]
+
+[[tool.importlinter.contracts]]
+name = "the client speaks HTTP only"
+type = "forbidden"
+source_modules = ["mcp_vitrine.client"]
+forbidden_modules = [
+  "mcp_vitrine.app",
+  "mcp_vitrine.cli",
+  "mcp_vitrine.mcp",
+  "mcp_vitrine.services",
+  "mcp_vitrine.storage",
+  "mcp_vitrine.web",
+]

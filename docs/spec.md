@@ -572,7 +572,8 @@ client name, and writing a line per refused request would turn a flood into disk
 **Secrets** (`secret`, `tokens`) are accepted **only** from the environment. A config file that
 sets them **MUST** be rejected at startup, so config files can be committed safely. Unknown keys
 **MUST** be rejected, which catches typos, in the file and among `VITRINE_*` variables alike. The
-client-side `VITRINE_URL` and `VITRINE_TOKEN` (what MCP clients and the Hermes plugin read) are not
+client-side `VITRINE_URL` and `VITRINE_TOKEN` (what MCP clients, the Hermes plugin and the `vitrine`
+client read) are not
 settings and are ignored, so one shell can run the server and a client.
 
 **Formats**
@@ -696,6 +697,35 @@ mcp-vitrine serve --config vitrine.toml
 Every command exits `0` on success, `1` when it failed, and `2` when the arguments or the
 configuration are wrong. Commands that read `data_dir` load the same configuration as `serve`, so
 they need `VITRINE_SECRET` and `VITRINE_TOKENS` too.
+
+**The client: `vitrine`**
+
+The same package installs `vitrine`, a token holder's client. It speaks only HTTP to `/api`
+(§ 7.1), never reads `data_dir` and needs no secret, so it runs on a laptop or in CI. It imports
+nothing from the server's layers (an import-linter contract).
+
+| Command | Does | Scope |
+|---|---|---|
+| `vitrine publish PATH… [--title] [--entry] [--tag …] [--project] [--expires] [--note] [--ref] [--zip] [--fallback]` | Files and folders as one multipart create. A folder contributes its contents relative to itself; hidden files and symlinks inside it are skipped. `--zip` packs them into one archive and sends it with `unpack=zip` (§ 7.3). | `write` |
+| `vitrine publish PATH… --update ID [--merge]` | A new version of `ID` | `write` |
+| `vitrine list [--query] [--tag] [--project] [--visibility] [--limit] [--all]` | One line per artifact; `--all` follows the cursors | `read` |
+| `vitrine get ID` | Metadata, files, live links and views | `read` |
+| `vitrine link ID [--ttl] [--label] [--passcode [VALUE]]` | A fresh private link. `--passcode` alone generates one and prints it once, on stderr. | `share` |
+| `vitrine revoke ID [--link LID]` | Revoke one link, or every private link | `share` |
+| `vitrine tag ID [--add …] [--remove …] [--project] [--title]` | Edit metadata (`PATCH`), without a version | `write` |
+| `vitrine delete ID [--yes]` | Asks on a terminal; without one, refuses unless `--yes` is given | `write` |
+| `vitrine open ID` | `link`, then the system browser | `share` |
+
+- **Configuration:** `VITRINE_URL` and `VITRINE_TOKEN` (§ 8.1), or `--url` and
+  `--token-file PATH`. A token **MUST NOT** be accepted as an argument, because argv is visible to
+  every user through `ps`: `--token` exits `2`.
+- **Output:** the URL alone on stdout, every message on stderr, so `url=$(vitrine publish r.html)`
+  works. `--json` prints the API's response instead.
+- There is no `--public`: `publish` says on stderr that the link is private and when it expires.
+- A 413 names the limit and suggests `--zip` or a smaller folder; a connection closed before the
+  answer names the likely causes.
+- Exit status as above: `0` ok, `1` failed (including a refusal by the server), `2` usage or
+  configuration.
 
 ## 10. Errors
 

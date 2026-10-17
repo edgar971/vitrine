@@ -16,6 +16,13 @@ cleanup() {
 trap cleanup EXIT
 
 uv build --quiet --out-dir "$work/dist"
+# The wheel carries the vendored JSX runtime; past this budget something unplanned was bundled.
+wheel_max=$((4 * 1024 * 1024))
+wheel_size="$(stat -c %s "$work"/dist/*.whl 2>/dev/null || stat -f %z "$work"/dist/*.whl)"
+if [ "$wheel_size" -gt "$wheel_max" ]; then
+    echo "wheel-test: the wheel is $wheel_size bytes, over the $wheel_max budget" >&2
+    exit 1
+fi
 uv venv --quiet --python 3.15 "$work/venv"
 # --no-sources and a fresh venv: nothing from this checkout is importable, only the wheel.
 uv pip install --quiet --no-sources --python "$work/venv" "$work"/dist/*.whl
@@ -57,6 +64,15 @@ if [ "$body" != "<h1>wheel</h1>" ]; then
     exit 1
 fi
 
+# The client command ships in the same wheel and publishes over /api with the same token.
+"$bin/vitrine" --help >/dev/null
+client_url="$(VITRINE_URL="$base" VITRINE_TOKEN="$token" "$bin/vitrine" publish "$work/index.html" 2>/dev/null)"
+client_body="$(curl --silent --fail "$client_url")"
+if [ "$client_body" != "<h1>wheel</h1>" ]; then
+    echo "wheel-test: vitrine publish gave a link that served '$client_body'" >&2
+    exit 1
+fi
+
 # The tools come from the installed wheel's own FastMCP, over streamable HTTP with the token.
 VITRINE_URL="$base" VITRINE_TOKEN="$token" "$bin/python" - <<'PY'
 import asyncio
@@ -86,4 +102,4 @@ async def main() -> None:
 asyncio.run(main())
 PY
 
-echo "wheel-test: mcp-vitrine $expected installs from its wheel, serves, uploads and lists its tools"
+echo "wheel-test: mcp-vitrine $expected installs from its wheel, serves, uploads, publishes with vitrine and lists its tools"

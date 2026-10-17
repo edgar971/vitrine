@@ -134,6 +134,7 @@ fails when a listed spec is renamed or removed, so this table cannot point at no
 | Private by default | `tests/http/api_spec.py::DescribeCreatingOverTheApi::WhenTheBodyIsValid::it_creates_a_private_artifact` |
 | Private by default | `tests/http/uploads_spec.py::DescribeTheUploadRoute::WhenTheUrlIsValid::it_is_private` |
 | Private by default | `tests/integrations/hermes_spec.py::DescribePublishingFiles::WhenAFolderIsPublished::it_leaves_the_artifact_private` |
+| Private by default | `tests/client/cli_spec.py::DescribePublish::WhenAFolderIsGiven::it_leaves_the_artifact_private` |
 | One path to public | `tests/mcp/gate_spec.py::DescribeThePublicGate::WhenTheHumanDeclines::it_leaves_the_artifact_private` |
 | One path to public | `tests/mcp/gate_spec.py::DescribeThePublicGate::WhenTheClientCannotElicit::it_leaves_the_artifact_private` |
 | One path to public | `tests/mcp/gate_spec.py::DescribeTheHandshakeEraGate::WhenTheHumanNeverAnswers::it_leaves_the_artifact_private` |

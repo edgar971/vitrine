@@ -796,6 +796,7 @@ dependencies = [
     { name = "mdit-py-plugins" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "python-multipart" },
     { name = "starlette" },
     { name = "uvicorn" },
 ]
@@ -827,6 +828,7 @@ requires-dist = [
     { name = "prometheus-client", marker = "extra == 'metrics'", specifier = ">=0.26" },
     { name = "pydantic", specifier = ">=2.14" },
     { name = "pydantic-settings", specifier = ">=2.16" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "starlette", specifier = ">=1.8,<2" },
     { name = "uvicorn", specifier = ">=0.54" },
 ]

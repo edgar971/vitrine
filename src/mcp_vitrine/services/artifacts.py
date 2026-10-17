@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import logging
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
@@ -28,7 +28,7 @@ from mcp_vitrine.domain.errors import (
     VitrineError,
 )
 from mcp_vitrine.domain.ids import new_id, new_lid, validate_client_ref
-from mcp_vitrine.domain.media import content_type, is_text
+from mcp_vitrine.domain.media import content_type, is_asset, is_text
 from mcp_vitrine.domain.models import (
     Artifact,
     ArtifactDetail,
@@ -37,18 +37,21 @@ from mcp_vitrine.domain.models import (
     ArtifactMeta,
     ArtifactPage,
     ArtifactQuery,
+    Content,
     GateDecision,
     LinkClaims,
     LinkKind,
     LinkRecord,
     MetaChange,
     PublishedArtifact,
+    Spooled,
     UploadGrant,
     VersionDraft,
     Visibility,
 )
 from mcp_vitrine.domain.paths import choose_entry, validate_path
 from mcp_vitrine.services import passcodes
+from mcp_vitrine.services.archives import UNPACK_ZIP
 from mcp_vitrine.services.audit import SWEEP, AuditEvent, AuditEventName, AuditLog, MetaField
 from mcp_vitrine.services.gate import GateBinding
 from mcp_vitrine.services.links import LinkService
@@ -59,6 +62,7 @@ from mcp_vitrine.storage.base import PUBLIC_UPDATE, Store
 TEXT_READ_LIMIT = 1024 * 1024
 SERIES_DAYS = 30
 UPLOAD_REUSED = "this upload URL was already used"
+SITE_TITLE = "site"
 # An id that once held an artifact is never handed to a new one: its old private links (epoch 0)
 # would open the new content.
 GONE = frozenset({AuditEventName.DELETED, AuditEventName.EXPIRED})
@@ -360,17 +364,24 @@ class ArtifactService:
         """What ties a gate question about ``request`` to the answer that comes back for it."""
         return GateBinding(self._links, artifact_id, client, request)
 
-    def upload_url(
+    def upload_url(  # noqa: PLR0913 - keyword-only: what the URL is for
         self,
-        filename: str,
+        filename: str | None,
         *,
         client: str,
         artifact_id: str | None = None,
         title: str | None = None,
         ttl: timedelta | None = None,
+        unpack: bool = False,
     ) -> UploadGrant:
-        """Issue a single-use upload URL; a new artifact's id is fixed now (spec § 7.3)."""
-        validate_path(filename)
+        """Issue a single-use upload URL; a new artifact's id is fixed now (spec § 7.3).
+
+        With ``unpack``, the body is a zip archive whose files become the version.
+        """
+        if filename is not None:
+            validate_path(filename)
+        elif not unpack:
+            raise Invalid("name the file the URL takes, e.g. report.pdf")
         if artifact_id is None:
             artifact_id = new_id()
         else:
@@ -378,7 +389,11 @@ class ArtifactService:
         link = self._links.upload_url(artifact_id, client=client, ttl=ttl)
         # The signature fixes the id, the expiry and the nonce; the name and the title are only
         # what the holder of that capability chose to call the upload, so they ride unsigned.
-        query = {"filename": filename} | ({"title": title} if title else {})
+        query = (
+            ({"filename": filename} if filename else {})
+            | ({"unpack": UNPACK_ZIP} if unpack else {})
+            | ({"title": title} if title else {})
+        )
         self._audit.append(
             AuditEvent(
                 ts=self._clock.now(),
@@ -397,7 +412,7 @@ class ArtifactService:
         return self._links.verify_upload(signature)
 
     def upload(
-        self, claims: LinkClaims, filename: str, content: bytes, *, title: str | None = None
+        self, claims: LinkClaims, filename: str, content: Content, *, title: str | None = None
     ) -> PublishedArtifact:
         """Land one ``PUT /u/{sig}``: create the pre-allocated artifact, or add a version (§ 7.3).
 
@@ -405,6 +420,23 @@ class ArtifactService:
         shows it. The nonce is spent in the same write, so a second ``PUT`` is a ``Conflict``.
         """
         validate_path(filename)
+        return self._land(claims, {filename: content}, title=title or filename, merge=True)
+
+    def upload_site(
+        self,
+        claims: LinkClaims,
+        files: Mapping[str, Content],
+        *,
+        title: str | None = None,
+        merge: bool = False,
+    ) -> PublishedArtifact:
+        """Land an unpacked archive through an upload URL: a site replaces the files (§ 7.3)."""
+        return self._land(claims, files, title=title or SITE_TITLE, merge=merge)
+
+    def _land(
+        self, claims: LinkClaims, files: Mapping[str, Content], *, title: str, merge: bool
+    ) -> PublishedArtifact:
+        """Create the pre-allocated artifact, or add a version, spending the URL's nonce."""
         if claims.client is None or claims.nonce is None:
             raise NotFound()
         try:
@@ -412,15 +444,13 @@ class ArtifactService:
         except NotFound:
             if any(event.event in GONE for event in self._audit.query(artifact=claims.id)):
                 raise NotFound() from None
-            draft = ArtifactDraft(
-                title=title or filename, files={filename: content}, upload_nonce=claims.nonce
-            )
+            draft = ArtifactDraft(title=title, files=files, upload_nonce=claims.nonce)
             try:
                 return self._create(claims.id, draft, client=claims.client)
             except Conflict:
                 # Another PUT of the same URL created it first.
                 raise Conflict(UPLOAD_REUSED) from None
-        version = VersionDraft(files={filename: content}, merge=True, upload_nonce=claims.nonce)
+        version = VersionDraft(files=files, merge=merge, upload_nonce=claims.nonce)
         return self.update(claims.id, version, client=claims.client)
 
     def open_public(self, artifact_id: str, *, version: int | None = None) -> Opened:
@@ -497,6 +527,15 @@ class ArtifactService:
             return choose_entry(files=files)
         except Invalid:
             raise NotFound() from None
+
+    def fallback_for(self, artifact: ArtifactMeta, path: str) -> str | None:
+        """The file a missing ``path`` serves instead, or ``None`` (spec § 4.3).
+
+        Never for an asset: a missing script answering with HTML would fail quietly.
+        """
+        if artifact.fallback is None or is_asset(path):
+            return None
+        return artifact.fallback
 
     def locate(self, artifact: ArtifactMeta, path: str, *, version: int | None = None) -> Path:
         """The file a view streams, from the version the artifact was opened at."""
@@ -768,7 +807,7 @@ def _version_fields(draft: VersionDraft) -> frozenset[str]:
         "expires_at": draft.expires_at is not None or draft.clear_expiry,
     }
     return frozenset(
-        {"version", "versions", "entry", "used_upload_nonces"}
+        {"version", "versions", "entry", "fallback", "used_upload_nonces"}
         | {name for name, written in named.items() if written}
     )
 
@@ -779,12 +818,22 @@ def request_hash(draft: ArtifactDraft) -> str:
     digest.update(draft.title.encode())
     digest.update(b"|")
     digest.update((draft.entry or "").encode())
+    digest.update(b"|")
+    digest.update((draft.fallback or "").encode())
     for path in sorted(draft.files):
         digest.update(b"|")
         digest.update(path.encode())
         digest.update(b":")
-        digest.update(hashlib.sha256(draft.files[path]).hexdigest().encode())
+        digest.update(_content_digest(draft.files[path]).encode())
     return digest.hexdigest()
+
+
+def _content_digest(content: Content) -> str:
+    """The SHA-256 of one file, read in blocks when it is already on disk."""
+    if not isinstance(content, Spooled):
+        return hashlib.sha256(content).hexdigest()
+    with content.path.open("rb") as file:
+        return hashlib.file_digest(file, "sha256").hexdigest()
 
 
 def _roll_back(rollback: Callable[[], object]) -> None:

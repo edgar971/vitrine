@@ -124,7 +124,9 @@ def security_headers(cache_control: str = NO_STORE) -> dict[str, str]:
     }
 
 
-def artifact_file(file: Path, path: str, *, prefix: Prefix, download: bool) -> Response:
+def artifact_file(
+    file: Path, path: str, *, prefix: Prefix, download: bool, status: int = HTTPStatus.OK
+) -> Response:
     """Stream one stored file with the allowlisted type; ``Range`` and ``HEAD`` come with it."""
     kind = content_type(path)
     headers = security_headers(prefix.cache_control)
@@ -133,6 +135,7 @@ def artifact_file(file: Path, path: str, *, prefix: Prefix, download: bool) -> R
     attachment = download or kind == OCTET_STREAM
     return FileResponse(
         file,
+        status_code=status,
         media_type=kind + TEXT_CHARSET if _is_text(kind) else kind,
         headers=headers,
         filename=PurePosixPath(path).name if attachment else None,
@@ -140,11 +143,11 @@ def artifact_file(file: Path, path: str, *, prefix: Prefix, download: bool) -> R
     )
 
 
-def rendered(html: str, *, prefix: Prefix) -> Response:
+def rendered(html: str, *, prefix: Prefix, status: int = HTTPStatus.OK) -> Response:
     """Renderer output: HTML, so it carries the sandbox like agent-written HTML (spec § 7.2)."""
     headers = security_headers(prefix.cache_control)
     headers["Content-Security-Policy"] = SANDBOX_CSP
-    return HTMLResponse(html, headers=headers)
+    return HTMLResponse(html, status_code=status, headers=headers)
 
 
 def status_of(error: VitrineError) -> int:

@@ -30,6 +30,7 @@ dependencies = [
   "mdit-py-plugins>=0.5",
   "pydantic>=2.14",
   "pydantic-settings>=2.16",
+  "python-multipart>=0.0.20",
   "starlette>=1.8,<2",
   "uvicorn>=0.54",
 ]

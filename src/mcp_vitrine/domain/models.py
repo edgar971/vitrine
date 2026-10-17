@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -273,6 +276,24 @@ class ArtifactSummary(BaseModel):
     public_until: AwareDatetime | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class Spooled:
+    """A file's bytes already on disk under ``data_dir/tmp``: the store moves it in, uncopied.
+
+    The HTTP edge streams a body here rather than holding it in memory (spec § 7.3).
+    """
+
+    path: Path
+
+    @property
+    def size(self) -> int:
+        """The bytes the file holds."""
+        return self.path.stat().st_size
+
+
+type Content = bytes | Spooled
+
+
 class ArtifactDraft(BaseModel):
     """What a caller publishes: the files plus the metadata of a new artifact (spec § 4).
 
@@ -283,7 +304,7 @@ class ArtifactDraft(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     title: str
-    files: dict[str, bytes]
+    files: Mapping[str, Content]
     entry: str | None = None
     tags: tuple[str, ...] = ()
     project: Project | None = None
@@ -291,6 +312,7 @@ class ArtifactDraft(BaseModel):
     expires_at: AwareDatetime | None = None
     client_ref: str | None = None
     upload_nonce: str | None = None
+    fallback: str | None = None
 
 
 class VersionDraft(BaseModel):
@@ -298,7 +320,7 @@ class VersionDraft(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    files: dict[str, bytes] | None = None
+    files: Mapping[str, Content] | None = None
     merge: bool = False
     entry: str | None = None
     title: str | None = None
@@ -309,6 +331,8 @@ class VersionDraft(BaseModel):
     expires_at: AwareDatetime | None = None
     clear_expiry: bool = False
     upload_nonce: str | None = None
+    # ``""`` clears the fallback; ``None`` keeps it.
+    fallback: str | None = None
 
     @model_validator(mode="after")
     def _expiry_is_not_ambiguous(self) -> VersionDraft:

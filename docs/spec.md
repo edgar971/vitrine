@@ -151,6 +151,15 @@ The same rule **MUST** apply when writing and when resolving a request path.
 - If not given: keep the previous entry while it still exists, else `index.html` if present,
   else the only file. Otherwise it is an error.
 
+**Fallback**
+
+- `fallback` is `null` or a path in the version, set on create or update (`""` clears it). It
+  **MUST** name a file in the version; an update whose files no longer hold it is refused.
+- A request for a path the version does not hold serves the fallback instead: with status 404
+  when the file is named `404.html`, else with 200 (a single-page app's `index.html`).
+- It **MUST NOT** apply to a path with an asset extension (any allowlisted type other than
+  `html` and `htm`), so a missing script or image fails loudly instead of answering with HTML.
+
 **Retention**
 
 - The newest `retain_versions` versions are kept (*configurable*, default 10).
@@ -255,15 +264,15 @@ The HTTP API applies the same scopes: `/api` writes need `vitrine:write`, and li
 
 | Tool | Parameters | Result | Scope |
 |---|---|---|---|
-| `artifact_create` | `title`; `files: {path: text}` (UTF-8, total ≤ `max_mcp_body`); `entry?`; `expires_in?`; `tags?`; `project?`; `note?`; `client_ref?` (§ 4.5) | `{id, url, version, expires_at, created}`. Always **private**; `url` is a fresh private link. `created` is false when `client_ref` matched. | `vitrine:write` |
-| `artifact_update` | `id`; `files?`; `merge=false`; `entry?`; `title?`; `expires_in?` (`"never"` clears); `tags?`; `note?` | `{id, url, version}`. The id is unchanged. With `merge`, files overlay the current version; without it they replace it. Without `files`, the current files carry over, so a metadata-only change is still a new version; `artifact_set_meta` changes metadata without one. On a **public** artifact the human is asked first (§ 6.1) and `url` is the public URL; a token without `vitrine:publish` is refused without asking (§ 4.4). | `vitrine:write` (+ `vitrine:publish` for a public artifact) |
+| `artifact_create` | `title`; `files: {path: text}` (UTF-8, total ≤ `max_mcp_body`); `entry?`; `expires_in?`; `tags?`; `project?`; `note?`; `fallback?` (§ 4.3); `client_ref?` (§ 4.5) | `{id, url, version, expires_at, created}`. Always **private**; `url` is a fresh private link. `created` is false when `client_ref` matched. | `vitrine:write` |
+| `artifact_update` | `id`; `files?`; `merge=false`; `entry?`; `title?`; `expires_in?` (`"never"` clears); `tags?`; `note?`; `fallback?` (`""` clears) | `{id, url, version}`. The id is unchanged. With `merge`, files overlay the current version; without it they replace it. Without `files`, the current files carry over, so a metadata-only change is still a new version; `artifact_set_meta` changes metadata without one. On a **public** artifact the human is asked first (§ 6.1) and `url` is the public URL; a token without `vitrine:publish` is refused without asking (§ 4.4). | `vitrine:write` (+ `vitrine:publish` for a public artifact) |
 | `artifact_get` | `id`; `version?` | `{artifact, version, files: [{path, bytes}], links, views}`. `artifact` is `meta.json` without its link records; `links` is `[{lid, label, created_at, expires_at, passcode: bool}]` for the live ones, never a URL or a hash. `views` is § 11.4's `{total, visitors, bots, first_viewed_at, last_viewed_at, links: [{lid, label, views, first_viewed_at, last_viewed_at}]}`, or `null` when `view_log` is `off`. `artifact.public_until` says when a public artifact stops being public. | `vitrine:read` |
 | `artifact_set_meta` | `id`; `title?`; `tags?` (replaces them); `add_tags?`; `remove_tags?`; `project?` (`""` clears it) | `{id, title, tags, project}`. Rewrites `meta.json` only: no version, no gate, no new link epoch, so every link keeps working. `tags` cannot be combined with `add_tags` or `remove_tags`, and a call must name something to change. A change to the values already there writes and audits nothing. | `vitrine:write` |
 | `artifact_list` | `query?` (search terms, below); `tag?`; `project?`; `visibility?`; `source?`; `updated_after?`; `expiring_within?` (a duration); `sort=updated` \| `created` \| `title`; `facets=false`; `limit=20` (max 100); `cursor?` | `{items: [{id, title, visibility, version, updated_at, source, tags, project, public_until}], next_cursor, facets}`. `updated` and `created` are newest first, `title` is A to Z. With `facets`, `facets` is `{projects: {name: count}, tags: {name: count}}` over the whole match, not the page; otherwise `null`. **No URLs**: links are minted on purpose with `artifact_link`. | `vitrine:read` |
 | `artifact_link` | `id`; `ttl?`; `label?` (who it is for, at most 200 characters); `passcode?`: `true` generates one, a string of 8–128 characters sets one | `{url, expires_at, lid, passcode?}`: a fresh recorded link (§ 3). A generated passcode is returned **once**, shown as `xxxxx-xxxxx` (10 Crockford base32 characters, 50 bits); a supplied one is not returned. On a public artifact it returns the public URL with `expires_at` = `public_until`, and refuses a `label` or a `passcode`. Every call is audited (`link_issued`). | `vitrine:share` |
 | `artifact_set_visibility` | `id`; `visibility`; `public_for?` (a duration, with `public` only) | `{id, visibility, url, public_until}`. Going public follows § 6; `public_for` and `public_ttl_max` set `public_until` (§ 4.3). On a public artifact, a different window asks the human again and keeps the links. Every change of visibility increments the link epoch. | `vitrine:publish` |
 | `artifact_revoke_links` | `id`; `link?` (a `lid`) | `{id, link_epoch, link}`. With `link`, only that link and its unlocked URLs stop; without it, every private link does (epoch + 1). | `vitrine:share` |
-| `artifact_upload_url` | `filename`; `id?`; `title?`; `ttl?` | `{id, put_url, expires_at, curl}`: a single-use signed upload URL (§ 7.3) for the artifact `id`, pre-allocated when none was given. `filename` and `title` ride unsigned in the URL's query: the signature fixes the id, the expiry and the nonce; the rest is the capability holder's to name. | `vitrine:write` |
+| `artifact_upload_url` | `filename?`; `id?`; `title?`; `ttl?`; `unpack?` (`"zip"`) | `{id, put_url, expires_at, curl}`: a single-use signed upload URL (§ 7.3) for the artifact `id`, pre-allocated when none was given. `filename` is required unless `unpack` is given; with `unpack`, the body is a zip archive and `curl` is `zip -qr - . \| curl --fail -T - <put_url>`, run inside the site's folder. `filename`, `title` and `unpack` ride unsigned in the URL's query: the signature fixes the id, the expiry and the nonce; the rest is the capability holder's to name. | `vitrine:write` |
 | `artifact_delete` | `id` | `{deleted: id}` | `vitrine:write` |
 
 Every tool also carries a `title` and all four MCP annotation hints (`readOnlyHint`,
@@ -389,9 +398,9 @@ cover them.
 | `GET /a/{id}@{n}/[{path}]` | none | Pinned version `n` of a public artifact. A version that is not retained returns 404. |
 | `GET /s/{sig}/[{path}]`, `GET /s/{sig}@{n}/[{path}]` | view or unlocked signature | The same for any artifact the signature names. A recorded link with a passcode answers **401 with the unlock form** instead, for every path: vitrine's own page, with no title, no file names and nothing from the artifact. |
 | `POST /s/{sig}[@{n}]/unlock` | view signature | Form fields `passcode` and `path`. A right passcode answers `303` to `/s/{usig}[@{n}]/{path}` (an `unlocked` signature, § 3), so relative assets resolve under it. A wrong one answers 401 with the form and one generic message. A link without a passcode answers `303` to itself. A bad signature or an expired artifact answers as the `GET` would (404 / 410). The body is at most 1 KiB, and a foreign `Origin` (`null` included) is refused with 403. |
-| `PUT /u/{sig}?filename=[&title=]` | upload signature, from a client still configured with `vitrine:write` | Raw body. Creates the pre-allocated private artifact (`201`), or adds a version that overlays the file on the current ones (`200`). Single use. Returns `{id, url, version, expires_at}`. A public target returns 403 (§ 4.4). An URL whose client was removed from `VITRINE_TOKENS`, or lost `vitrine:write`, returns 404. |
-| `POST /api/artifacts` | bearer, `vitrine:write` | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?` (repeatable, or comma-separated), `project?` (empty means none), `note?`, `client_ref?`. Any other field is refused with 400, so there is no way to send a visibility. Returns `201 {id, url, version, expires_at}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
-| `PUT /api/artifacts/{id}` | bearer, `vitrine:write` | Same body, without `client_ref`. Adds a version; `merge=true` overlays; `expires_in=never` clears the expiry; an empty `project` clears it. A public target returns 403 (§ 4.4). |
+| `PUT /u/{sig}?filename=[&title=]`, `PUT /u/{sig}?unpack=zip[&title=][&merge=true]` | upload signature, from a client still configured with `vitrine:write` | Raw body. Creates the pre-allocated private artifact (`201`), or adds a version that overlays the file on the current ones (`200`). With `unpack=zip` the body is a zip archive (§ 7.3) whose files are the version: they replace the current ones unless `merge=true`, and the result adds `{files, skipped, warnings}`. Single use. Returns `{id, url, version, expires_at}`. A public target returns 403 (§ 4.4). An URL whose client was removed from `VITRINE_TOKENS`, or lost `vitrine:write`, returns 404. |
+| `POST /api/artifacts` | bearer, `vitrine:write` | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?` (repeatable, or comma-separated), `project?` (empty means none), `note?`, `fallback?`, `client_ref?`, `unpack?`. With `unpack=zip`, the body holds exactly one `file` part of type `application/zip`, unpacked as § 7.3, and the result adds `{files, skipped, warnings}`. Any other field is refused with 400, so there is no way to send a visibility. Returns `201 {id, url, version, expires_at}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
+| `PUT /api/artifacts/{id}` | bearer, `vitrine:write` | Same body, without `client_ref`; a form of fields alone may be `application/x-www-form-urlencoded`. Adds a version; `merge=true` overlays; `expires_in=never` clears the expiry; an empty `project` or `fallback` clears it. A public target returns 403 (§ 4.4). |
 | `GET /api/artifacts` | bearer, `vitrine:read` | Same query parameters and page as `artifact_list` |
 | `GET /api/artifacts/{id}[?version=]` | bearer, `vitrine:read` | As `artifact_get`: metadata, one version's files, live links (never their URL or hash) and views |
 | `DELETE /api/artifacts/{id}` | bearer, `vitrine:write` | As `artifact_delete`. Returns `{deleted}` |
@@ -476,6 +485,32 @@ on a view is a 404 like any other missing file.
   - `max_upload` on `/api` and `/u`;
   - `max_mcp_body` on `/mcp`.
 - Exceeding a limit returns 413.
+
+- A body is streamed to `data_dir/tmp` as it arrives, never held whole in memory, and renamed into
+  the version from there. What is left of a failed request is removed with it.
+
+**Zip archives** (`unpack=zip`, ADR 0007)
+
+Every rule fails the **whole** upload, and nothing is written:
+
+| Rule | Status |
+|---|---|
+| Entries (directories aside) ≤ `max_files` | 413 |
+| Inflated **while streaming**, the running total ≤ `max_artifact`; declared sizes are not trusted, and one that lies fails its CRC | 413 / 400 |
+| Each entry inflates at most `unpack_max_ratio` times its compressed size, once past 1 MiB | 413 |
+| Only `stored` and `deflate`; encrypted entries refused | 400 |
+| The § 4.3 path rule, after stripping one top-level folder every entry shares (`..`, absolute and backslash names refused) | 400 |
+| A symlink entry (`S_IFLNK` in the external attributes) refused | 400 |
+| Duplicate paths after the strip refused | 400 |
+| Names UTF-8 (flag bit 11) or ASCII | 400 |
+
+- `__MACOSX/` and names with a dot segment (`.DS_Store`, `.git/`) are **skipped** and counted in
+  `skipped`. A nested archive is stored as a file, never unpacked.
+- Quota applies to the inflated bytes.
+- A site built for `/` requests `/assets/x.js`, outside the artifact; vitrine does not rewrite agent
+  HTML. `warnings` names an entry HTML that holds `src="/` or `href="/`: build with
+  `vite build --base=./`, `"homepage": "."` for Create React App, or `assetPrefix: "./"` for a
+  static Next export.
 
 **Upload URLs** (`artifact_upload_url`)
 
@@ -583,6 +618,7 @@ settings and are ignored, so one shell can run the server and a client.
 | `max_mcp_body` | `4MB` | Request body limit on `/mcp` (text artifacts ride in tool arguments) |
 | `max_artifact` | `100MB` | Largest single version |
 | `max_files` | `200` | Files per version |
+| `unpack_max_ratio` | `200` | Most a zip entry may inflate past its compressed size, once over 1 MiB (§ 7.3) |
 | `quota` | `10GB` | Total storage. Writes beyond it fail with 507. |
 | `retain_versions` | `10` | Versions kept per artifact |
 | `ref_ttl` | `24h` | How long a `client_ref` stays bound to its artifact (§ 4.5) |

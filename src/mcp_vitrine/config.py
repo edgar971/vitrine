@@ -348,6 +348,12 @@ class Settings(BaseSettings):
     )
     max_artifact: ByteSize = setting("100MB", group=LIMITS, description="Largest single version")
     max_files: int = setting(200, group=LIMITS, description="Files per version", ge=1)
+    unpack_max_ratio: int = setting(
+        200,
+        group=LIMITS,
+        description="Most an archive entry may inflate past its compressed size, once over 1 MiB",
+        ge=1,
+    )
     quota: ByteSize = setting(
         "10GB", group=LIMITS, description="Total storage; writes beyond it fail with 507"
     )

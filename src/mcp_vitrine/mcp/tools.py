@@ -9,7 +9,7 @@ import json
 import logging
 import shlex
 from functools import partial
-from typing import Annotated
+from typing import Annotated, Literal
 
 import mcp.types as mt
 from anyio import to_thread
@@ -95,6 +95,15 @@ Entry = Annotated[
         max_length=MAX_PATH_BYTES,
     ),
 ]
+Fallback = Annotated[
+    str | None,
+    Field(
+        description="For a site: the file a missing page serves, e.g. index.html for a "
+        "single-page app (status 200) or 404.html (status 404). Never served for a missing "
+        "script, style or image.",
+        max_length=MAX_PATH_BYTES,
+    ),
+]
 TagList = list[Annotated[str, Field(max_length=TAG_MAX)]]
 Tags = Annotated[
     TagList | None,
@@ -161,6 +170,7 @@ def artifact_create(
     tags: Tags = None,
     project: Project = None,
     note: Note = "",
+    fallback: Fallback = None,
     client_ref: Annotated[
         str | None,
         Field(
@@ -189,6 +199,7 @@ def artifact_create(
         note=note,
         expires_at=None if expires_in is None else service.expiry(requested_duration(expires_in)),
         client_ref=client_ref,
+        fallback=fallback,
     )
     return service.create(draft, client=_caller(caller))
 
@@ -228,6 +239,14 @@ async def artifact_update(
     ] = None,
     tags: Tags = None,
     note: Note = "",
+    fallback: Annotated[
+        str | None,
+        Field(
+            description="The file a missing page serves (index.html for a single-page app, "
+            "404.html), or an empty string to stop. Default: kept.",
+            max_length=MAX_PATH_BYTES,
+        ),
+    ] = None,
     ctx: Context = CurrentContext(),
     service: ArtifactService = Depends(artifact_service),
     gate: PublicGate = Depends(public_gate),
@@ -251,13 +270,14 @@ async def artifact_update(
         if expires_in in (None, NEVER)
         else service.expiry(requested_duration(expires_in)),
         clear_expiry=expires_in == NEVER,
+        fallback=fallback,
     )
     client = _caller(caller)
     detail = await to_thread.run_sync(partial(service.get, id))
     approval = None
     # Only a token that may publish is asked; any other is refused by the service, unasked.
     if detail.artifact.visibility is Visibility.PUBLIC and Scope.PUBLISH in caller.scopes:
-        request = _request("update", files, merge, entry, title, expires_in, tags, note)
+        request = _request("update", files, merge, entry, title, expires_in, tags, note, fallback)
         answer = await public_gate_flow.confirm(
             ctx,
             gate,
@@ -608,12 +628,13 @@ def artifact_revoke_links(
 @domain_errors(ToolError)
 def artifact_upload_url(
     filename: Annotated[
-        str,
+        str | None,
         Field(
-            description="The file's relative path inside the artifact, e.g. report.pdf.",
+            description="The file's relative path inside the artifact, e.g. report.pdf. "
+            "Not needed with unpack.",
             max_length=MAX_PATH_BYTES,
         ),
-    ],
+    ] = None,
     id: Annotated[
         str | None,
         Field(
@@ -629,12 +650,20 @@ def artifact_upload_url(
         str | None,
         Field(description="How long the URL works: 5m, 15m, 1h.", pattern=DURATION_PATTERN),
     ] = None,
+    unpack: Annotated[
+        Literal["zip"] | None,
+        Field(
+            description="zip: the PUT body is a zip of a built site (a folder with index.html), "
+            "and its files replace the artifact's. Build it with relative asset paths."
+        ),
+    ] = None,
     service: ArtifactService = Depends(artifact_service),
     caller: AccessToken = CurrentAccessToken(),
 ) -> UploadUrl:
     """Get a single-use URL to PUT one binary file (PDF, image, …) into a PRIVATE artifact.
 
-    Run the returned curl command with the local file. The id is fixed now, so reuse it.
+    Run the returned curl command with the local file; with unpack=zip, run it inside the site's
+    folder. The id is fixed now, so reuse it.
     """
     grant = service.upload_url(
         filename,
@@ -642,8 +671,12 @@ def artifact_upload_url(
         artifact_id=id,
         title=title,
         ttl=None if ttl is None else requested_duration(ttl),
+        unpack=unpack is not None,
     )
-    command = f"curl --fail -T {shlex.quote(filename)} {shlex.quote(grant.put_url)}"
+    if unpack is not None:
+        command = f"zip -qr - . | curl --fail -T - {shlex.quote(grant.put_url)}"
+    else:
+        command = f"curl --fail -T {shlex.quote(filename or '')} {shlex.quote(grant.put_url)}"
     return UploadUrl(id=grant.id, put_url=grant.put_url, expires_at=grant.expires_at, curl=command)
 
 

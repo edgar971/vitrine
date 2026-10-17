@@ -47,6 +47,7 @@ The contract, including the accepted formats, is [spec § 8](spec.md#8-configura
 | `max_mcp_body` | `VITRINE_MAX_MCP_BODY` | `4MB` | Request body limit on `/mcp` |
 | `max_artifact` | `VITRINE_MAX_ARTIFACT` | `100MB` | Largest single version |
 | `max_files` | `VITRINE_MAX_FILES` | `200` | Files per version |
+| `unpack_max_ratio` | `VITRINE_UNPACK_MAX_RATIO` | `200` | Most an archive entry may inflate past its compressed size, once over 1 MiB |
 | `quota` | `VITRINE_QUOTA` | `10GB` | Total storage; writes beyond it fail with 507 |
 | `retain_versions` | `VITRINE_RETAIN_VERSIONS` | `10` | Versions kept per artifact |
 | `ref_ttl` | `VITRINE_REF_TTL` | `24h` | How long a `client_ref` stays bound (spec § 4.5) |

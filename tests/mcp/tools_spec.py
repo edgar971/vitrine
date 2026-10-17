@@ -38,6 +38,20 @@ class DescribeArtifactCreate:
         ) -> None:
             assert services.artifacts.get(published["id"]).artifact.source == CLIENT
 
+    class WhenAFallbackIsNamed:
+        async def it_keeps_it(self, call: Call, services: Services) -> None:
+            created = await call(
+                "artifact_create", title="App", files={"index.html": "x"}, fallback="index.html"
+            )
+            assert services.artifacts.get(created["id"]).artifact.fallback == "index.html"
+
+    class WhenTheFallbackIsNotAFile:
+        async def it_fails_naming_it(self, call: Call) -> None:
+            with pytest.raises(ToolError, match=r"fallback"):
+                await call(
+                    "artifact_create", title="App", files={"index.html": "x"}, fallback="a.html"
+                )
+
     class WhenTheCallIsRetriedWithTheSameClientRef:
         async def it_returns_the_same_artifact_not_created(self, call: Call) -> None:
             first = await call("artifact_create", title="T", files=FILES, client_ref="weekly")
@@ -182,6 +196,20 @@ class DescribeArtifactUploadUrl:
         async def it_gives_a_curl_command_that_puts_the_file(self, call: Call) -> None:
             grant = await call("artifact_upload_url", filename="report.pdf")
             assert grant["curl"].startswith("curl --fail -T report.pdf ")
+
+    class WhenAZipSiteIsAsked:
+        async def it_asks_for_the_archive_in_the_url(self, call: Call) -> None:
+            grant = await call("artifact_upload_url", unpack="zip")
+            assert grant["put_url"].endswith("?unpack=zip")
+
+        async def it_gives_the_zip_one_liner(self, call: Call) -> None:
+            grant = await call("artifact_upload_url", unpack="zip")
+            assert grant["curl"].startswith("zip -qr - . | curl --fail -T - ")
+
+    class WhenNeitherAFileNorUnpackIsGiven:
+        async def it_fails_naming_the_problem(self, call: Call) -> None:
+            with pytest.raises(ToolError, match=r"name the file"):
+                await call("artifact_upload_url")
 
     class WhenAnIdIsGiven:
         async def it_keeps_that_id(self, call: Call, published: dict[str, Any]) -> None:

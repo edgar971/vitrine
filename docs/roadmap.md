@@ -23,14 +23,26 @@ next release is tracked in [#15](https://github.com/edgar971/vitrine/issues/15).
 - [ ] The threat model in [security.md](security.md) reviewed against the shipped code.
 - [x] The final tag: PyPI, the signed image, and a GitHub release.
 
-## After 0.1
+## Next release
 
-Ordered by expected value. Each item already has a seam in the [design](design.md).
+Everything planned after `0.1.0` ships in one release, **`0.2.0`**. Its scope, its order and what
+blocks what live in the [milestone](https://github.com/edgar971/vitrine/milestones) and in
+[#30](https://github.com/edgar971/vitrine/issues/30). The work is cut into four pull requests, one
+issue each:
 
-1. A content preview in the public-gate prompt, so the human approves what they actually saw
-   (security R3).
-2. An out-of-band approval link, for clients that cannot elicit — and for the agent that holds a
-   `vitrine:publish` token and can answer its own prompt (security R2).
-3. An S3-compatible `Store` for more than one replica.
-4. OAuth/OIDC auth for multi-user deployments.
-5. More renderers (ipynb, mermaid, diff).
+- **`meta.json` schema 2, projects, metadata edits and search.** One `SCHEMA_VERSION = 2` bump and
+  one `mcp-vitrine migrate` for upgraders, covering every field the release needs.
+- **Per-link passcodes, per-link revoke, scheduled unpublish and view counts.** A link becomes a
+  record, so it can carry a passcode, be revoked on its own and be counted.
+- **`/api` parity, the `vitrine` client CLI, markdown, JSX and zip sites.** Everything a shell, a
+  browser or a CI job needs that MCP alone does not give them.
+- **The web dashboard and MCP notifications.** Phase 1 of the dashboard only narrows.
+
+Each pull request merges to `main` as it is green; the release is cut once the milestone is empty.
+`0.2.0` also closes the threat-model review left unticked above, and it is the release that moves
+the new threats into [security.md](security.md) § 3.
+
+Unscheduled, each with a seam in the [design](design.md): phase 2 of the dashboard (out-of-band
+approvals, for clients that cannot elicit), a content preview in the public-gate prompt so the human
+approves what they actually saw (security R3), an S3-compatible `Store` for more than one replica,
+OAuth/OIDC auth for multi-user deployments, and the remaining renderers (ipynb, mermaid, diff).

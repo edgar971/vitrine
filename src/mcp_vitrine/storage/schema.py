@@ -28,7 +28,14 @@ class Plan:
     target: int
 
 
-# A release that bumps SCHEMA_VERSION adds its step here and says so in the changelog.
+def _add_schema2_defaults(meta: Meta) -> Meta:
+    meta.setdefault("links", [])
+    meta.setdefault("fallback", None)
+    meta.setdefault("public_until", None)
+    meta.setdefault("project", None)
+    return meta
+
+
 CURRENT = Plan(steps={}, target=SCHEMA_VERSION)
 
 

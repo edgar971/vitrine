@@ -9,7 +9,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 
 from mcp_vitrine.domain.errors import ConfigError, SchemaMismatch
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 TAG_LIMIT = 200
 NONCES_KEPT = 50
 
@@ -86,9 +86,19 @@ class Version(BaseModel):
     files: int = Field(ge=0)
 
 
-class FileEntry(BaseModel):
-    """A file in one version: its relative path and its size in bytes."""
+class LinkRecord(BaseModel):
+    """One live link record (spec § 3 / 4.2, schema 2)."""
 
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    lid: str
+    label: str | None = None
+    created_at: AwareDatetime
+    expires_at: AwareDatetime
+    passcode: dict[str, object] | None = None
+
+
+class FileEntry(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     path: str
@@ -115,6 +125,11 @@ class Artifact(BaseModel):
     tags: tuple[str, ...] = ()
     link_epoch: int = 0
     used_upload_nonces: tuple[str, ...] = ()
+    # New in schema 2 (0.2.0); all default to pre-0.2 behaviour.
+    links: tuple[LinkRecord, ...] = ()
+    fallback: str | None = None
+    public_until: AwareDatetime | None = None
+    project: str | None = None
 
     @field_validator("schema_version")
     @classmethod

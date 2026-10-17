@@ -36,7 +36,7 @@ from mcp_vitrine.domain.errors import (
 )
 from mcp_vitrine.domain.ids import is_valid_id
 from mcp_vitrine.domain.models import (
-    NONCES_KEPT,
+    LEGACY_NONCES_KEPT,
     Artifact,
     ArtifactDraft,
     ArtifactPage,
@@ -47,6 +47,7 @@ from mcp_vitrine.domain.models import (
     LinkRecord,
     ListSort,
     MetaChange,
+    SpentNonce,
     Spooled,
     Version,
     VersionDraft,
@@ -135,7 +136,7 @@ class FileStore:
                     tags=draft.tags,
                     project=draft.project,
                     fallback=fallback,
-                    used_upload_nonces=_spend((), draft.upload_nonce),
+                    used_upload_nonces=_spend((), draft.upload, at),
                 )
                 self._write_meta(artifact)
             return artifact
@@ -155,7 +156,9 @@ class FileStore:
             if if_private and previous.visibility is Visibility.PUBLIC:
                 raise Refused(PUBLIC_UPDATE)
             # Checked and spent under the artifact's lock, so two PUTs of one URL cannot both land.
-            if draft.upload_nonce is not None and draft.upload_nonce in previous.used_upload_nonces:
+            if draft.upload is not None and any(
+                spent.nonce == draft.upload.nonce for spent in previous.used_upload_nonces
+            ):
                 raise Conflict(UPLOAD_REUSED)
             # No files means nothing replaces the current ones: the version carries them over.
             source = (
@@ -199,9 +202,7 @@ class FileStore:
                         "expires_at": _updated_expiry(previous, draft),
                         "fallback": fallback,
                         "updated_at": at,
-                        "used_upload_nonces": _spend(
-                            previous.used_upload_nonces, draft.upload_nonce
-                        ),
+                        "used_upload_nonces": _spend(previous.used_upload_nonces, draft.upload, at),
                     }
                 )
                 self._write_meta(artifact)
@@ -863,11 +864,20 @@ def _parse_time(value: object) -> datetime | None:
         return None
 
 
-def _spend(spent: tuple[str, ...], nonce: str | None) -> tuple[str, ...]:
-    """Record a used upload nonce, keeping the newest ``NONCES_KEPT`` (spec § 7.3)."""
-    if nonce is None:
+def _spend(
+    spent: tuple[SpentNonce, ...], upload: SpentNonce | None, now: datetime
+) -> tuple[SpentNonce, ...]:
+    """Record a used upload nonce, dropping only those whose URL has expired (spec § 7.3).
+
+    A count cap would forget a nonce while its URL still verifies. The upload rate limit and
+    ``upload_ttl_max`` bound how many can be live at once.
+    """
+    if upload is None:
         return spent
-    return (*spent, nonce)[-NONCES_KEPT:]
+    live = [nonce for nonce in spent if nonce.is_live(now)]
+    legacy = [nonce for nonce in live if nonce.expires_at is None][-LEGACY_NONCES_KEPT:]
+    dated = [nonce for nonce in live if nonce.expires_at is not None]
+    return (*legacy, *dated, upload)
 
 
 def _live_links(artifact: Artifact, now: datetime) -> tuple[LinkRecord, ...]:

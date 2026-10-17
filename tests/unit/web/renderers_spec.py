@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import csv
 
+import pytest
+
 from mcp_vitrine.web.renderers import (
     render_csv,
     render_json,
@@ -127,3 +129,26 @@ class DescribeChoosingARenderer:
     class WhenTheExtensionHasNone:
         def it_returns_none(self) -> None:
             assert renderer_for("index.html", ["md", "csv", "tsv", "json"]) is None
+
+
+class DescribeMarkdownImages:
+    class WhenTheImageIsInTheArtifact:
+        def it_shows_it(self) -> None:
+            assert '<img src="img/chart.png"' in render_markdown(b"![chart](img/chart.png)", "a.md")
+
+    class WhenTheImageIsInlineData:
+        def it_shows_it(self) -> None:
+            page = render_markdown(b"![dot](data:image/png;base64,AA==)", "a.md")
+            assert '<img src="data:image/png;base64,AA=="' in page
+
+    class WhenTheImageIsRemote:
+        @pytest.mark.parametrize(
+            "source", ["https://tracker.example/p.gif", "//tracker.example/p.gif"]
+        )
+        def it_never_loads_it(self, source: str) -> None:
+            page = render_markdown(f"![chart]({source})".encode(), "a.md")
+            assert "<img" not in page
+
+        def it_links_to_it_by_its_alt_text(self) -> None:
+            page = render_markdown(b"![chart](https://tracker.example/p.gif)", "a.md")
+            assert '<a href="https://tracker.example/p.gif" rel="noreferrer">chart</a>' in page

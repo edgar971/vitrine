@@ -18,6 +18,7 @@ from mcp_vitrine.domain.models import (
     LinkClaims,
     LinkKind,
     Scope,
+    SpentNonce,
     Version,
     VersionDraft,
     Visibility,
@@ -236,3 +237,16 @@ class DescribeLinkClaims:
         def it_refuses_the_payload(self) -> None:
             with pytest.raises(ValidationError):
                 _claims(epoch=None)
+
+
+class DescribeASpentNonce:
+    class WhenItWasStoredAsABareString:
+        def it_reads_it_without_an_expiry(self) -> None:
+            assert SpentNonce.model_validate("n1") == SpentNonce(nonce="n1", expires_at=None)
+
+        def it_counts_as_live(self) -> None:
+            assert SpentNonce(nonce="n1").is_live(NOW)
+
+    class WhenItsUrlHasExpired:
+        def it_is_not_live(self) -> None:
+            assert not SpentNonce(nonce="n1", expires_at=NOW).is_live(NOW)

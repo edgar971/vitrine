@@ -108,6 +108,30 @@ class DescribeCountedGateVerdicts:
                 )
             assert metrics.counts["gate", "declined"] == 1
 
+    class WhenTheHumanAnswersAfterTheArtifactWentPublicAnotherWay:
+        def it_still_counts_their_verdict(
+            self, service: ArtifactService, created: str, metrics: RecordingMetrics
+        ) -> None:
+            service.set_visibility(
+                created, Visibility.PUBLIC, client=CLIENT, gate=GateDecision.APPROVED
+            )
+            service.set_visibility(
+                created, Visibility.PUBLIC, client=CLIENT, gate=GateDecision.DECLINED
+            )
+            assert metrics.counts["gate", "declined"] == 1
+
+    class WhenNobodyWasAskedBecauseItIsAlreadyPublic:
+        def it_counts_no_verdict(
+            self, service: ArtifactService, created: str, metrics: RecordingMetrics
+        ) -> None:
+            service.set_visibility(
+                created, Visibility.PUBLIC, client=CLIENT, gate=GateDecision.APPROVED
+            )
+            service.set_visibility(
+                created, Visibility.PUBLIC, client=CLIENT, gate=GateDecision.NOT_REQUIRED
+            )
+            assert metrics.counts["gate", "not_required"] == 0
+
     class WhenAnArtifactIsMadePrivate:
         def it_counts_no_verdict(
             self, service: ArtifactService, created: str, metrics: RecordingMetrics

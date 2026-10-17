@@ -10,12 +10,16 @@ import contextlib
 import csv
 import io
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from functools import partial
 from html import escape
 from pathlib import PurePosixPath
+from urllib.parse import urlsplit
 
 from markdown_it import MarkdownIt
+from markdown_it.renderer import RendererHTML
+from markdown_it.token import Token
+from markdown_it.utils import EnvType, OptionsDict
 from mdit_py_plugins.anchors import anchors_plugin
 from mdit_py_plugins.footnote import footnote_plugin
 from mdit_py_plugins.front_matter import front_matter_plugin
@@ -46,6 +50,32 @@ _MARKDOWN = (
     .use(anchors_plugin, max_level=6)
 )
 FRONT_MATTER = "front_matter"
+# An image the page may load itself: one inside the artifact, or inline data.
+LOCAL_IMAGE_SCHEMES = frozenset({"", "data"})
+
+
+def _image(
+    renderer: RendererHTML,
+    tokens: Sequence[Token],
+    index: int,
+    options: OptionsDict,
+    env: EnvType,
+) -> str:
+    """An image inside the artifact as an image; a remote one as a link to it.
+
+    Loading a remote image would tell its host the viewer's IP and when they opened the page,
+    which a private link must not do; the viewer can still follow the link on purpose.
+    """
+    token = tokens[index]
+    source = str(token.attrGet("src") or "")
+    parts = urlsplit(source)
+    if parts.scheme.lower() in LOCAL_IMAGE_SCHEMES and not parts.netloc:
+        return renderer.image(tokens, index, options, env)
+    label = renderer.renderInlineAsText(token.children or [], options, env) or source
+    return f'<a href="{escape(source)}" rel="noreferrer">{escape(label)}</a>'
+
+
+_MARKDOWN.add_render_rule("image", _image)
 
 
 def render_markdown(data: bytes, filename: str) -> str:

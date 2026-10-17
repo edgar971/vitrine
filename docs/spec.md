@@ -467,7 +467,7 @@ Anything else **MUST** be served as `application/octet-stream` with
 
 | Extension | Rendered as |
 |---|---|
-| `md` | CommonMark with raw HTML disabled, plus tables, strikethrough, task lists (disabled checkboxes), footnotes and an `id` anchor on each heading. Front matter (`---` lines at the top) is not shown; a simple `title: …` line in it becomes the page title. |
+| `md` | CommonMark with raw HTML disabled; an image outside the artifact (any URL with a scheme or host, `data:` aside) becomes a link to it, so opening the page never tells a third party the viewer's IP. Plus plus tables, strikethrough, task lists (disabled checkboxes), footnotes and an `id` anchor on each heading. Front matter (`---` lines at the top) is not shown; a simple `title: …` line in it becomes the page title. |
 | `csv`, `tsv` | Table |
 | `json` | Indented, escaped |
 | `jsx`, `tsx` | A shell page that transpiles the file in the browser and mounts its default export (below) |
@@ -498,10 +498,15 @@ All renderer output is HTML. A file over 2 MiB is served as itself rather than r
 | `Referrer-Policy` | `no-referrer` |
 | `X-Robots-Tag` | `noindex, nofollow` |
 | `Cache-Control` | `private, no-store` under `/s/`; `public, max-age=60` under `/a/` |
-| `Content-Security-Policy` | `sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads; frame-ancestors 'none'` |
+| `Content-Security-Policy` | By type, below; every file gets one |
 
-The `Content-Security-Policy` header applies to HTML, SVG, XML (an XHTML namespace makes XML a
-page) and renderer output. It **MUST NOT** include `allow-same-origin`.
+| Served as | `Content-Security-Policy` |
+|---|---|
+| HTML, SVG, XML (an XHTML namespace makes XML a page) and renderer output | `sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads; frame-ancestors 'none'` |
+| PDF | `frame-ancestors 'none'`: Chromium and Firefox refuse to render a PDF in a sandboxed document, and their viewers already run isolated from the page |
+| Anything else | `sandbox; frame-ancestors 'none'`: no script runs, whatever a browser makes of the file |
+
+No policy **MAY** include `allow-same-origin`.
 
 Errors on a view are plain text and carry the same headers, with `no-store`. A malformed path
 on a view is a 404 like any other missing file.
@@ -546,8 +551,11 @@ Every rule fails the **whole** upload, and nothing is written:
 **Upload URLs** (`artifact_upload_url`)
 
 - The `id` is always fixed: it is pre-allocated when the caller doesn't give one.
-- The nonce is recorded in `used_upload_nonces` (the last 50 are kept), in the same write as
-  the version it lands, so two concurrent `PUT`s of one URL land at most once.
+- The nonce is recorded in `used_upload_nonces` with its URL's expiry, in the same write as the
+  version it lands, so two concurrent `PUT`s of one URL land at most once. A nonce is kept until
+  its URL expires, never dropped by count, so a used URL cannot land again while its signature
+  still verifies. A nonce 0.1 stored as a bare string has no expiry; the newest 50 of those are
+  kept.
 - A replay returns 409.
 - An id that once held an artifact is never created again by an upload: if the artifact was
   deleted or expired after the URL was issued, the `PUT` returns 404. Re-creating it would make
@@ -734,6 +742,7 @@ settings and are ignored, so one shell can run the server and a client.
 | `view_log` | `counts` | `counts` or `off` (§ 11.4) |
 | `view_retention` | `90d` | View-count months older than this are deleted by the sweep |
 | `metrics_port` | `0` (off) | Separate Prometheus listener; needs the `metrics` extra |
+| `metrics_host` | `127.0.0.1` | Its listen address. The listener has no auth and no `Host` check, so it stays on loopback unless the operator opens it to a scraper on a network they control. |
 | `log_level` | `INFO` | |
 | `log_format` | `text` | `text` or `json` |
 
@@ -775,7 +784,7 @@ mcp-vitrine serve --config vitrine.toml
 | `mcp-vitrine serve [--config FILE] [--host H] [--port P]` | Run the server. It refuses to start on data with another `schema_version` ([operations](operations.md) § 4), sweeps once before the first request, then every `sweep_interval`. |
 | `mcp-vitrine config check [--config FILE]` | Validate the configuration and print the effective values, with secrets redacted. Exits non-zero on error. |
 | `mcp-vitrine token new <name> [--scopes read,write,share,publish]` | Print a new random token, plus its `VITRINE_TOKENS` entry. Writes nothing to disk. |
-| `mcp-vitrine token hash <token>` | Print the hash of an existing token |
+| `mcp-vitrine token hash` | Print the hash of an existing token, read from stdin (or typed at the terminal), never from argv, where it would land in shell history and the process list. A token passed as an argument is refused (exit 2) and not echoed. |
 | `mcp-vitrine secret new` | Print a new random 32-byte hex secret |
 | `mcp-vitrine admin password` | Read the dashboard password twice from the terminal (at least 12 characters) and print its `VITRINE_ADMIN_PASSWORD='scrypt$…'` line. Writes nothing to disk; the password is never an argument. |
 | `mcp-vitrine sweep [--config FILE]` | Run the expiry and staging sweep once, then exit (for cron-style setups). Safe beside a running server: staging younger than 10 minutes is left alone. |

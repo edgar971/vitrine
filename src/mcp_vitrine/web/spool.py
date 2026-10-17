@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterable, AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from io import BufferedWriter
@@ -35,6 +36,10 @@ if TYPE_CHECKING:
 # A text field is a title, a note or a tag; nothing near this is one.
 FIELD_MAX = 64 * 1024
 SPOOL_PREFIX = "spool-"
+# Bytes handed to the worker thread at once: a hop per network chunk costs more than the write.
+BATCH_BYTES = 256 * 1024
+# How often a streaming spool refreshes its timestamp, far inside the sweep's staging grace.
+TOUCH_EVERY = 30.0
 URLENCODED = b"application/x-www-form-urlencoded"
 
 
@@ -59,9 +64,11 @@ class Form:
 class Spool:
     """One request's directory under ``data_dir/tmp``; its files belong to the request."""
 
-    def __init__(self, directory: Path) -> None:
+    def __init__(self, directory: Path, *, clock: Callable[[], float] = time.monotonic) -> None:
         """Use ``directory``, which the caller created and removes."""
         self.directory = directory
+        self._clock = clock
+        self._touched = clock()
 
     def path(self) -> Path:
         """A fresh file name inside the spool."""
@@ -72,9 +79,8 @@ class Spool:
         target = self.path()
         sink = await to_thread.run_sync(_open, target)
         try:
-            async for chunk in request.stream():
-                if chunk:
-                    await to_thread.run_sync(self.append, sink, chunk)
+            async for batch in batches(request.stream()):
+                await to_thread.run_sync(self.append, sink, batch)
         finally:
             await to_thread.run_sync(sink.close)
         return Spooled(target)
@@ -93,9 +99,8 @@ class Spool:
         reader = _Reader(self, max_files=max_files, max_fields=max_fields)
         parser = MultipartParser(boundary, reader.callbacks())
         try:
-            async for chunk in request.stream():
-                if chunk:
-                    await to_thread.run_sync(parser.write, chunk)
+            async for batch in batches(request.stream()):
+                await to_thread.run_sync(parser.write, batch)
             await to_thread.run_sync(parser.finalize)
         except MultipartParseError as error:
             raise Invalid(f"the body is not valid multipart: {error}") from None
@@ -106,9 +111,28 @@ class Spool:
         return reader.form
 
     def append(self, sink: BufferedWriter, chunk: bytes) -> None:
-        """Append a chunk and keep the spool fresh, so a sweep beside a slow upload spares it."""
+        """Append a chunk and keep the spool fresh, so a sweep beside a slow upload spares it.
+
+        The timestamp moves at most every ``TOUCH_EVERY`` seconds: often enough for the sweep's
+        grace, without a filesystem call per chunk.
+        """
         sink.write(chunk)
-        os.utime(self.directory)
+        now = self._clock()
+        if now - self._touched >= TOUCH_EVERY:
+            os.utime(self.directory)
+            self._touched = now
+
+
+async def batches(chunks: AsyncIterable[bytes]) -> AsyncIterator[bytes]:
+    """Network chunks gathered into ``BATCH_BYTES`` pieces, the last one whatever is left."""
+    pending = bytearray()
+    async for chunk in chunks:
+        pending += chunk
+        if len(pending) >= BATCH_BYTES:
+            yield bytes(pending)
+            pending.clear()
+    if pending:
+        yield bytes(pending)
 
 
 @asynccontextmanager

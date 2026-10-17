@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
+from starlette.responses import Response
 
 from mcp_vitrine.domain.errors import (
     AuditUnavailable,
@@ -20,7 +22,14 @@ from mcp_vitrine.domain.errors import (
     TooLarge,
     VitrineError,
 )
-from mcp_vitrine.web.responses import SANDBOX_CSP, Prefix, problem, status_of
+from mcp_vitrine.web.responses import SANDBOX_CSP, Prefix, artifact_file, problem, status_of
+
+
+def _served(tmp_path: Path, name: str) -> Response:
+    """How one stored file named ``name`` is served on a signed link."""
+    file = tmp_path / name
+    file.write_bytes(b"x")
+    return artifact_file(file, name, prefix=Prefix.SIGNED, download=False)
 
 
 class DescribeTheSandbox:
@@ -30,6 +39,28 @@ class DescribeTheSandbox:
 
         def it_forbids_framing(self) -> None:
             assert "frame-ancestors 'none'" in SANDBOX_CSP
+
+
+class DescribeTheFilePolicy:
+    class WhenTheFileIsAnImage:
+        def it_is_sandboxed_without_scripts(self, tmp_path: Path) -> None:
+            policy = _served(tmp_path, "chart.png").headers["content-security-policy"]
+            assert policy == "sandbox; frame-ancestors 'none'"
+
+    class WhenTheFileIsText:
+        def it_is_sandboxed(self, tmp_path: Path) -> None:
+            policy = _served(tmp_path, "notes.txt").headers["content-security-policy"]
+            assert policy.startswith("sandbox;")
+
+    class WhenTheFileIsAPdf:
+        def it_cannot_be_framed(self, tmp_path: Path) -> None:
+            policy = _served(tmp_path, "report.pdf").headers["content-security-policy"]
+            assert policy == "frame-ancestors 'none'"
+
+    class WhenTheFileIsHtml:
+        def it_keeps_the_scripted_sandbox(self, tmp_path: Path) -> None:
+            policy = _served(tmp_path, "index.html").headers["content-security-policy"]
+            assert policy == SANDBOX_CSP
 
 
 class DescribeCaching:

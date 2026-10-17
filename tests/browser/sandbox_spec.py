@@ -92,3 +92,10 @@ class DescribeAPasscodeLinkInChromium:
 
         def it_still_runs_in_an_opaque_origin(self, unlocked: Page) -> None:
             assert _result(unlocked)["origin"] == "null"
+
+
+class DescribeAnImageOpenedOnItsOwnInChromium:
+    class WhenItIsServedUnderTheScriptlessSandbox:
+        def it_still_displays(self, page: Page, base: str, probe: PublishedArtifact) -> None:
+            page.goto(f"{probe.url}img/pixel.png")
+            assert page.evaluate("document.images[0].naturalWidth") == 1

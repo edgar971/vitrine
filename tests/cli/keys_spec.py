@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -64,9 +65,33 @@ class DescribeTokenNew:
 
 
 class DescribeTokenHash:
-    class WhenGivenAToken:
-        def it_prints_its_sha256(self, run: Runner) -> None:
-            assert run("token", "hash", "abc").out.strip() == hashlib.sha256(b"abc").hexdigest()
+    class WhenTheTokenIsPipedIn:
+        def it_prints_its_sha256(self, run: Runner, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setattr("sys.stdin", io.StringIO("abc\n"))
+            assert run("token", "hash").out.strip() == hashlib.sha256(b"abc").hexdigest()
+
+    class WhenTheTokenIsTypedAtTheTerminal:
+        def it_prints_its_sha256(
+            self, run: Runner, monkeypatch: pytest.MonkeyPatch, typed: Callable[..., None]
+        ) -> None:
+            terminal = io.StringIO()
+            monkeypatch.setattr(terminal, "isatty", lambda: True)
+            monkeypatch.setattr("sys.stdin", terminal)
+            typed("abc")
+            assert run("token", "hash").out.strip() == hashlib.sha256(b"abc").hexdigest()
+
+    class WhenTheTokenIsPassedAsAnArgument:
+        def it_exits_as_misconfigured(self, run: Runner) -> None:
+            assert run("token", "hash", "abc").status == 2
+
+        def it_does_not_echo_it(self, run: Runner) -> None:
+            result = run("token", "hash", "do-not-echo-me")
+            assert "do-not-echo-me" not in result.out + result.err
+
+    class WhenStdinIsEmpty:
+        def it_fails(self, run: Runner, monkeypatch: pytest.MonkeyPatch) -> None:
+            monkeypatch.setattr("sys.stdin", io.StringIO(""))
+            assert run("token", "hash").status == 1
 
 
 class DescribeSecretNew:

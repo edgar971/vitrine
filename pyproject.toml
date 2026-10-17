@@ -27,6 +27,7 @@ classifiers = [
 dependencies = [
   "fastmcp>=4.1,<4.2",
   "markdown-it-py>=4.2",
+  "mdit-py-plugins>=0.5",
   "pydantic>=2.14",
   "pydantic-settings>=2.16",
   "starlette>=1.8,<2",

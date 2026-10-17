@@ -444,7 +444,7 @@ Anything else **MUST** be served as `application/octet-stream` with
 
 | Extension | Rendered as |
 |---|---|
-| `md` | CommonMark with raw HTML disabled |
+| `md` | CommonMark with raw HTML disabled, plus tables, strikethrough, task lists (disabled checkboxes), footnotes and an `id` anchor on each heading. Front matter (`---` lines at the top) is not shown; a simple `title: …` line in it becomes the page title. |
 | `csv`, `tsv` | Table |
 | `json` | Indented, escaped |
 

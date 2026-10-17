@@ -13,7 +13,7 @@ import pytest
 from mcp_vitrine.config import Settings
 from mcp_vitrine.domain.clock import Clock
 from mcp_vitrine.domain.errors import NotFound
-from mcp_vitrine.domain.models import Artifact, LinkKind, Version
+from mcp_vitrine.domain.models import Artifact, LinkKind, LinkRecord, Version
 from mcp_vitrine.domain.paths import choose_entry
 from mcp_vitrine.services.links import LinkPolicy, LinkService
 from tests.conftest import FrozenClock
@@ -23,6 +23,13 @@ SECRET = b"0123456789abcdef0123456789abcdef"
 ID = "k7m2q9x4tz3wbn6r"
 CLIENT = "hermes"
 MAC_BYTES = 16
+LID = "AbCdEfGh_-0"
+
+
+def _record(clock: Clock) -> LinkRecord:
+    """The record of the link ``LID``, live for a week."""
+    now = clock.now()
+    return LinkRecord(lid=LID, created_at=now, expires_at=now + timedelta(days=7))
 
 
 @pytest.fixture
@@ -213,6 +220,71 @@ class DescribeVerification:
             signature = _signature(links.view_url(ID, epoch=0).url, "/s/")
             links.verify_view(signature)
             assert seen
+
+
+class DescribeRecordedLinks:
+    class WhenOneIsMinted:
+        def it_carries_its_lid(self, links: LinkService) -> None:
+            signature = _signature(links.view_url(ID, epoch=0, lid=LID).url, "/s/")
+            assert links.verify_view(signature).lid == LID
+
+    class WhenTheLidIsNotOne:
+        def it_is_not_found(self, links: LinkService, clock: FrozenClock) -> None:
+            expires = int((clock.now() + timedelta(days=1)).timestamp())
+            with pytest.raises(NotFound):
+                links.verify_view(_forge(f"view|{ID}|{expires}|0|not a lid"))
+
+    class WhenItsRecordExists:
+        def it_is_accepted(self, links: LinkService, artifact: Artifact, clock: Clock) -> None:
+            recorded = artifact.model_copy(update={"links": (_record(clock),)})
+            signature = _signature(links.view_url(ID, epoch=0, lid=LID).url, "/s/")
+            assert links.accepts(links.verify_view(signature), recorded)
+
+    class WhenItsRecordIsGone:
+        def it_is_refused(self, links: LinkService, artifact: Artifact) -> None:
+            signature = _signature(links.view_url(ID, epoch=0, lid=LID).url, "/s/")
+            assert not links.accepts(links.verify_view(signature), artifact)
+
+
+class DescribeUnlockedSignatures:
+    @pytest.fixture
+    def unlocked(self, links: LinkService) -> str:
+        """The unlocked signature a recorded link earns."""
+        view = links.verify_view(_signature(links.view_url(ID, epoch=0, lid=LID).url, "/s/"))
+        return links.unlocked(view, link_expires_at=view.expires_at)
+
+    class WhenOneIsVerified:
+        def it_carries_the_link_and_its_epoch(self, links: LinkService, unlocked: str) -> None:
+            claims = links.verify_unlocked(unlocked)
+            assert (claims.kind, claims.lid, claims.epoch) == (LinkKind.UNLOCKED, LID, 0)
+
+    class WhenAnUnlockedSigIsUsedAsAViewSig:
+        def it_is_not_found(self, links: LinkService, unlocked: str) -> None:
+            with pytest.raises(NotFound):
+                links.verify_view(unlocked)
+
+    class WhenAViewSigIsUsedAsAnUnlockedSig:
+        def it_is_not_found(self, links: LinkService) -> None:
+            signature = _signature(links.view_url(ID, epoch=0, lid=LID).url, "/s/")
+            with pytest.raises(NotFound):
+                links.verify_unlocked(signature)
+
+    class WhenItsTimeRunsOut:
+        def it_lasts_the_unlock_ttl(self, links: LinkService, unlocked: str, clock: Clock) -> None:
+            assert links.verify_unlocked(unlocked).expires_at == clock.now() + timedelta(hours=12)
+
+    class WhenTheLinkExpiresFirst:
+        def it_stops_with_the_link(self, links: LinkService, clock: Clock) -> None:
+            short = links.view_url(ID, epoch=0, lid=LID, ttl=timedelta(hours=1))
+            view = links.verify_view(_signature(short.url, "/s/"))
+            unlocked = links.unlocked(view, link_expires_at=view.expires_at)
+            assert links.verify_unlocked(unlocked).expires_at == short.expires_at
+
+    class WhenTheLinkHasNoLid:
+        def it_cannot_be_unlocked(self, links: LinkService) -> None:
+            view = links.verify_view(_signature(links.view_url(ID, epoch=0).url, "/s/"))
+            with pytest.raises(NotFound):
+                links.unlocked(view, link_expires_at=view.expires_at)
 
 
 class DescribeLinkPolicy:

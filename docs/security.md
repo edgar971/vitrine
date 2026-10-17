@@ -43,7 +43,7 @@ cell names the closest one. **Spec** rows came after the spike, where the code i
 | T2 | Unauthenticated MCP calls | Hashed tokens, constant-time comparison, 401 | Validated |
 | T3 | Custom HTTP routes missing auth (the MCP auth layer covers only `/mcp`) | Each route authenticates itself, and a route-table test fails on any unclassified route | Validated (bypass demonstrated, then closed); route-table test in `tests/http/routes_spec.py` |
 | T4 | Guessing ids, or learning that a private artifact exists | 80-bit ids. One indistinguishable 404 for missing, malformed and private ids and for bad links. No listing without a token. | Validated |
-| T5 | Forging, transplanting or replaying links | HMAC with the kind, id, expiry and epoch inside the MAC. Epoch revocation. Single-use upload nonces, spent in the same write as the version. An upload never re-creates a deleted or expired id, whose old links would otherwise open the new content. | Validated; upload replay in `tests/http/uploads_spec.py`, re-creation in `tests/unit/services/artifacts_spec.py` |
+| T5 | Forging, transplanting or replaying links | HMAC with the kind, id, expiry, epoch and (for a recorded link) its `lid` inside the MAC. Epoch revocation, and per-link revocation by deleting the link's record. An `unlocked` signature is its own kind: it never verifies as a view link, cannot be unlocked again, and dies with its link's record or epoch. Single-use upload nonces, spent in the same write as the version. An upload never re-creates a deleted or expired id, whose old links would otherwise open the new content. | Validated; upload replay in `tests/http/uploads_spec.py`, re-creation in `tests/unit/services/artifacts_spec.py`, kinds in `tests/unit/services/links_spec.py` |
 | T6 | Path traversal or symlink escape | One path rule for writing and reading; `resolve()` must stay inside the version root; symlinks refused | Validated (encoded and plain `..` variants) |
 | T7 | Malicious HTML/SVG reads cookies, storage or acts as the viewer | CSP `sandbox` without `allow-same-origin` gives an opaque origin. `frame-ancestors 'none'`, `nosniff`, an extension allowlist, and unknown types forced to download. | Validated in Chromium |
 | T8 | DNS rebinding from a browser on the same network | Host allowlist (421) and Origin check on `/mcp` (403) | Validated against uvicorn bound to `0.0.0.0` |
@@ -59,7 +59,9 @@ cell names the closest one. **Spec** rows came after the spike, where the code i
 | T18 | Retries create duplicate artifacts, or a reused key swaps content | `client_ref` is scoped per client and claimed with an exclusive file create. The same key with a different request is a conflict. A create that fails releases its key, so the retry is not locked out. | Spec |
 | T19 | New content on an already public artifact goes live without the gate: a `write`-only token, `PUT /api/artifacts/{id}` or an upload URL adds a version, and the caller is told it is private | Adding a version to a public artifact needs an approving gate decision. Over MCP, `artifact_update` asks the human when the token holds `vitrine:publish`; otherwise, and on every HTTP route, it is refused (403) and audited as `publish_refused`. The store checks visibility under the artifact's lock, so a concurrent publish cannot slip a version past it. | Validated (`tests/mcp/public_updates_spec.py`, `tests/http/public_updates_spec.py`) |
 | T20 | A gate answer is forged, replayed onto another question, or approves content the human never saw | On `2026-07-28` the question's `requestState` is signed over the artifact, the version shown, the client and the call's arguments; an answer without it, or with another request's, is declined (the SDK also seals the state to its request). On both eras the write must find the version the human was shown, else `conflict`. | Validated on both eras (`tests/mcp/public_updates_spec.py`) |
-| T21 | A client's token is removed, but what it minted still works | Upload URLs carry their client and are refused once that client is gone or lost `vitrine:write`. Private view links are bearer capabilities: they last until they expire (`link_ttl_max`), `artifact_revoke_links` or a visibility change bumps the epoch, or the secret is rotated. | Upload refusal in `tests/http/public_updates_spec.py`; view links are a documented limit |
+| T21 | A client's token is removed, but what it minted still works | Upload URLs carry their client and are refused once that client is gone or lost `vitrine:write`. Private view links are bearer capabilities: they last until they expire (`link_ttl_max`), their record is revoked (`artifact_revoke_links(link=lid)`), `artifact_revoke_links` or a visibility change bumps the epoch, or the secret is rotated. | Upload refusal in `tests/http/public_updates_spec.py`; view links are a documented limit |
+| T22 | A forwarded or unfurled private link exposes the artifact: it is pasted into a ticket, or a chat unfurler (Slackbot, Discordbot, …) fetches it and shows a preview to the whole channel | A recorded link can carry a **passcode**: without it, every path answers 401 with vitrine's own form, which shows nothing from the artifact, so a preview shows the form. The passcode is kept as an scrypt hash only, never logged or audited; it is given to the user apart from the link. Wrong passcodes are rate-limited per link and address (`rate_unlock`) and per link (`rate_unlock_link`), and an empty bucket answers 429 without checking. The unlock `POST` refuses a foreign `Origin` and bodies over 1 KiB. One link can be revoked on its own, which ends its unlocked URLs too. | Validated (`tests/http/passcodes_spec.py`, `tests/browser/sandbox_spec.py`) |
+| T23 | View counts track viewers | Counts and ids only: a visitor is an HMAC under a key that lives in memory and changes every hour, and only the number of distinct values is written. No IP address or user agent reaches disk. Views are not audit events, the files hold no content, months older than `view_retention` are deleted, and `view_log = off` records nothing. | Validated (`tests/http/view_counts_spec.py`, `tests/unit/services/views_spec.py`) |
 
 ## 4. Secrets
 
@@ -81,6 +83,7 @@ cell names the closest one. **Spec** rows came after the spike, where the code i
 | R4 | Public URLs last until revoked: the id is the secret | That is the meaning of "anyone with the link". `artifact_set_visibility(private)` or `artifact_delete` removes access at the origin immediately; public views are `max-age=60`, so a shared cache or CDN may serve them for up to a minute longer. |
 | R5 | A single replica means downtime on restart | Acceptable for the target scale; the `Store` seam is the path to more replicas |
 | R6 | Protocol-era detection uses a private FastMCP method | Minor-version pin plus per-era tests (design § 12) |
+| R7 | A passcode is only as private as the way it travels | A generated passcode passes through the MCP transcript, since the agent tells the user. An unlocked URL is itself a bearer capability that can be forwarded for up to `unlock_ttl`. A supplied passcode is only as strong as its owner makes it, and case and hyphens do not count. Keep `unlock_ttl` short where that matters, and revoke the link (`artifact_revoke_links(link=lid)`) to end every unlocked URL at once. |
 
 ## 6. The security specs
 
@@ -108,6 +111,16 @@ cell names the closest one. **Spec** rows came after the spike, where the code i
     a forged, replayed or stale gate answer is declined (T19, T20).
 14. **Client plugins:** a plugin's upload tool has no visibility parameter, and what it publishes
     is private (`tests/integrations/hermes_spec.py`).
+15. **Passcodes:** a passcode link never serves content without its passcode, a wrong passcode
+    never does either, an empty unlock bucket does not check the passcode, revoking a link ends
+    its unlocked URLs, an unlocked signature is refused where a view one is expected, and the
+    passcode never reaches a log (T22).
+16. **Scheduled unpublish:** `/a/` answers 404 from `public_until` on, before the sweep, which
+    then makes the artifact private and revokes its private links; the gate names the end date.
+17. **Views:** no IP address or user agent is ever written, and `view_log = off` writes nothing
+    (T23).
+18. **Compensation:** undoing a change whose audit failed never undoes a change that landed beside
+    it (`tests/unit/services/link_records_spec.py`).
 
 ### Invariants and the specs that hold them
 
@@ -138,6 +151,7 @@ fails when a listed spec is renamed or removed, so this table cannot point at no
 | Signed link segments and tokens are never logged | `tests/http/logs_spec.py::DescribeTheAccessLog::WhenASignedLinkIsViewed::it_never_logs_the_signature` |
 | Signed link segments and tokens are never logged | `tests/http/logs_spec.py::DescribeTheAccessLog::WhenAnUploadUrlIsUsed::it_never_logs_the_signature` |
 | Signed link segments and tokens are never logged | `tests/http/logs_spec.py::DescribeTheAccessLog::WhenABearerTokenIsSent::it_never_logs_the_token` |
+| Signed link segments and tokens are never logged | `tests/http/logs_spec.py::DescribeTheAccessLog::WhenAPasscodeIsPosted::it_never_logs_the_unlocked_signature` |
 | Every state change is audited | `tests/mcp/audit_spec.py::DescribeTheAuditOfEachChange::WhenAnArtifactIsCreated::it_records_created_once` |
 | Every state change is audited | `tests/unit/services/artifacts_spec.py::DescribeDelete::WhenTheAuditFails::it_keeps_the_artifact` |
 | Every state change is audited | `tests/mcp/audit_spec.py::DescribeTheAuditOfEachChange::WhenTheTitleIsSecret::it_keeps_the_title_out_of_the_log` |

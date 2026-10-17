@@ -28,7 +28,8 @@ easy to extend.**
 │  resources, prompts;       │  /healthz                    │                  │
 │  instructions; scopes      │                              │                  │
 ├────────────────────────────┴──────────────────────────────┴──────────────────┤
-│ services/  ArtifactService · LinkService · PublicGate · AuditLog · Limits    │
+│ services/  ArtifactService · LinkService · PublicGate · AuditLog · Limits ·  │
+│            ViewLog · passcodes                                               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ domain/  models, errors      storage/  Store protocol → FileStore → data_dir │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -40,13 +41,14 @@ easy to extend.**
 src/mcp_vitrine/
   app.py          build_app(settings) → one Starlette app: web routes + /mcp, one middleware
                   stack, and the lifespan that sweeps at startup and every sweep_interval
-  cli.py          serve · config check · token · secret · sweep · audit · backup · migrate
+  cli.py          serve · config check · token · secret · sweep · audit · views · backup · migrate
   config.py       Settings (pydantic-settings): env + TOML, secrets env-only
   reference.py    docs/configuration.md, rendered from Settings (`just docs`)
   metrics.py      the optional metrics_port exporter
   domain/         models, errors, ids, media, paths, layout, clock — no framework, no I/O
   storage/        base (the Store protocol), filesystem (FileStore), schema, backup
-  services/       artifacts, links, gate, audit, limits, tokens, metrics, maintenance, container
+  services/       artifacts, links, passcodes, gate, audit, views, limits, tokens, metrics,
+                  maintenance, container
   mcp/            server, tools, resources, prompts, auth, deps, gate, middleware, policy, errors,
                   results, instructions
   web/            routes (with ROUTE_ACCESS), responses, renderers, middleware

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 NOT_FOUND = "not found"
 EXPIRED = "expired"
+LOCKED = "a passcode is required"
 
 
 class VitrineError(Exception):
@@ -24,6 +25,17 @@ class Expired(VitrineError):
     def __init__(self) -> None:
         """Use the one expiry message."""
         super().__init__(EXPIRED)
+
+
+class Locked(VitrineError):
+    """The link carries a passcode that was not given, or not given right (spec § 7.1).
+
+    A view answers it with the unlock form; it says nothing about the artifact behind the link.
+    """
+
+    def __init__(self) -> None:
+        """Use the one message every refused unlock shares."""
+        super().__init__(LOCKED)
 
 
 class Invalid(VitrineError):

@@ -62,13 +62,19 @@ class DescribeTheAuditOfEachChange:
             assert _names(events)[1:] == [AuditEventName.DELETED]
 
     class WhenNothingChanges:
-        async def it_records_nothing_for_reads_and_links(
+        async def it_records_nothing_for_reads(
             self, call: Call, published: dict[str, Any], events: Events
         ) -> None:
             await call("artifact_get", id=published["id"])
             await call("artifact_list")
-            await call("artifact_link", id=published["id"])
             assert _names(events) == [AuditEventName.CREATED]
+
+    class WhenALinkIsMinted:
+        async def it_records_link_issued_once(
+            self, call: Call, published: dict[str, Any], events: Events
+        ) -> None:
+            await call("artifact_link", id=published["id"])
+            assert _names(events)[1:] == [AuditEventName.LINK_ISSUED]
 
     class WhenTheTitleIsSecret:
         async def it_keeps_the_title_out_of_the_log(self, call: Call, events: Events) -> None:

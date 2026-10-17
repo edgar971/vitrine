@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -44,6 +44,8 @@ class GateDecision(StrEnum):
     DECLINED = "declined"
     UNSUPPORTED = "unsupported"
     DISABLED = "disabled"
+    # Not a verdict anyone gives: the sweep ending a public window that ran out (spec § 4.3).
+    SCHEDULED = "scheduled"
 
     def approves(self) -> bool:
         """Whether this verdict lets a publish through."""
@@ -77,6 +79,8 @@ class LinkKind(StrEnum):
 
     VIEW = "view"
     UPLOAD = "upload"
+    # A passcode link whose passcode was given; never accepted where a view is, nor the reverse.
+    UNLOCKED = "unlocked"
     # Not a link: the state a gate question carries to its answer (security T20).
     GATE = "gate"
 
@@ -115,7 +119,7 @@ class Passcode(BaseModel):
 
 
 class LinkRecord(BaseModel):
-    """One live private link (spec § 4.2). Inert until per-link records ship."""
+    """One live private link that ``artifact_link`` minted (spec § 4.2)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -125,10 +129,34 @@ class LinkRecord(BaseModel):
     expires_at: AwareDatetime
     passcode: Passcode | None = None
 
+    def summary(self) -> LinkSummary:
+        """What a reader is shown: whether there is a passcode, never its hash."""
+        return LinkSummary(
+            lid=self.lid,
+            label=self.label,
+            created_at=self.created_at,
+            expires_at=self.expires_at,
+            passcode=self.passcode is not None,
+        )
 
-class Artifact(BaseModel):
-    """An artifact exactly as ``meta.json`` holds it (spec § 4.2).
 
+class LinkSummary(BaseModel):
+    """One live link as ``artifact_get`` lists it: never the URL, never the hash (spec § 5.1)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    lid: str
+    label: str
+    created_at: AwareDatetime
+    expires_at: AwareDatetime
+    passcode: bool
+
+
+class ArtifactMeta(BaseModel):
+    """``meta.json`` as a reader is shown it: every field but the link records (spec § 5.1).
+
+    ``Artifact`` adds those. A field typed ``ArtifactMeta`` that holds an ``Artifact`` serialises
+    as this class, so no passcode hash leaves through a result by accident.
     A field whose feature is not enabled keeps its default and has no effect.
     """
 
@@ -149,7 +177,6 @@ class Artifact(BaseModel):
     tags: tuple[str, ...] = ()
     link_epoch: int = 0
     used_upload_nonces: tuple[str, ...] = ()
-    links: tuple[LinkRecord, ...] = ()
     fallback: str | None = None
     public_until: AwareDatetime | None = None
     project: Project | None = None
@@ -163,7 +190,7 @@ class Artifact(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _versions_agree_with_the_current_one(self) -> Artifact:
+    def _versions_agree_with_the_current_one(self) -> Self:
         """Keep ``version`` and ``versions`` from drifting apart; pruning drops the oldest."""
         numbers = tuple(version.n for version in self.versions)
         if numbers != tuple(range(numbers[0], numbers[0] + len(numbers))):
@@ -184,6 +211,16 @@ class Artifact(BaseModel):
         """Whether the artifact is past ``expires_at`` (spec § 4.3)."""
         return self.expires_at is not None and now >= self.expires_at
 
+    def is_public_at(self, now: datetime) -> bool:
+        """Whether ``/a/`` serves it now: public, and its public window has not run out (§ 4.3)."""
+        return self.visibility is Visibility.PUBLIC and (
+            self.public_until is None or now < self.public_until
+        )
+
+    def has_lapsed(self, now: datetime) -> bool:
+        """Public on disk, but past ``public_until``: the sweep makes it private (spec § 4.3)."""
+        return self.visibility is Visibility.PUBLIC and not self.is_public_at(now)
+
     def summary(self) -> ArtifactSummary:
         """The listing projection: no URLs, no file lists (spec § 5.1)."""
         return ArtifactSummary(
@@ -195,6 +232,7 @@ class Artifact(BaseModel):
             source=self.source,
             tags=self.tags,
             project=self.project,
+            public_until=self.public_until,
         )
 
     def text(self) -> tuple[str, ...]:
@@ -207,6 +245,16 @@ class Artifact(BaseModel):
             *notes,
             self.entry,
         )
+
+
+class Artifact(ArtifactMeta):
+    """An artifact exactly as ``meta.json`` holds it (spec § 4.2), link records included."""
+
+    links: tuple[LinkRecord, ...] = ()
+
+    def link(self, lid: str) -> LinkRecord | None:
+        """The live record of one link, if it still exists."""
+        return next((record for record in self.links if record.lid == lid), None)
 
 
 class ArtifactSummary(BaseModel):
@@ -222,6 +270,7 @@ class ArtifactSummary(BaseModel):
     source: str
     tags: tuple[str, ...] = ()
     project: str | None = None
+    public_until: AwareDatetime | None = None
 
 
 class ArtifactDraft(BaseModel):
@@ -326,14 +375,42 @@ def _new_tags(tags: tuple[str, ...], added: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(fresh)
 
 
-class ArtifactDetail(BaseModel):
-    """``artifact_get``: the metadata plus the file list of one version (spec § 5.1)."""
+class LinkViews(BaseModel):
+    """How often one recorded link was opened (spec § 11.4)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    artifact: Artifact
+    lid: str
+    label: str = ""
+    views: int = Field(ge=0)
+    first_viewed_at: AwareDatetime | None = None
+    last_viewed_at: AwareDatetime | None = None
+
+
+class Views(BaseModel):
+    """An artifact's view counts, to the hour; a visitor is counted once per hour (spec § 11.4)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    total: int = Field(default=0, ge=0)
+    visitors: int = Field(default=0, ge=0)
+    bots: int = Field(default=0, ge=0)
+    first_viewed_at: AwareDatetime | None = None
+    last_viewed_at: AwareDatetime | None = None
+    links: tuple[LinkViews, ...] = ()
+
+
+class ArtifactDetail(BaseModel):
+    """``artifact_get``: the metadata, one version's files, the live links and the views (§ 5.1)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    artifact: ArtifactMeta
     version: int = Field(ge=1)
     files: tuple[FileEntry, ...]
+    links: tuple[LinkSummary, ...] = ()
+    # ``None`` when ``view_log`` is off.
+    views: Views | None = None
 
 
 class PublishedArtifact(BaseModel):
@@ -409,17 +486,28 @@ class LinkClaims(BaseModel):
     epoch: int | None = None
     nonce: str | None = None
     client: str | None = None
+    lid: str | None = None
 
     @model_validator(mode="after")
     def _payload_matches_the_kind(self) -> LinkClaims:
-        """A view link carries an epoch; an upload link a nonce and the client that asked for it."""
+        """Each kind carries exactly its payload (spec § 3).
+
+        A view link carries an epoch and maybe a link id; an unlocked one both; an upload one a
+        nonce and the client that asked for it.
+        """
         upload_fields = (self.nonce, self.client)
         if self.kind is LinkKind.VIEW and (
             self.epoch is None or any(field is not None for field in upload_fields)
         ):
-            raise ValueError("a view link carries an epoch and nothing else")
+            raise ValueError("a view link carries an epoch, an optional link id and nothing else")
+        if self.kind is LinkKind.UNLOCKED and (
+            self.epoch is None or self.lid is None or any(f is not None for f in upload_fields)
+        ):
+            raise ValueError("an unlocked link carries an epoch and a link id, and nothing else")
         if self.kind is LinkKind.UPLOAD and (
-            any(field is None for field in upload_fields) or self.epoch is not None
+            any(field is None for field in upload_fields)
+            or self.epoch is not None
+            or self.lid is not None
         ):
             raise ValueError("an upload link carries a nonce and a client, and no epoch")
         return self
@@ -435,12 +523,18 @@ class SignedLink(BaseModel):
 
 
 class ArtifactLink(BaseModel):
-    """What ``artifact_link`` hands out: a private link, or the public URL, which never expires."""
+    """What ``artifact_link`` hands out: a private link, or the public URL (spec § 5.1).
+
+    A recorded link carries its ``lid``; a generated passcode is here once and never again.
+    The public URL carries ``public_until`` as its expiry, or none.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     url: str
     expires_at: AwareDatetime | None = None
+    lid: str | None = None
+    passcode: str | None = None
 
 
 class UploadGrant(BaseModel):

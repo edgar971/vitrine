@@ -16,8 +16,8 @@ vitrine stores files that agents publish and serves them to browsers. This spec 
 How the pieces are built is in [`design.md`](design.md); why they are safe is in
 [`security.md`](security.md).
 
-Out of scope for 0.1: a web UI for owners, comments, analytics, password-protected links,
-fetching content from URLs, and storage backends other than the filesystem.
+Out of scope: a web UI for owners, comments, fetching content from URLs, emailed one-time codes,
+and storage backends other than the filesystem. Analytics are anonymous view counts only (§ 11.4).
 
 ## 2. Concepts
 
@@ -28,7 +28,9 @@ fetching content from URLs, and storage backends other than the filesystem.
 | **Visibility** | `private` (default) or `public`. |
 | **Public URL** | `{base}/a/{id}/`. Anyone with it can view. The id is the secret; nothing lists public artifacts. |
 | **Private link** | `{base}/s/{sig}/`. A signed capability with an expiry. Revocable. |
+| **Recorded link** | A private link `artifact_link` minted: it carries a **link id** (`lid`) and lives as a record in `meta.json`, so it can carry a **passcode**, be revoked on its own and have its views counted. |
 | **Link epoch** | A per-artifact counter inside every private link. Incrementing it revokes all private links issued before. |
+| **Public window** | `public_until`: when a public artifact goes private again on its own (§ 4.3). |
 | **Client** | An agent or tool holding an API token. Its **name** is recorded as the artifact's `source`. |
 | **Base** | The configured public origin (`public_base_url`) used to build every URL. |
 | **Client reference** | An optional key a client sends with `artifact_create` so a retried call returns the same artifact instead of a duplicate (§ 4.5). |
@@ -46,17 +48,32 @@ fetching content from URLs, and storage backends other than the filesystem.
 
 ```
 sig  = b64url(body) "." b64url(HMAC-SHA256(secret, body)[0:16])
-body = "view"   "|" id "|" expires_unix "|" link_epoch                (private viewing)
-     | "upload" "|" id "|" expires_unix "|" nonce "|" client       (signed upload URL)
+body = "view"     "|" id "|" expires_unix "|" link_epoch [ "|" lid ]   (private viewing)
+     | "unlocked" "|" id "|" expires_unix "|" link_epoch "|" lid       (a passcode was given)
+     | "upload"   "|" id "|" expires_unix "|" nonce "|" client         (signed upload URL)
 ```
 
-- `b64url` is URL-safe base64 without padding.
+- `b64url` is URL-safe base64 without padding. A `lid` is 8 random bytes in `b64url`.
 - Verification **MUST** use a constant-time comparison.
 - The `kind` is covered by the MAC, so a signature of one kind **MUST NOT** verify as another.
 - An upload URL signs the client that asked for it. The upload is attributed to that client and
   spends that client's `rate_writes` bucket, whoever runs the `PUT`.
 - A link that is tampered, expired, of the wrong kind, for another id or carrying a stale epoch
   **MUST** produce the same response as an unknown artifact (404).
+- **Recorded links.** Every link `artifact_link` mints carries a `lid` and has a record in
+  `meta.json` (§ 4.2). It verifies only while that record exists, so deleting the record revokes
+  that one link. The link a create or an update returns carries no `lid`: it is the author's
+  working link, revoked by the epoch only. Links minted before 0.2 (no `lid`) verify as before.
+- An artifact holds at most `max_links` live records (*configurable*, default `500`); minting
+  past that fails with "revoke links first". Expired records are dropped first, and by the sweep.
+- **Passcodes.** A recorded link may carry a passcode. Its record holds only the scrypt hash
+  (`hashlib.scrypt`, `n=2**15, r=8, p=1`, a 16-byte salt). Case and hyphens are ignored, so
+  `ABCDE-fghjk` and `abcdefghjk` are one passcode. The passcode **MUST NOT** appear in the audit
+  log, the access log, metrics or any error. It cannot be changed: mint a new link instead.
+- **Unlocked signatures.** A right passcode earns an `unlocked` signature (§ 7.1), valid until
+  the earlier of `unlock_ttl` (*configurable*, default `12h`) and the link's own expiry, and only
+  while the link's record exists and the epoch matches. `unlocked` never verifies as `view`, and
+  `view` never as `unlocked`.
 - TTLs are *configurable*: default and maximum for view links and for upload URLs (§ 8).
 - Duration strings use the form `<int><s|m|h|d>`, for example `15m` or `7d`.
 
@@ -70,6 +87,7 @@ body = "view"   "|" id "|" expires_unix "|" link_epoch                (private v
   artifacts/<id>/v<n>/<files…>     immutable once in place
   refs/<client>/<sha256(ref)>      idempotency records (§ 4.5)
   audit/<YYYY-MM>.jsonl            append-only audit log (§ 11.3)
+  views/<YYYY-MM>.jsonl            anonymous view counts (§ 11.4)
   tmp/                             staging; MUST be on the same filesystem as artifacts/
 ```
 
@@ -105,9 +123,9 @@ body = "view"   "|" id "|" expires_unix "|" link_epoch                (private v
 | Field | Type | Default | Used by |
 |---|---|---|---|
 | `project` | `null` \| a name matching `[a-z0-9][a-z0-9_.-]{0,63}` | `null` | projects: one per artifact; tags stay many |
-| `links` | `[{lid, label, created_at, expires_at, passcode}]`, live links only; `passcode` is `null` or `{hash, salt, n, r, p}` (scrypt) | `[]` | per-link passcode, revoke and view counts |
+| `links` | `[{lid, label, created_at, expires_at, passcode}]`, one per recorded link; `passcode` is `null` or `{hash, salt, n, r, p}` (scrypt) | `[]` | per-link passcode, revoke and view counts (§ 3) |
 | `fallback` | `null` \| a path in the version | `null` | zip sites, SPA fallback |
-| `public_until` | `null` \| timestamp | `null` | scheduled unpublish |
+| `public_until` | `null` \| timestamp | `null` | scheduled unpublish (§ 4.3) |
 
 A field whose feature is not enabled keeps its default and has no effect. `meta.json` holds no
 secret in clear and nothing about viewers: no IPs, no passcodes. A link `label` is a name the user
@@ -143,6 +161,20 @@ The same rule **MUST** apply when writing and when resolving a request path.
 - After `expires_at`, every view returns `410 Gone`.
 - A periodic sweep deletes expired artifacts (*configurable* interval).
 
+**Scheduled unpublish**
+
+- `public_until` ends a public window: `artifact_set_visibility(id, "public", public_for)` sets it
+  to now + `public_for`. `public_ttl_max` (*configurable*, default `off`) caps every window, a
+  missing `public_for` included, so with it set nothing stays public for ever.
+- It is **enforced at request time**: once `public_until` passes, `/a/{id}/…` **MUST** answer
+  404, as for any private id, even before the sweep runs.
+- The sweep then makes the artifact private: `visibility = private`, `public_until = null`, link
+  epoch + 1, every link record dropped. It audits `visibility_changed` with `client = "@sweep"`
+  and `gate = "scheduled"`. The artifact and its history are kept.
+- **Widening needs the gate.** Moving `public_until` later or clearing it is only possible through
+  `artifact_set_visibility(public, …)`, which asks the human again (§ 6.1) and keeps the links.
+  Going private early is `artifact_set_visibility(private)`.
+
 **Write atomicity**
 
 - A version becomes visible only once its folder is renamed into place and `meta.json` is
@@ -159,7 +191,10 @@ The same rule **MUST** apply when writing and when resolving a request path.
   (new version)   │   PRIVATE    │ ─────────────────────────────────────────► │    PUBLIC    │ ◄── update
                                                                                                 + gate approved
    revoke_links   │ /s/{sig} only│ ◄───────────────────────────────────────── │ /a/{id} + /s │
-   (epoch + 1)    └──────┬───────┘        set_visibility(private), epoch + 1  └──────┬───────┘
+   (epoch + 1, or │              │        set_visibility(private), epoch + 1  │              │
+    one lid)      │              │ ◄───────────────────────────────────────── │              │ ◄── set_visibility(
+                  │              │  sweep after public_until, epoch + 1       │              │     public, public_for)
+                  └──────┬───────┘  (/a/ is 404 from public_until on)         └──────┬───────┘     + gate approved
                          │ expires_at passes                                         │
                          ▼                                                           ▼
                   ┌──────────────┐   sweep                                  (same: EXPIRED)
@@ -168,8 +203,8 @@ The same rule **MUST** apply when writing and when resolving a request path.
                   └──────────────┘
 ```
 
-Every arrow is one audit event (§ 11.3). Every visibility change increments the link epoch, so no
-private link survives a round trip through public.
+Every arrow is one audit event (§ 11.3). Every visibility change increments the link epoch and
+drops every link record, so no private link survives a round trip through public.
 
 New content on a public artifact is public the moment it lands, so a version **MUST NOT** be added
 to a public artifact without the gate (§ 6). Over MCP, `artifact_update` asks the human when the
@@ -222,12 +257,12 @@ The HTTP API applies the same scopes: `/api` writes need `vitrine:write`, and li
 |---|---|---|---|
 | `artifact_create` | `title`; `files: {path: text}` (UTF-8, total ≤ `max_mcp_body`); `entry?`; `expires_in?`; `tags?`; `project?`; `note?`; `client_ref?` (§ 4.5) | `{id, url, version, expires_at, created}`. Always **private**; `url` is a fresh private link. `created` is false when `client_ref` matched. | `vitrine:write` |
 | `artifact_update` | `id`; `files?`; `merge=false`; `entry?`; `title?`; `expires_in?` (`"never"` clears); `tags?`; `note?` | `{id, url, version}`. The id is unchanged. With `merge`, files overlay the current version; without it they replace it. Without `files`, the current files carry over, so a metadata-only change is still a new version; `artifact_set_meta` changes metadata without one. On a **public** artifact the human is asked first (§ 6.1) and `url` is the public URL; a token without `vitrine:publish` is refused without asking (§ 4.4). | `vitrine:write` (+ `vitrine:publish` for a public artifact) |
-| `artifact_get` | `id`; `version?` | Metadata plus `files: [{path, bytes}]` | `vitrine:read` |
+| `artifact_get` | `id`; `version?` | `{artifact, version, files: [{path, bytes}], links, views}`. `artifact` is `meta.json` without its link records; `links` is `[{lid, label, created_at, expires_at, passcode: bool}]` for the live ones, never a URL or a hash. `views` is § 11.4's `{total, visitors, bots, first_viewed_at, last_viewed_at, links: [{lid, label, views, first_viewed_at, last_viewed_at}]}`, or `null` when `view_log` is `off`. `artifact.public_until` says when a public artifact stops being public. | `vitrine:read` |
 | `artifact_set_meta` | `id`; `title?`; `tags?` (replaces them); `add_tags?`; `remove_tags?`; `project?` (`""` clears it) | `{id, title, tags, project}`. Rewrites `meta.json` only: no version, no gate, no new link epoch, so every link keeps working. `tags` cannot be combined with `add_tags` or `remove_tags`, and a call must name something to change. A change to the values already there writes and audits nothing. | `vitrine:write` |
-| `artifact_list` | `query?` (search terms, below); `tag?`; `project?`; `visibility?`; `source?`; `updated_after?`; `expiring_within?` (a duration); `sort=updated` \| `created` \| `title`; `facets=false`; `limit=20` (max 100); `cursor?` | `{items: [{id, title, visibility, version, updated_at, source, tags, project}], next_cursor, facets}`. `updated` and `created` are newest first, `title` is A to Z. With `facets`, `facets` is `{projects: {name: count}, tags: {name: count}}` over the whole match, not the page; otherwise `null`. **No URLs**: links are minted on purpose with `artifact_link`. | `vitrine:read` |
-| `artifact_link` | `id`; `ttl?` | `{url, expires_at}`. A fresh private link, or the public URL if public. | `vitrine:share` |
-| `artifact_set_visibility` | `id`; `visibility` | `{id, visibility, url}`. Going public follows § 6. Every change increments the link epoch. | `vitrine:publish` |
-| `artifact_revoke_links` | `id` | `{id, link_epoch}` | `vitrine:share` |
+| `artifact_list` | `query?` (search terms, below); `tag?`; `project?`; `visibility?`; `source?`; `updated_after?`; `expiring_within?` (a duration); `sort=updated` \| `created` \| `title`; `facets=false`; `limit=20` (max 100); `cursor?` | `{items: [{id, title, visibility, version, updated_at, source, tags, project, public_until}], next_cursor, facets}`. `updated` and `created` are newest first, `title` is A to Z. With `facets`, `facets` is `{projects: {name: count}, tags: {name: count}}` over the whole match, not the page; otherwise `null`. **No URLs**: links are minted on purpose with `artifact_link`. | `vitrine:read` |
+| `artifact_link` | `id`; `ttl?`; `label?` (who it is for, at most 200 characters); `passcode?`: `true` generates one, a string of 8–128 characters sets one | `{url, expires_at, lid, passcode?}`: a fresh recorded link (§ 3). A generated passcode is returned **once**, shown as `xxxxx-xxxxx` (10 Crockford base32 characters, 50 bits); a supplied one is not returned. On a public artifact it returns the public URL with `expires_at` = `public_until`, and refuses a `label` or a `passcode`. Every call is audited (`link_issued`). | `vitrine:share` |
+| `artifact_set_visibility` | `id`; `visibility`; `public_for?` (a duration, with `public` only) | `{id, visibility, url, public_until}`. Going public follows § 6; `public_for` and `public_ttl_max` set `public_until` (§ 4.3). On a public artifact, a different window asks the human again and keeps the links. Every change of visibility increments the link epoch. | `vitrine:publish` |
+| `artifact_revoke_links` | `id`; `link?` (a `lid`) | `{id, link_epoch, link}`. With `link`, only that link and its unlocked URLs stop; without it, every private link does (epoch + 1). | `vitrine:share` |
 | `artifact_upload_url` | `filename`; `id?`; `title?`; `ttl?` | `{id, put_url, expires_at, curl}`: a single-use signed upload URL (§ 7.3) for the artifact `id`, pre-allocated when none was given. `filename` and `title` ride unsigned in the URL's query: the signature fixes the id, the expiry and the nonce; the rest is the capability holder's to name. | `vitrine:write` |
 | `artifact_delete` | `id` | `{deleted: id}` | `vitrine:write` |
 
@@ -252,10 +287,11 @@ No tool other than `artifact_set_visibility` takes a visibility, and no HTTP rou
 | `artifact://{id}` | `meta.json` plus the file list (JSON) |
 | `artifact://{id}/{path}` | Text of one file in the current version. Text types only, up to 1 MB. Anything else returns an error naming the size and type. |
 | `artifact://{id}/history` | This artifact's audit events, newest first (§ 11.3). An unknown id is `not found`. |
+| `artifact://{id}/views` | This artifact's views hour by hour for the last 30 days: `[{hour, views, visitors, bots}]`, oldest first, empty hours left out (§ 11.4). An unknown id is `not found`. |
 
 Clients use resources to read an artifact back before revising it. Every resource needs `vitrine:read`
-and spends the `rate_reads` bucket. A file named `history` at an artifact's root is shadowed by the
-history resource; read it with `GET /s/…` instead.
+and spends the `rate_reads` bucket. A file named `history` or `views` at an artifact's root is
+shadowed by those resources; read it with `GET /s/…` instead.
 
 ### 5.3 Policy carried in descriptions
 
@@ -266,7 +302,9 @@ Tool descriptions are part of this spec, because they are what the model reads.
 - **`artifact_set_visibility`:** it **MUST** state:
   - use it only when the user asked for a public link;
   - the user will be asked to confirm;
-  - the agent should tell the user when a link is public.
+  - the agent should tell the user when a link is public, and until when (`public_until`).
+- **`artifact_link`:** it **MUST** tell the agent to give a passcode to the user separately from
+  the link, and say when a public URL stops being public.
 
 ### 5.4 Server instructions
 
@@ -307,9 +345,11 @@ tools and scopes don't already allow.
 ### 6.1 Confirmation
 
 The confirmation message **MUST** name the artifact title and its file count, and say that
-anyone with the link can view it. When `artifact_update` asks before adding a version to a public
-artifact, the message names the title, says it is public and that the new version is visible
-immediately.
+anyone with the link can view it. With a public window it **MUST** name the end ("…PUBLIC until
+24 Oct 2026 10:00 UTC? Anyone with the link can view it until then"). When it moves the window of
+an artifact that is already public, it says so ("Keep … PUBLIC until …"). When `artifact_update`
+asks before adding a version to a public artifact, the message names the title, says it is public
+and that the new version is visible immediately.
 
 | Negotiated MCP protocol | Mechanism | Approved when |
 |---|---|---|
@@ -347,7 +387,8 @@ cover them.
 |---|---|---|
 | `GET /a/{id}/[{path}]` | none | Public artifact, current version. A missing, private or malformed id returns 404. |
 | `GET /a/{id}@{n}/[{path}]` | none | Pinned version `n` of a public artifact. A version that is not retained returns 404. |
-| `GET /s/{sig}/[{path}]`, `GET /s/{sig}@{n}/[{path}]` | view signature | The same for any artifact the signature names |
+| `GET /s/{sig}/[{path}]`, `GET /s/{sig}@{n}/[{path}]` | view or unlocked signature | The same for any artifact the signature names. A recorded link with a passcode answers **401 with the unlock form** instead, for every path: vitrine's own page, with no title, no file names and nothing from the artifact. |
+| `POST /s/{sig}[@{n}]/unlock` | view signature | Form fields `passcode` and `path`. A right passcode answers `303` to `/s/{usig}[@{n}]/{path}` (an `unlocked` signature, § 3), so relative assets resolve under it. A wrong one answers 401 with the form and one generic message. A link without a passcode answers `303` to itself. A bad signature or an expired artifact answers as the `GET` would (404 / 410). The body is at most 1 KiB, and a foreign `Origin` (`null` included) is refused with 403. |
 | `PUT /u/{sig}?filename=[&title=]` | upload signature, from a client still configured with `vitrine:write` | Raw body. Creates the pre-allocated private artifact (`201`), or adds a version that overlays the file on the current ones (`200`). Single use. Returns `{id, url, version, expires_at}`. A public target returns 403 (§ 4.4). An URL whose client was removed from `VITRINE_TOKENS`, or lost `vitrine:write`, returns 404. |
 | `POST /api/artifacts` | bearer, `vitrine:write` | `multipart/form-data`: one `file` part per file (the part's filename is its relative path), plus fields `title`, `entry?`, `expires_in?`, `tags?` (repeatable, or comma-separated), `project?` (empty means none), `note?`, `client_ref?`. Any other field is refused with 400, so there is no way to send a visibility. Returns `201 {id, url, version, expires_at}`, or `200` with the existing artifact when `client_ref` matched (§ 4.5). Always private. |
 | `PUT /api/artifacts/{id}` | bearer, `vitrine:write` | Same body, without `client_ref`. Adds a version; `merge=true` overlays; `expires_in=never` clears the expiry; an empty `project` clears it. A public target returns 403 (§ 4.4). |
@@ -357,6 +398,12 @@ cover them.
 
 The `@{n}` suffix keeps version pinning inside one path segment, so relative asset URLs in
 multi-file HTML keep working under every prefix.
+
+The unlock form carries `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline';
+form-action 'self'; frame-ancestors 'none'`, `no-store`, and `Referrer-Policy: same-origin` (under
+`no-referrer` a browser posts the form with `Origin: null`). A passcode is never kept in a cookie:
+agent HTML runs in an opaque origin, where a `SameSite` cookie never reaches the page's own
+assets, so the unlocked state rides in the path segment, like `@{n}` (ADR 0006).
 
 Every `GET` route also answers `HEAD`. A view URL without its trailing slash redirects to it.
 An empty `{path}` serves the entry; an entry in a subdirectory is redirected to (`307`, a
@@ -451,15 +498,20 @@ Token buckets in memory: per client for authenticated calls, per source IP for v
 | `rate_links` | client | `120/m` | `artifact_link`, `artifact_revoke_links`, `artifact_set_visibility` |
 | `rate_reads` | client | `600/m` | get, list, resources |
 | `rate_views` | source IP | `1200/m` | `/a/` and `/s/` requests |
+| `rate_unlock` | link + source IP | `10/m` | wrong passcodes only |
+| `rate_unlock_link` | link | `100/h` | wrong passcodes only, from every address together |
 
 Behaviour when a bucket is empty:
 
 - MCP calls fail with `rate limited: retry after <n>s`.
 - HTTP returns `429` with `Retry-After`.
-- Rejected calls do no work and write nothing.
+- Rejected calls do no work and write nothing. An unlock refused by either unlock bucket does not
+  check the passcode, so its holder can lock out other holders of that same link only.
 
 The source IP honours `X-Forwarded-For` only from `forwarded_allow_ips`. Setting a limit to
-`off` disables it. Counters reset on restart, which is acceptable for a single process.
+`off` disables it. Counters reset on restart, which is acceptable for a single process. A bucket
+that has refilled is dropped from memory, so the per-IP and per-link state does not grow with
+every address that ever called.
 
 A refusal from a client's bucket is audited (§ 11.3). A refused view is not: a viewer has no
 client name, and writing a line per refused request would turn a flood into disk writes.
@@ -527,6 +579,8 @@ settings and are ignored, so one shell can run the server and a client.
 | `ref_ttl` | `24h` | How long a `client_ref` stays bound to its artifact (§ 4.5) |
 | `rate_writes` / `rate_links` / `rate_reads` | `60/m` / `120/m` / `600/m` | Per-client buckets (§ 7.5) |
 | `rate_views` | `1200/m` | Per-IP bucket for views (§ 7.5) |
+| `rate_unlock` / `rate_unlock_link` | `10/m` / `100/h` | Wrong passcodes per link and IP, and per link (§ 7.5) |
+| `max_links` | `500` | Live recorded links per artifact (§ 3) |
 
 **Links**
 
@@ -534,13 +588,17 @@ settings and are ignored, so one shell can run the server and a client.
 |---|---|---|
 | `link_ttl` / `link_ttl_max` | `7d` / `90d` | Private link lifetime: default and ceiling |
 | `upload_ttl` / `upload_ttl_max` | `15m` / `1h` | Upload URL lifetime: default and ceiling |
+| `unlock_ttl` | `12h` | How long an unlocked passcode link works, never past the link itself (§ 3) |
+| `public_ttl_max` | `off` | The longest public window; `off` for none (§ 4.3) |
 
 **Operations**
 
 | Key | Default | Description |
 |---|---|---|
-| `sweep_interval` | `1h` | Expiry, staging, idempotency-record and audit-retention sweep period |
+| `sweep_interval` | `1h` | Expiry, unpublish, link-record, staging, idempotency-record, audit- and view-retention sweep period |
 | `audit_retention` | `365d` | Audit files older than this are deleted by the sweep |
+| `view_log` | `counts` | `counts` or `off` (§ 11.4) |
+| `view_retention` | `90d` | View-count months older than this are deleted by the sweep |
 | `metrics_port` | `0` (off) | Separate Prometheus listener; needs the `metrics` extra |
 | `log_level` | `INFO` | |
 | `log_format` | `text` | `text` or `json` |
@@ -586,7 +644,8 @@ mcp-vitrine serve --config vitrine.toml
 | `mcp-vitrine secret new` | Print a new random 32-byte hex secret |
 | `mcp-vitrine sweep [--config FILE]` | Run the expiry and staging sweep once, then exit (for cron-style setups). Safe beside a running server: staging younger than 10 minutes is left alone. |
 | `mcp-vitrine audit [--id ID] [--client NAME] [--since 7d] [--json] [--config FILE]` | Print audit events, newest first; `--json` prints the stored lines |
-| `mcp-vitrine backup <dest> [--config FILE]` | Write a consistent, restorable copy of `data_dir` ([operations](operations.md) § 2) |
+| `mcp-vitrine views [--id ID] [--since 7d] [--config FILE]` | Print view counts per artifact and link, most viewed first: views, visitors, bots (§ 11.4). It reads what the server flushed, so the last minute may be missing. |
+| `mcp-vitrine backup <dest> [--config FILE]` | Write a consistent, restorable copy of `data_dir`, `views/` included ([operations](operations.md) § 2) |
 | `mcp-vitrine migrate [--dry-run] [--config FILE]` | Upgrade `meta.json` files to the current `schema_version` ([operations](operations.md) § 4) |
 
 Every command exits `0` on success, `1` when it failed, and `2` when the arguments or the
@@ -599,12 +658,13 @@ they need `VITRINE_SECRET` and `VITRINE_TOKENS` too.
 |---|---|---|
 | Missing or invalid token | 401 (transport) | 401 |
 | Token without the scope | tool not listed; calling it fails as unknown | 403 |
-| Unknown or malformed id; private id on `/a/`; invalid link | tool error `not found` | 404 |
+| Unknown or malformed id; private id, or a public one past `public_until`, on `/a/`; invalid link; revoked link record | tool error `not found` | 404 |
+| A passcode link opened without its passcode, or with a wrong one | — | 401 with the unlock form |
 | Expired artifact | tool error `expired` | 410 |
 | Unsafe path; bad entry; empty artifact; a duration that is zero or over 36500 days | tool error naming the problem | 400 |
 | Upload URL reused; `client_ref` reused with different content; the artifact changed while the human decided | tool error `conflict` | 409 |
 | Rate limit exceeded | tool error `rate limited: retry after <n>s` | 429 + `Retry-After` |
-| Over a size or file-count limit | tool error | 413 |
+| Over a size or file-count limit; `max_links` live links | tool error | 413 |
 | Over quota | tool error | 507 |
 | Public refused (§ 6) | tool error stating it stays private | — |
 | A new version for a public artifact without the gate (§ 4.4) | tool error saying the artifact is public | 403 |
@@ -632,7 +692,8 @@ tool error `internal error`.
 | `vitrine_artifacts` | gauge | — |
 | `vitrine_storage_bytes` | gauge | — |
 | `vitrine_versions_created_total` | counter | `client` |
-| `vitrine_views_total` | counter | `route` = `a` \| `s` |
+| `vitrine_views_total` | counter | `route` = `a` \| `s`; `kind` = `view` \| `bot` (a link unfurler, § 11.4). Every file served, assets included. |
+| `vitrine_unlock_total` | counter | `outcome` = `ok` \| `wrong` \| `rate_limited` |
 | `vitrine_public_gate_total` | counter | `outcome` = `approved` \| `declined` \| `unsupported` \| `disabled` \| `not_required` (one per gate decision: making an artifact public, or adding a version to a public one) |
 | `vitrine_rejected_total` | counter | `reason` = `rate_limited` \| `scope` |
 
@@ -652,9 +713,10 @@ state change is acknowledged.
 |---|---|
 | `created` | `version`, `files`, `bytes`, `client_ref` (when given) |
 | `version_added` | `version`, `files`, `bytes`, `merge` (on a public artifact, only after the gate approved) |
-| `visibility_changed` | `from`, `to`, `gate` = `approved` \| `not_required` |
+| `visibility_changed` | `from`, `to`, `gate` = `approved` \| `not_required` \| `scheduled` (the sweep ended a public window; `client` = `@sweep`). Moving the window of a public artifact is `from` = `to` = `public`. |
 | `publish_refused` | `gate` = `declined` \| `unsupported` \| `disabled` |
-| `links_revoked` | `link_epoch` |
+| `link_issued` | `lid`, `expires_at`, `passcode` (a boolean). Never the label, the URL or the passcode. |
+| `links_revoked` | `link_epoch` (every link), or `lid` (one link) |
 | `metadata_changed` | `fields`: the **names** of what changed (`title`, `tags`, `project`), never the values |
 | `upload_url_issued` | `expires_at` |
 | `deleted` | — |
@@ -672,6 +734,38 @@ Rules:
   happen.
 - A line that is not an event (a write torn by a crash) is skipped and logged when the log is
   read, and the next append starts on a fresh line.
+
+### 11.4 Views
+
+Views are telemetry, not audit events: they are counted in memory and appended to
+`views/<YYYY-MM>.jsonl` every 60 seconds and at shutdown, without an `fsync`, so a crash loses up to
+a minute of counts. A flood costs one counter, not a disk write per request.
+
+`view_log` (*configurable*): `counts` (default) or `off`, which records nothing.
+
+**What counts.** A view is a `GET` answered 2xx whose path is the entry or a renderer page;
+assets do not count, so a page with 30 images is one view. Not counted: `HEAD`, `Range` requests,
+`Sec-Purpose: prefetch`, requests refused by a rate limit, and unlock forms.
+
+**Who.** A viewer is anonymous, so "who" means *which link*:
+
+- a recorded link's views count under its `lid`, shown with its `label` when read; older links
+  and the public URL count under `lid: null`;
+- a **visitor** is `HMAC(hour_key, ip | user_agent)`, where `hour_key` is random, lives in memory
+  only and changes every hour; only the **number** of distinct values is stored;
+- a **bot** is a user agent from a short list of link unfurlers (Slackbot, Discordbot,
+  TelegramBot, WhatsApp, Twitterbot, facebookexternalhit, LinkedInBot), counted apart from views.
+
+No IP address or user agent reaches disk. Each line holds counts added since the previous line
+for its key, and the lines of a key add up to its totals:
+
+```json
+{"hour":"2026-10-17T14:00:00Z","artifact":"k7m2q9x4tz3wbn6r","route":"s","lid":"AbCdEfGh_-0","views":12,"visitors":3,"bots":1}
+```
+
+Disk grows with artifacts × hours viewed × links, not with requests. `view_retention` (default
+`90d`) deletes whole months; counts of deleted artifacts stay until then, and hold only ids.
+They are read through `artifact_get.views`, `artifact://{id}/views` and `mcp-vitrine views`.
 
 ## 12. Compatibility
 

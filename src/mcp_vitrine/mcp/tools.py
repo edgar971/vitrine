@@ -21,7 +21,8 @@ from fastmcp.server.providers import LocalProvider
 from pydantic import AwareDatetime, Field
 
 from mcp_vitrine.config import requested_duration
-from mcp_vitrine.domain.ids import ALPHABET, CLIENT_REF_MAX, ID_LENGTH
+from mcp_vitrine.domain.errors import Invalid
+from mcp_vitrine.domain.ids import ALPHABET, CLIENT_REF_MAX, ID_LENGTH, LID_PATTERN
 from mcp_vitrine.domain.models import (
     PROJECT_PATTERN,
     TAG_LIMIT,
@@ -298,7 +299,11 @@ def artifact_get(
     ] = None,
     service: ArtifactService = Depends(artifact_service),
 ) -> ArtifactDetail:
-    """Read an artifact's metadata and the file list of one version. Returns no link."""
+    """Read an artifact's metadata, one version's file list, its live links and its views.
+
+    Returns no URL: links are minted on purpose with artifact_link. Views count each link
+    separately, and link unfurlers (chat previews) as bots, not views.
+    """
     return service.get(id, version=version)
 
 
@@ -447,10 +452,38 @@ def artifact_set_meta(
 def artifact_link(
     id: ArtifactId,
     ttl: Ttl = None,
+    label: Annotated[
+        str | None,
+        Field(
+            description="Who the link is for, e.g. 'sent to finance': shown with its view "
+            "counts, never to viewers.",
+            max_length=TITLE_MAX,
+        ),
+    ] = None,
+    passcode: Annotated[
+        bool | str | None,
+        Field(
+            description="true generates a passcode the viewer must type before the content "
+            "shows; a string of 8 to 128 characters sets one. A private artifact only."
+        ),
+    ] = None,
     service: ArtifactService = Depends(artifact_service),
+    caller: AccessToken = CurrentAccessToken(),
 ) -> ArtifactLink:
-    """Mint a fresh signed private link that expires, or return the URL of a public artifact."""
-    return service.link(id, ttl=None if ttl is None else requested_duration(ttl))
+    """Mint a fresh signed private link that expires, or return the URL of a public artifact.
+
+    Each link has its own lid: artifact_revoke_links(link=lid) stops that one alone. A generated
+    passcode is returned once: give it to the user separately from the link, never in the same
+    message, so a forwarded or unfurled link does not carry it. A public URL's expires_at is when
+    the artifact stops being public, or null.
+    """
+    return service.link(
+        id,
+        client=_caller(caller),
+        ttl=None if ttl is None else requested_duration(ttl),
+        label=label or "",
+        passcode=passcode,
+    )
 
 
 @tools.tool(
@@ -468,6 +501,14 @@ async def artifact_set_visibility(
     visibility: Annotated[
         Visibility, Field(description="public: anyone with the link can view. private: links only.")
     ],
+    public_for: Annotated[
+        str | None,
+        Field(
+            description="With public: stay public this long (12h, 7d), then go private again on "
+            "its own. Default: until made private, or the server's ceiling.",
+            pattern=DURATION_PATTERN,
+        ),
+    ] = None,
     ctx: Context = CurrentContext(),
     service: ArtifactService = Depends(artifact_service),
     gate: PublicGate = Depends(public_gate),
@@ -476,19 +517,29 @@ async def artifact_set_visibility(
     """Make an artifact public, or private again. Use public only when the user asked for it.
 
     The user is asked to confirm before anything becomes public; if they decline, it stays private.
-    When a link is public, tell the user clearly. Every change revokes the existing private links.
+    When a link is public, tell the user clearly, and until when: public_until is when it goes
+    private again on its own (null: never). Calling it again on a public artifact moves that end,
+    which asks the user again. Every change of visibility revokes the existing private links.
     """
     client = _caller(caller)
+    if public_for is not None and visibility is not Visibility.PUBLIC:
+        raise Invalid("public_for applies to visibility=public")
     detail = await to_thread.run_sync(partial(service.get, id))
     decision = GateDecision.NOT_REQUIRED
     seen_version = None
-    if visibility is Visibility.PUBLIC and detail.artifact.visibility is not Visibility.PUBLIC:
+    until = service.public_window(None if public_for is None else requested_duration(public_for))
+    widens = detail.artifact.visibility is not Visibility.PUBLIC or (
+        detail.artifact.public_until != until
+    )
+    if visibility is Visibility.PUBLIC and widens:
         answer = await public_gate_flow.confirm(
             ctx,
             gate,
             detail,
-            question=gate.question(detail),
-            binding=service.gate_binding(id, client=client, request=_request(visibility)),
+            question=gate.question(detail, until=until),
+            binding=service.gate_binding(
+                id, client=client, request=_request(visibility, public_for)
+            ),
         )
         if isinstance(answer, mt.InputRequiredResult):
             return answer
@@ -502,10 +553,16 @@ async def artifact_set_visibility(
             client=client,
             gate=decision,
             seen_version=seen_version,
+            public_until=until,
         )
     )
     link = service.url_for(artifact)
-    return VisibilityChange(id=artifact.id, visibility=artifact.visibility, url=link.url)
+    return VisibilityChange(
+        id=artifact.id,
+        visibility=artifact.visibility,
+        url=link.url,
+        public_until=artifact.public_until,
+    )
 
 
 @tools.tool(
@@ -520,12 +577,23 @@ async def artifact_set_visibility(
 @domain_errors(ToolError)
 def artifact_revoke_links(
     id: ArtifactId,
+    link: Annotated[
+        str | None,
+        Field(
+            description="The lid of one link, from artifact_link or artifact_get: stop only "
+            "that one. Omit to stop every private link.",
+            pattern=LID_PATTERN.pattern,
+        ),
+    ] = None,
     service: ArtifactService = Depends(artifact_service),
     caller: AccessToken = CurrentAccessToken(),
 ) -> RevokedLinks:
-    """Stop every private link issued so far for this artifact. A public URL is not affected."""
-    artifact = service.revoke_links(id, client=_caller(caller))
-    return RevokedLinks(id=artifact.id, link_epoch=artifact.link_epoch)
+    """Stop one private link, or every private link issued so far. A public URL is not affected.
+
+    Unlocked passcode sessions of a revoked link stop with it.
+    """
+    artifact = service.revoke_links(id, client=_caller(caller), lid=link)
+    return RevokedLinks(id=artifact.id, link_epoch=artifact.link_epoch, link=link)
 
 
 @tools.tool(

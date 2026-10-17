@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
-from collections.abc import Callable
+import logging
+from collections.abc import Callable, Collection
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
@@ -19,22 +21,26 @@ from mcp_vitrine.domain.errors import (
     Conflict,
     Expired,
     Invalid,
+    Locked,
     NotFound,
     Refused,
     TooLarge,
     VitrineError,
 )
-from mcp_vitrine.domain.ids import new_id, validate_client_ref
+from mcp_vitrine.domain.ids import new_id, new_lid, validate_client_ref
 from mcp_vitrine.domain.media import content_type, is_text
 from mcp_vitrine.domain.models import (
     Artifact,
     ArtifactDetail,
     ArtifactDraft,
     ArtifactLink,
+    ArtifactMeta,
     ArtifactPage,
     ArtifactQuery,
     GateDecision,
     LinkClaims,
+    LinkKind,
+    LinkRecord,
     MetaChange,
     PublishedArtifact,
     UploadGrant,
@@ -42,17 +48,39 @@ from mcp_vitrine.domain.models import (
     Visibility,
 )
 from mcp_vitrine.domain.paths import choose_entry, validate_path
-from mcp_vitrine.services.audit import AuditEvent, AuditEventName, AuditLog, MetaField
+from mcp_vitrine.services import passcodes
+from mcp_vitrine.services.audit import SWEEP, AuditEvent, AuditEventName, AuditLog, MetaField
 from mcp_vitrine.services.gate import GateBinding
 from mcp_vitrine.services.links import LinkService
 from mcp_vitrine.services.metrics import Metrics, NoMetrics
+from mcp_vitrine.services.views import HourViews, ViewLog
 from mcp_vitrine.storage.base import PUBLIC_UPDATE, Store
 
 TEXT_READ_LIMIT = 1024 * 1024
+SERIES_DAYS = 30
 UPLOAD_REUSED = "this upload URL was already used"
 # An id that once held an artifact is never handed to a new one: its old private links (epoch 0)
 # would open the new content.
 GONE = frozenset({AuditEventName.DELETED, AuditEventName.EXPIRED})
+PUBLIC_LINK = (
+    "this artifact is public, so its one URL takes no passcode or label: make it private to "
+    "share it with a passcode"
+)
+# The fields each kind of change writes; a compensation puts back only these (see ``_restore``).
+VISIBILITY_FIELDS = frozenset({"visibility", "public_until", "link_epoch", "links"})
+EPOCH_FIELDS = frozenset({"link_epoch", "links"})
+LINK_FIELDS = frozenset({"links"})
+META_FIELDS = frozenset(MetaField)
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class Opened:
+    """An artifact a view may serve, and the recorded link it was opened through, if any."""
+
+    artifact: Artifact
+    lid: str | None = None
 
 
 class SweepReport(BaseModel):
@@ -61,15 +89,18 @@ class SweepReport(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     expired: int = 0
+    unpublished: int = 0
+    links: int = 0
     staging: int = 0
     refs: int = 0
     audit_months: int = 0
+    view_months: int = 0
 
 
 class ArtifactService:
     """The pipeline every mutation follows: validate, write, audit, and undo if the audit fails."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - keyword-only seams, one per collaborator
         self,
         *,
         store: Store,
@@ -77,8 +108,10 @@ class ArtifactService:
         audit: AuditLog,
         clock: Clock,
         metrics: Metrics | None = None,
+        views: ViewLog | None = None,
     ) -> None:
         """Wire the seams; nothing is global."""
+        self._views = views
         self._metrics = metrics or NoMetrics()
         self._store = store
         self._links = links
@@ -178,7 +211,7 @@ class ArtifactService:
                 bytes=artifact.versions[-1].bytes,
                 merge=draft.merge,
             ),
-            rollback=partial(self._undo_version, previous, artifact.version),
+            rollback=partial(self._undo_version, previous, artifact, draft),
         )
         self._metrics.version_created(client)
         return self._published(self._store.prune(artifact_id))
@@ -204,7 +237,7 @@ class ArtifactService:
                 client=client,
                 fields=changed,
             ),
-            rollback=partial(self._store.replace_meta, before),
+            rollback=partial(self._restore, before, after, META_FIELDS),
         )
         return after
 
@@ -212,8 +245,18 @@ class ArtifactService:
         """Read one version's metadata and file list; an expired artifact answers ``Expired``."""
         artifact = self._usable(artifact_id)
         number = artifact.version if version is None else version
+        now = self._clock.now()
+        live = tuple(record for record in artifact.links if record.expires_at > now)
+        views = None
+        if self._views is not None:
+            labels = {record.lid: record.label for record in artifact.links}
+            views = self._views.totals(artifact.id, labels=labels)
         return ArtifactDetail(
-            artifact=artifact, version=number, files=self._store.files(artifact_id, number)
+            artifact=artifact,
+            version=number,
+            files=self._store.files(artifact_id, number),
+            links=tuple(record.summary() for record in live),
+            views=views,
         )
 
     def read_text(self, artifact_id: str, path: str) -> str:
@@ -237,16 +280,81 @@ class ArtifactService:
         """The moment that lies ``after`` from now on the service's clock."""
         return self._clock.now() + after
 
-    def link(self, artifact_id: str, *, ttl: timedelta | None = None) -> ArtifactLink:
-        """A fresh private link, or the public URL when the artifact is public (spec § 5.1)."""
-        return self.url_for(self._usable(artifact_id), ttl=ttl)
+    def link(
+        self,
+        artifact_id: str,
+        *,
+        client: str,
+        ttl: timedelta | None = None,
+        label: str = "",
+        passcode: str | bool | None = None,
+    ) -> ArtifactLink:
+        """Mint a recorded private link, or return the public URL when public (spec § 5.1).
+
+        A recorded link carries a ``lid``, so it can be revoked on its own and its views
+        counted. ``passcode=True`` generates one, a string supplies one; it is returned once
+        and only its scrypt hash is kept.
+        """
+        artifact = self._usable(artifact_id)
+        if artifact.visibility is Visibility.PUBLIC:
+            if label or passcode:
+                raise Invalid(PUBLIC_LINK)
+            return self.url_for(artifact)
+        shown = passcodes.generate() if passcode is True else passcode or None
+        if isinstance(passcode, str):
+            passcodes.check_supplied(passcode)
+        expires_at = self._links.link_expiry(ttl)
+        record = LinkRecord(
+            lid=new_lid(),
+            label=label,
+            created_at=self._clock.now(),
+            expires_at=expires_at,
+            passcode=None if shown is None else passcodes.digest(shown),
+        )
+        after = self._store.add_link(artifact_id, record, limit=self._links.policy.max_links)
+        self._record(
+            AuditEvent(
+                ts=self._clock.now(),
+                event=AuditEventName.LINK_ISSUED,
+                artifact=artifact_id,
+                client=client,
+                lid=record.lid,
+                expires_at=expires_at,
+                passcode=shown is not None,
+            ),
+            rollback=partial(self._drop_link, artifact_id, record.lid),
+        )
+        # Signed at the epoch the record landed under, so the two cannot disagree.
+        signed = self._links.view_url(
+            artifact_id, epoch=after.link_epoch, expires_at=expires_at, lid=record.lid
+        )
+        return ArtifactLink(
+            url=signed.url,
+            expires_at=expires_at,
+            lid=record.lid,
+            passcode=shown if passcode is True else None,
+        )
 
     def url_for(self, artifact: Artifact, *, ttl: timedelta | None = None) -> ArtifactLink:
-        """The URL that opens ``artifact`` as it is now; a public one carries no expiry."""
+        """The URL that opens ``artifact`` as it is now: unrecorded, or the public URL.
+
+        The public URL expires with the public window (``public_until``), or never.
+        """
         if artifact.visibility is Visibility.PUBLIC:
-            return ArtifactLink(url=self._links.public_url(artifact.id))
+            return ArtifactLink(
+                url=self._links.public_url(artifact.id), expires_at=artifact.public_until
+            )
         link = self._links.view_url(artifact.id, epoch=artifact.link_epoch, ttl=ttl)
         return ArtifactLink(url=link.url, expires_at=link.expires_at)
+
+    def public_window(self, public_for: timedelta | None) -> datetime | None:
+        """When a publish asked to last ``public_for`` stops being public, after clamping.
+
+        ``public_ttl_max`` caps every window, so with it set nothing stays public for ever.
+        """
+        ceiling = self._links.policy.public_ttl_max
+        lengths = [length for length in (public_for, ceiling) if length is not None]
+        return self._clock.now() + min(lengths) if lengths else None
 
     def gate_binding(self, artifact_id: str, *, client: str, request: str) -> GateBinding:
         """What ties a gate question about ``request`` to the answer that comes back for it."""
@@ -315,22 +423,66 @@ class ArtifactService:
         version = VersionDraft(files={filename: content}, merge=True, upload_nonce=claims.nonce)
         return self.update(claims.id, version, client=claims.client)
 
-    def open_public(self, artifact_id: str, *, version: int | None = None) -> Artifact:
-        """The artifact behind ``/a/{id}``: a private id is as unknown as a missing one (§ 7.1)."""
-        artifact = self._store.get(artifact_id)
-        if artifact.visibility is not Visibility.PUBLIC:
-            raise NotFound()
-        return self._viewable(artifact, version)
+    def open_public(self, artifact_id: str, *, version: int | None = None) -> Opened:
+        """The artifact behind ``/a/{id}``: a private id is as unknown as a missing one (§ 7.1).
 
-    def open_signed(self, signature: str, *, version: int | None = None) -> Artifact:
-        """The artifact behind ``/s/{sig}``; any bad link answers like a missing artifact (§ 3)."""
+        So is one whose public window ran out, before the sweep has made it private (§ 4.3).
+        """
+        artifact = self._store.get(artifact_id)
+        if not artifact.is_public_at(self._clock.now()):
+            raise NotFound()
+        return Opened(self._viewable(artifact, version))
+
+    def open_signed(self, signature: str, *, version: int | None = None) -> Opened:
+        """The artifact behind ``/s/{sig}``; any bad link answers like a missing artifact (§ 3).
+
+        The signature is a view link or an unlocked one. A view link whose record carries a
+        passcode is ``Locked``: the route answers with the unlock form, never the content.
+        """
+        claims = self._signed_claims(signature)
+        artifact = self._store.get(claims.id)
+        if not self._links.accepts(claims, artifact):
+            raise NotFound()
+        self._viewable(artifact, version)
+        record = None if claims.lid is None else artifact.link(claims.lid)
+        if claims.kind is LinkKind.VIEW and record is not None and record.passcode is not None:
+            raise Locked()
+        return Opened(artifact, claims.lid)
+
+    def view_claims(self, signature: str) -> LinkClaims:
+        """Verify a view link's signature, so the edge can key the unlock buckets by its link."""
+        return self._links.verify_view(signature)
+
+    def unlock(self, signature: str, passcode: str) -> str | None:
+        """The unlocked signature a right passcode earns for a view link (spec § 7.1).
+
+        ``None`` when the link has no passcode, so the caller sends the viewer to the link
+        itself; ``Locked`` for a wrong one. An unlocked signature cannot be unlocked again.
+        """
         claims = self._links.verify_view(signature)
         artifact = self._store.get(claims.id)
         if not self._links.accepts(claims, artifact):
             raise NotFound()
-        return self._viewable(artifact, version)
+        self._viewable(artifact, None)
+        record = None if claims.lid is None else artifact.link(claims.lid)
+        if record is None or record.passcode is None:
+            return None
+        if not passcodes.matches(passcode, record.passcode):
+            raise Locked()
+        return self._links.unlocked(claims, link_expires_at=claims.expires_at)
 
-    def entry_of(self, artifact: Artifact, *, version: int | None = None) -> str:
+    def count_view(self, opened: Opened, *, route: str, address: str, user_agent: str) -> None:
+        """Count one view of an opened artifact, attributed to its link (spec § 11.4)."""
+        if self._views is not None:
+            self._views.record(
+                opened.artifact.id,
+                route=route,
+                lid=opened.lid,
+                address=address,
+                user_agent=user_agent,
+            )
+
+    def entry_of(self, artifact: ArtifactMeta, *, version: int | None = None) -> str:
         """The file a link opens; a pinned older version opens its own entry (spec § 4.3).
 
         Only the current entry is stored, so an older version keeps it while it has that file,
@@ -346,9 +498,17 @@ class ArtifactService:
         except Invalid:
             raise NotFound() from None
 
-    def locate(self, artifact: Artifact, path: str, *, version: int | None = None) -> Path:
+    def locate(self, artifact: ArtifactMeta, path: str, *, version: int | None = None) -> Path:
         """The file a view streams, from the version the artifact was opened at."""
         return self._store.locate(artifact.id, path, version=version or artifact.version)
+
+    def view_series(self, artifact_id: str) -> tuple[HourViews, ...]:
+        """One existing artifact's views, hour by hour, over ``SERIES_DAYS`` (spec § 11.4)."""
+        artifact = self._store.get(artifact_id)
+        if self._views is None:
+            return ()
+        since = self._clock.now() - timedelta(days=SERIES_DAYS)
+        return self._views.series(artifact.id, since=since)
 
     def history(self, artifact_id: str) -> tuple[AuditEvent, ...]:
         """The audit events of one existing artifact, newest first (spec § 5.2)."""
@@ -372,7 +532,7 @@ class ArtifactService:
         )
         self._store.delete(artifact_id)
 
-    def set_visibility(
+    def set_visibility(  # noqa: PLR0913 - keyword-only: the gate's verdict and what it approved
         self,
         artifact_id: str,
         visibility: Visibility,
@@ -380,13 +540,18 @@ class ArtifactService:
         client: str,
         gate: GateDecision,
         seen_version: int | None = None,
+        public_until: datetime | None = None,
     ) -> Artifact:
         """Apply the gate's decision; this is the only path that can widen access (spec § 6).
 
         ``seen_version`` is the version the human approved: a later one is a ``Conflict``.
+        Going public sets ``public_until``; asking a public artifact to be public again moves
+        it, which needs the gate like any publish (spec § 4.3).
         """
         artifact = self._store.get(artifact_id)
-        if artifact.visibility is visibility:
+        if artifact.visibility is visibility and (
+            visibility is Visibility.PRIVATE or artifact.public_until == public_until
+        ):
             return artifact
         if visibility is Visibility.PUBLIC:
             self._metrics.gate(gate)
@@ -401,6 +566,7 @@ class ArtifactService:
             artifact_id,
             visibility,
             if_version=seen_version if visibility is Visibility.PUBLIC else None,
+            public_until=public_until if visibility is Visibility.PUBLIC else None,
         )
         self._record(
             AuditEvent(
@@ -408,27 +574,33 @@ class ArtifactService:
                 event=AuditEventName.VISIBILITY_CHANGED,
                 artifact=artifact.id,
                 client=client,
-                gate=gate if visibility is Visibility.PUBLIC else GateDecision.NOT_REQUIRED,
+                gate=_audited_gate(visibility, gate),
                 from_visibility=artifact.visibility,
                 to_visibility=visibility,
             ),
-            rollback=partial(self._store.replace_meta, artifact),
+            rollback=partial(self._restore, artifact, updated, VISIBILITY_FIELDS),
         )
         return updated
 
-    def revoke_links(self, artifact_id: str, *, client: str) -> Artifact:
-        """Increment the link epoch, so every private link issued before stops working."""
+    def revoke_links(self, artifact_id: str, *, client: str, lid: str | None = None) -> Artifact:
+        """Revoke one recorded link (``lid``), or every private link by incrementing the epoch."""
         artifact = self._store.get(artifact_id)
-        updated = self._store.revoke_links(artifact_id)
+        if lid is not None:
+            updated = self._store.remove_link(artifact_id, lid)
+            fields = LINK_FIELDS
+        else:
+            updated = self._store.revoke_links(artifact_id)
+            fields = EPOCH_FIELDS
         self._record(
             AuditEvent(
                 ts=self._clock.now(),
                 event=AuditEventName.LINKS_REVOKED,
                 artifact=artifact.id,
                 client=client,
-                link_epoch=updated.link_epoch,
+                link_epoch=updated.link_epoch if lid is None else None,
+                lid=lid,
             ),
-            rollback=partial(self._store.replace_meta, artifact),
+            rollback=partial(self._restore, artifact, updated, fields),
         )
         return updated
 
@@ -463,10 +635,38 @@ class ArtifactService:
             expired += 1
         return SweepReport(
             expired=expired,
+            unpublished=self._unpublish_lapsed(),
+            links=self._store.sweep_links(),
             staging=self._store.sweep_staging(grace=grace),
             refs=self._store.sweep_refs(),
             audit_months=self._audit.sweep(),
+            view_months=0 if self._views is None else self._views.sweep(),
         )
+
+    def _unpublish_lapsed(self) -> int:
+        """Make every artifact whose public window ran out private again (spec § 4.3).
+
+        ``/a/`` already answers 404 for them; this ends the private links issued while public
+        too, and records who did it: the sweep, under ``gate = scheduled``.
+        """
+        unpublished = 0
+        for artifact_id in self._store.lapsed_ids():
+            try:
+                self.set_visibility(
+                    artifact_id, Visibility.PRIVATE, client=SWEEP, gate=GateDecision.SCHEDULED
+                )
+            except NotFound:
+                # Deleted since the scan.
+                continue
+            unpublished += 1
+        return unpublished
+
+    def _signed_claims(self, signature: str) -> LinkClaims:
+        """The claims of a view or an unlocked signature; ``NotFound`` for anything else."""
+        try:
+            return self._links.verify_view(signature)
+        except NotFound:
+            return self._links.verify_unlocked(signature)
 
     def _viewable(self, artifact: Artifact, version: int | None) -> Artifact:
         """Refuse an expired artifact (410) and a version that is not retained (404)."""
@@ -509,7 +709,7 @@ class ArtifactService:
         )
         raise Refused(reason)
 
-    def _record(self, event: AuditEvent, *, rollback: Callable[[], None]) -> None:
+    def _record(self, event: AuditEvent, *, rollback: Callable[[], object]) -> None:
         """Audit a change that already landed, undoing it when the log cannot be written."""
         try:
             self._audit.append(event)
@@ -517,10 +717,60 @@ class ArtifactService:
             _roll_back(rollback)
             raise
 
-    def _undo_version(self, previous: Artifact, version: int) -> None:
-        """Put an artifact back the way it was before a version was added."""
-        self._store.vitrine_version(previous.id, version)
-        self._store.replace_meta(previous)
+    def _undo_version(self, previous: Artifact, after: Artifact, draft: VersionDraft) -> None:
+        """Put an artifact back the way it was before a version was added, if nothing moved."""
+        if after.version != previous.version + 1:
+            logger.warning("not undoing %s v%d: another version landed", after.id, after.version)
+            return
+        if self._restore(previous, after, _version_fields(draft)):
+            self._store.vitrine_version(previous.id, after.version)
+
+    def _drop_link(self, artifact_id: str, lid: str) -> None:
+        """Remove a record whose ``link_issued`` could not be written; its URL was never seen."""
+        self._store.remove_link(artifact_id, lid)
+
+    def _restore(self, before: Artifact, after: Artifact, fields: Collection[str]) -> bool:
+        """Undo one change, and only that change, whose audit write failed (spec § 11.3).
+
+        ``before`` may have been read before the store took its lock, so a change that landed in
+        between would be undone with it: that is refused when ``before`` and ``after`` differ
+        outside the fields this kind of change writes. Then the store puts ``before`` back only
+        if ``meta.json`` is still ``after``, so a later change, audited on its own, survives.
+        """
+        moved = [
+            name
+            for name in type(after).model_fields
+            if name not in fields and name != "updated_at"
+            if getattr(before, name) != getattr(after, name)
+        ]
+        if moved:
+            logger.warning("not undoing a change to %s: %s moved meanwhile", after.id, moved)
+            return False
+        restored = self._store.replace_meta(before, if_current=after)
+        if not restored:
+            logger.warning("not undoing a change to %s: it changed again since", after.id)
+        return restored
+
+
+def _audited_gate(visibility: Visibility, gate: GateDecision) -> GateDecision:
+    """The gate ``visibility_changed`` records: the verdict, or why it went private."""
+    if visibility is Visibility.PUBLIC or gate is GateDecision.SCHEDULED:
+        return gate
+    return GateDecision.NOT_REQUIRED
+
+
+def _version_fields(draft: VersionDraft) -> frozenset[str]:
+    """The fields an update writes: the version's own, and the metadata the draft names."""
+    named = {
+        "title": draft.title is not None,
+        "tags": draft.tags is not None,
+        "project": draft.project is not None,
+        "expires_at": draft.expires_at is not None or draft.clear_expiry,
+    }
+    return frozenset(
+        {"version", "versions", "entry", "used_upload_nonces"}
+        | {name for name, written in named.items() if written}
+    )
 
 
 def request_hash(draft: ArtifactDraft) -> str:
@@ -537,7 +787,7 @@ def request_hash(draft: ArtifactDraft) -> str:
     return digest.hexdigest()
 
 
-def _roll_back(rollback: Callable[[], None]) -> None:
+def _roll_back(rollback: Callable[[], object]) -> None:
     """Undo a change, keeping the audit failure as the error the caller sees."""
     with contextlib.suppress(VitrineError):
         rollback()

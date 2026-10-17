@@ -13,6 +13,7 @@ ARTIFACTS_DIR = "artifacts"
 REFS_DIR = "refs"
 TMP_DIR = "tmp"
 AUDIT_DIR = "audit"
+VIEWS_DIR = "views"
 META_FILE = "meta.json"
 VERSION_PREFIX = "v"
 
@@ -20,7 +21,7 @@ VERSION_PREFIX = "v"
 def ensure(root: Path) -> None:
     """Create every directory the layout needs, refusing a ``tmp`` on another filesystem."""
     check_root(root)
-    for name in (ARTIFACTS_DIR, REFS_DIR, TMP_DIR, AUDIT_DIR):
+    for name in (ARTIFACTS_DIR, REFS_DIR, TMP_DIR, AUDIT_DIR, VIEWS_DIR):
         (root / name).mkdir(parents=True, exist_ok=True)
 
 
@@ -55,6 +56,11 @@ def ref_dir(root: Path, client: str) -> Path:
 def audit_file(root: Path, when: datetime) -> Path:
     """The audit log of one month."""
     return root / AUDIT_DIR / f"{when:%Y-%m}.jsonl"
+
+
+def views_file(root: Path, when: datetime) -> Path:
+    """The view counts of one month (spec § 11.4)."""
+    return root / VIEWS_DIR / f"{when:%Y-%m}.jsonl"
 
 
 def _device(path: Path) -> int:

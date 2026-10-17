@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict
 from mcp_vitrine.config import Settings
 from mcp_vitrine.domain.clock import Clock
 from mcp_vitrine.domain.errors import NotFound
-from mcp_vitrine.domain.ids import is_valid_id, new_nonce
+from mcp_vitrine.domain.ids import is_valid_id, is_valid_lid, new_nonce
 from mcp_vitrine.domain.models import Artifact, LinkClaims, LinkKind, SignedLink, UploadLink
 
 MAC_BYTES = 16
@@ -33,6 +33,9 @@ class LinkPolicy(BaseModel):
     link_ttl_max: timedelta = timedelta(days=90)
     upload_ttl: timedelta = timedelta(minutes=15)
     upload_ttl_max: timedelta = timedelta(hours=1)
+    unlock_ttl: timedelta = timedelta(hours=12)
+    max_links: int = 500
+    public_ttl_max: timedelta | None = None
 
     @classmethod
     def from_settings(cls, settings: Settings) -> LinkPolicy:
@@ -43,6 +46,9 @@ class LinkPolicy(BaseModel):
             link_ttl_max=settings.link_ttl_max,
             upload_ttl=settings.upload_ttl,
             upload_ttl_max=settings.upload_ttl_max,
+            unlock_ttl=settings.unlock_ttl,
+            max_links=settings.max_links,
+            public_ttl_max=settings.public_ttl_max,
         )
 
 
@@ -59,11 +65,43 @@ class LinkService:
         self._secret = secret
         self._clock = clock
 
-    def view_url(self, artifact_id: str, *, epoch: int, ttl: timedelta | None = None) -> SignedLink:
-        """Mint a private viewing link that stops working at its expiry (spec § 3)."""
-        expires_at = self._expiry(ttl, self._policy.link_ttl, self._policy.link_ttl_max)
-        signature = self._sign(self._body(LinkKind.VIEW, artifact_id, expires_at, str(epoch)))
+    @property
+    def policy(self) -> LinkPolicy:
+        """The link settings this signer was built with."""
+        return self._policy
+
+    def view_url(
+        self,
+        artifact_id: str,
+        *,
+        epoch: int,
+        ttl: timedelta | None = None,
+        expires_at: datetime | None = None,
+        lid: str | None = None,
+    ) -> SignedLink:
+        """Mint a private viewing link that stops working at its expiry (spec § 3).
+
+        With ``lid`` it is a recorded link, which works only while its record exists.
+        ``expires_at`` is one :meth:`link_expiry` already chose, for a link and its record.
+        """
+        if expires_at is None:
+            expires_at = self.link_expiry(ttl)
+        payload = (str(epoch),) if lid is None else (str(epoch), lid)
+        signature = self._sign(self._body(LinkKind.VIEW, artifact_id, expires_at, *payload))
         return SignedLink(url=f"{self._policy.base_url}/s/{signature}/", expires_at=expires_at)
+
+    def link_expiry(self, ttl: timedelta | None) -> datetime:
+        """When a view link asked to last ``ttl`` expires, clamped to ``link_ttl_max``."""
+        return self._expiry(ttl, self._policy.link_ttl, self._policy.link_ttl_max)
+
+    def unlocked(self, claims: LinkClaims, *, link_expires_at: datetime) -> str:
+        """The signature a right passcode earns: ``unlock_ttl`` long, never past the link (§ 3)."""
+        if claims.lid is None or claims.epoch is None:
+            raise NotFound()
+        expires_at = min(self._clock.now() + self._policy.unlock_ttl, link_expires_at)
+        return self._sign(
+            self._body(LinkKind.UNLOCKED, claims.id, expires_at, str(claims.epoch), claims.lid)
+        )
 
     def public_url(self, artifact_id: str) -> str:
         """The unsigned URL of a public artifact: the id is the secret (spec § 2)."""
@@ -87,6 +125,10 @@ class LinkService:
     def verify_view(self, signature: str) -> LinkClaims:
         """Return the claims of a valid view link, or ``NotFound``."""
         return self._verify(signature, LinkKind.VIEW)
+
+    def verify_unlocked(self, signature: str) -> LinkClaims:
+        """Return the claims of a valid unlocked signature, or ``NotFound``."""
+        return self._verify(signature, LinkKind.UNLOCKED)
 
     def verify_upload(self, signature: str) -> LinkClaims:
         """Return the claims of a valid upload link, or ``NotFound``."""
@@ -126,8 +168,13 @@ class LinkService:
         return int(version)
 
     def accepts(self, claims: LinkClaims, artifact: Artifact) -> bool:
-        """Whether a verified link still names this artifact at its current epoch (spec § 3)."""
-        return claims.id == artifact.id and claims.epoch == artifact.link_epoch
+        """Whether a verified link still names this artifact at its current epoch (spec § 3).
+
+        A recorded link (one with a ``lid``) also needs its record: deleting it revokes the link.
+        """
+        if claims.id != artifact.id or claims.epoch != artifact.link_epoch:
+            return False
+        return claims.lid is None or artifact.link(claims.lid) is not None
 
     def _sign(self, body: str) -> str:
         """``b64url(body) "." b64url(HMAC-SHA256(secret, body)[0:16])``."""
@@ -162,9 +209,15 @@ class LinkService:
         if claimed_kind != kind or not is_valid_id(artifact_id) or expires_at <= self._clock.now():
             raise NotFound()
         match kind, payload:
-            case LinkKind.VIEW, [epoch] if epoch.isascii() and epoch.isdigit():
+            case LinkKind.VIEW, [epoch] if _is_count(epoch):
                 return LinkClaims(
                     kind=kind, id=artifact_id, expires_at=expires_at, epoch=int(epoch)
+                )
+            case ((LinkKind.VIEW | LinkKind.UNLOCKED), [epoch, lid]) if _is_count(
+                epoch
+            ) and is_valid_lid(lid):
+                return LinkClaims(
+                    kind=kind, id=artifact_id, expires_at=expires_at, epoch=int(epoch), lid=lid
                 )
             case LinkKind.UPLOAD, [nonce, client] if nonce and client:
                 return LinkClaims(
@@ -181,6 +234,11 @@ class LinkService:
         """Clamp the requested lifetime to the configured ceiling (spec § 3)."""
         now = self._clock.now()
         return now + min(default if ttl is None else ttl, ceiling)
+
+
+def _is_count(text: str) -> bool:
+    """Whether a signed field is a plain non-negative integer."""
+    return text.isascii() and text.isdigit()
 
 
 def _encode(value: bytes) -> str:

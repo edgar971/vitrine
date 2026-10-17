@@ -508,6 +508,122 @@ class DescribeVisibilityAndRevocation:
                 store.revoke_links(new_id())
 
 
+def _link(
+    clock: Clock, lid: str = "AbCdEfGh_-0", *, ttl: timedelta = timedelta(days=7)
+) -> LinkRecord:
+    """A link record, live for ``ttl``."""
+    return LinkRecord(lid=lid, created_at=clock.now(), expires_at=clock.now() + ttl)
+
+
+class DescribeLinkRecords:
+    class WhenALinkIsAdded:
+        def it_is_recorded(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store)
+            store.add_link(artifact_id, _link(clock), limit=10)
+            assert [record.lid for record in store.get(artifact_id).links] == ["AbCdEfGh_-0"]
+
+    class WhenTheLimitIsReached:
+        def it_is_too_large(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store)
+            store.add_link(artifact_id, _link(clock), limit=1)
+            with pytest.raises(TooLarge):
+                store.add_link(artifact_id, _link(clock, "BbCdEfGh_-0"), limit=1)
+
+    class WhenAnExpiredRecordIsInTheWay:
+        def it_is_dropped_first(
+            self, store: Store, clock: Clock, advance: Callable[[timedelta], None]
+        ) -> None:
+            artifact_id = _create(store)
+            store.add_link(artifact_id, _link(clock, ttl=timedelta(hours=1)), limit=1)
+            advance(timedelta(hours=2))
+            store.add_link(artifact_id, _link(clock, "BbCdEfGh_-0"), limit=1)
+            assert [record.lid for record in store.get(artifact_id).links] == ["BbCdEfGh_-0"]
+
+    class WhenOneIsRemoved:
+        def it_keeps_the_others(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store)
+            store.add_link(artifact_id, _link(clock), limit=10)
+            store.add_link(artifact_id, _link(clock, "BbCdEfGh_-0"), limit=10)
+            store.remove_link(artifact_id, "AbCdEfGh_-0")
+            assert [record.lid for record in store.get(artifact_id).links] == ["BbCdEfGh_-0"]
+
+        def it_keeps_the_epoch(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store)
+            store.add_link(artifact_id, _link(clock), limit=10)
+            assert store.remove_link(artifact_id, "AbCdEfGh_-0").link_epoch == 0
+
+    class WhenTheRecordIsUnknown:
+        def it_is_not_found(self, store: Store) -> None:
+            with pytest.raises(NotFound):
+                store.remove_link(_create(store), "AbCdEfGh_-0")
+
+    class WhenEveryLinkIsRevoked:
+        def it_drops_every_record(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store)
+            store.add_link(artifact_id, _link(clock), limit=10)
+            assert store.revoke_links(artifact_id).links == ()
+
+    class WhenTheVisibilityChanges:
+        def it_drops_every_record(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store)
+            store.add_link(artifact_id, _link(clock), limit=10)
+            assert store.set_visibility(artifact_id, Visibility.PUBLIC).links == ()
+
+    class WhenTheSweepRuns:
+        def it_drops_the_expired_records(
+            self, store: Store, clock: Clock, advance: Callable[[timedelta], None]
+        ) -> None:
+            artifact_id = _create(store)
+            store.add_link(artifact_id, _link(clock, ttl=timedelta(hours=1)), limit=10)
+            store.add_link(artifact_id, _link(clock, "BbCdEfGh_-0"), limit=10)
+            advance(timedelta(hours=2))
+            assert (store.sweep_links(), len(store.get(artifact_id).links)) == (1, 1)
+
+
+class DescribeThePublicWindow:
+    class WhenItGoesPublicWithAnEnd:
+        def it_records_the_end(self, store: Store, clock: Clock) -> None:
+            end = clock.now() + timedelta(days=1)
+            artifact_id = _create(store)
+            assert (
+                store.set_visibility(artifact_id, Visibility.PUBLIC, public_until=end).public_until
+                == end
+            )
+
+    class WhenTheEndIsMoved:
+        def it_keeps_the_epoch(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store)
+            store.set_visibility(artifact_id, Visibility.PUBLIC, public_until=clock.now())
+            moved = store.set_visibility(
+                artifact_id, Visibility.PUBLIC, public_until=clock.now() + timedelta(days=7)
+            )
+            assert moved.link_epoch == 1
+
+    class WhenItGoesPrivate:
+        def it_clears_the_end(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store)
+            store.set_visibility(artifact_id, Visibility.PUBLIC, public_until=clock.now())
+            assert store.set_visibility(artifact_id, Visibility.PRIVATE).public_until is None
+
+    class WhenTheEndHasPassed:
+        def it_is_lapsed(
+            self, store: Store, clock: Clock, advance: Callable[[timedelta], None]
+        ) -> None:
+            artifact_id = _create(store)
+            store.set_visibility(
+                artifact_id, Visibility.PUBLIC, public_until=clock.now() + timedelta(hours=1)
+            )
+            advance(timedelta(hours=1))
+            assert store.lapsed_ids() == (artifact_id,)
+
+        def it_lists_nothing_while_it_is_open(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store)
+            store.set_visibility(
+                artifact_id, Visibility.PUBLIC, public_until=clock.now() + timedelta(hours=1)
+            )
+            assert store.lapsed_ids() == ()
+
+
 class DescribeClaimingAClientRef:
     class WhenTheRefIsFree:
         def it_reports_a_new_claim(self, store: Store) -> None:
@@ -649,6 +765,29 @@ class DescribeCompensation:
             store.set_visibility(artifact_id, Visibility.PUBLIC)
             store.replace_meta(original)
             assert store.get(artifact_id).visibility is Visibility.PRIVATE
+
+    class WhenTheArtifactChangedAgainSince:
+        def it_writes_nothing(self, store: Store) -> None:
+            artifact_id = _create(store)
+            original = store.get(artifact_id)
+            published = store.set_visibility(artifact_id, Visibility.PUBLIC)
+            store.revoke_links(artifact_id)
+            assert store.replace_meta(original, if_current=published) is False
+
+        def it_keeps_the_later_change(self, store: Store) -> None:
+            artifact_id = _create(store)
+            original = store.get(artifact_id)
+            published = store.set_visibility(artifact_id, Visibility.PUBLIC)
+            store.revoke_links(artifact_id)
+            store.replace_meta(original, if_current=published)
+            assert store.get(artifact_id).link_epoch == 2
+
+    class WhenItIsStillWhatTheChangeLeft:
+        def it_restores_it(self, store: Store) -> None:
+            artifact_id = _create(store)
+            original = store.get(artifact_id)
+            published = store.set_visibility(artifact_id, Visibility.PUBLIC)
+            assert store.replace_meta(original, if_current=published) is True
 
 
 class DescribeUsage:

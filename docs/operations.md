@@ -101,7 +101,7 @@ The audit log (`mcp-vitrine audit --since 24h`) is where an operator answers "wh
 
 | Situation | Action |
 |---|---|
-| A private link was shared too widely | `artifact_revoke_links(id)`. Minting a link is not audited; `mcp-vitrine audit --id` shows who changed the artifact and who asked for upload URLs |
+| A private link was shared too widely | `artifact_revoke_links(id, link=lid)` ends that one link and its unlocked URLs; without `link`, every private link. `artifact_get` lists the live links with their labels, and `mcp-vitrine views --id` shows which link was opened. `mcp-vitrine audit --id` shows who minted each link (`link_issued`) and who changed the artifact |
 | Something is public that shouldn't be | `artifact_set_visibility(id, private)` removes `/a/` access at once and revokes private links. Then `artifact_delete` if needed. |
 | A client token leaked | Remove its entry from `VITRINE_TOKENS` and restart. Review `mcp-vitrine audit --client <name>`. |
 | `VITRINE_SECRET` leaked | Rotate it (§ 5); every private link dies. Review the audit log. |

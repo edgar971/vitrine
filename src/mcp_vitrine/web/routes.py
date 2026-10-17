@@ -27,23 +27,32 @@ from starlette.routing import Route
 
 from mcp_vitrine.config import Settings, requested_duration
 from mcp_vitrine.domain import layout
-from mcp_vitrine.domain.errors import Invalid, NotFound, TooLarge, VitrineError
+from mcp_vitrine.domain.errors import (
+    Invalid,
+    Locked,
+    NotFound,
+    RateLimited,
+    TooLarge,
+    VitrineError,
+)
 from mcp_vitrine.domain.ids import CLIENT_REF_MAX, is_valid_id
 from mcp_vitrine.domain.models import (
     PROJECT_PATTERN,
     TAG_LIMIT,
     TAG_MAX,
     TITLE_MAX,
-    Artifact,
     ArtifactDraft,
     ArtifactQuery,
     PublishedArtifact,
     Scope,
     VersionDraft,
 )
+from mcp_vitrine.domain.paths import validate_path
+from mcp_vitrine.services.artifacts import Opened
 from mcp_vitrine.services.audit import DenialReason
 from mcp_vitrine.services.container import Services
 from mcp_vitrine.services.limits import Bucket
+from mcp_vitrine.services.views import is_unfurler
 from mcp_vitrine.web.renderers import RENDER_LIMIT, renderer_for
 from mcp_vitrine.web.responses import (
     Prefix,
@@ -53,6 +62,7 @@ from mcp_vitrine.web.responses import (
     rendered,
     security_headers,
     unauthorized,
+    unlock_form,
 )
 
 NEVER = "never"
@@ -65,6 +75,9 @@ PARSER_MAX_FIELDS = 64
 VERSION_MARK = "@"
 # More digits than any real version number needs.
 MAX_PIN_DIGITS = 9
+UNLOCK_FIELDS = 4
+# Requests a browser makes ahead of a click: not someone opening the link.
+PREFETCH = frozenset({"prefetch", "prerender"})
 
 
 class Access(StrEnum):
@@ -79,6 +92,7 @@ class Access(StrEnum):
 ROUTE_ACCESS: dict[str, Access] = {
     "view_public": Access.PUBLIC,
     "view_private": Access.SIGNATURE,
+    "unlock_private": Access.SIGNATURE,
     "upload": Access.SIGNATURE,
     "api_create": Access.BEARER,
     "api_update": Access.BEARER,
@@ -130,6 +144,7 @@ class WebRoutes:
         """The table, named as ``ROUTE_ACCESS`` names it."""
         return [
             Route("/a/{ref}/{path:path}", self.view_public, methods=["GET"], name="view_public"),
+            Route("/s/{ref}/unlock", self.unlock_private, methods=["POST"], name="unlock_private"),
             Route("/s/{ref}/{path:path}", self.view_private, methods=["GET"], name="view_private"),
             Route("/u/{sig}", self.upload, methods=["PUT"], name="upload"),
             Route("/api/artifacts", self.api_create, methods=["POST"], name="api_create"),
@@ -145,6 +160,47 @@ class WebRoutes:
     async def view_private(self, request: Request) -> Response:
         """``GET /s/{sig}[@n]/[path]``: any artifact the signature names."""
         return await self._view(request, Prefix.SIGNED, self._services.artifacts.open_signed)
+
+    async def unlock_private(self, request: Request) -> Response:
+        """``POST /s/{sig}/unlock``: trade a link's passcode for an unlocked URL (spec § 7.1).
+
+        Only a wrong passcode spends the two buckets; an empty one answers 429 before the
+        passcode is looked at. The redirect is ``303``, so the browser follows with a ``GET``.
+        """
+        service = self._services.artifacts
+        limits = self._services.limits
+        reference = request.path_params["ref"]
+        spent: list[tuple[Bucket, str]] = []
+        wrong = False
+        try:
+            signature, version = _pinned(reference)
+            claims = service.view_claims(signature)
+            passcode, path = await self._unlock_fields(request)
+            address = request.client.host if request.client else "-"
+            link = f"{claims.id}|{claims.lid or '-'}"
+            for bucket, key in ((Bucket.UNLOCK, f"{link}|{address}"), (Bucket.UNLOCK_LINK, link)):
+                limits.check(bucket, key)
+                spent.append((bucket, key))
+            try:
+                unlocked = await _run(partial(service.unlock, signature, passcode))
+            except Locked:
+                wrong = True
+                self._services.metrics.unlocked("wrong")
+                return unlock_form(reference, path, wrong=True)
+        except VitrineError as error:
+            if isinstance(error, RateLimited):
+                self._services.metrics.unlocked("rate_limited")
+            return problem(error, view=True)
+        finally:
+            if not wrong:
+                for bucket, key in spent:
+                    limits.refund(bucket, key)
+        if unlocked is None:
+            # No passcode on this link: it opens as it is.
+            return _see_other(reference, path)
+        self._services.metrics.unlocked("ok")
+        pin = "" if version is None else f"{VERSION_MARK}{version}"
+        return _see_other(f"{unlocked}{pin}", path)
 
     async def upload(self, request: Request) -> Response:
         """``PUT /u/{sig}?filename=``: one raw file, once per URL (spec § 7.3)."""
@@ -254,18 +310,24 @@ class WebRoutes:
         )
 
     async def _view(
-        self, request: Request, prefix: Prefix, open_artifact: Callable[..., Artifact]
+        self, request: Request, prefix: Prefix, open_artifact: Callable[..., Opened]
     ) -> Response:
         """Rate-limit, open, resolve and serve one file under the response policy (§ 7.2)."""
         service = self._services.artifacts
         try:
             client = request.client.host if request.client else "-"
             self._services.limits.check(Bucket.VIEWS, client)
-            key, version = _pinned(request.path_params["ref"])
-            artifact = await _run(partial(open_artifact, key, version=version))
+            reference = request.path_params["ref"]
+            key, version = _pinned(reference)
+            try:
+                opened = await _run(partial(open_artifact, key, version=version))
+            except Locked:
+                return unlock_form(reference, request.path_params["path"])
+            artifact = opened.artifact
             path = request.path_params["path"]
+            entry = await _run(partial(service.entry_of, artifact, version=version))
             if not path:
-                path = await _run(partial(service.entry_of, artifact, version=version))
+                path = entry
                 if "/" in path:
                     # A nested entry is redirected to, so its relative links resolve beside it.
                     return RedirectResponse(
@@ -277,12 +339,36 @@ class WebRoutes:
             render = None if raw or download else renderer_for(path, self._settings.renderers)
             if render is not None and (await _run(file.stat)).st_size <= RENDER_LIMIT:
                 data = await _run(file.read_bytes)
-                self._services.metrics.viewed(prefix.value)
-                return rendered(await _run(partial(render, data, path)), prefix=prefix)
+                page = rendered(await _run(partial(render, data, path)), prefix=prefix)
+                self._served(request, prefix, opened, counted=True)
+                return page
         except VitrineError as error:
             return problem(error, view=True)
-        self._services.metrics.viewed(prefix.value)
+        self._served(request, prefix, opened, counted=path == entry)
         return artifact_file(file, path, prefix=prefix, download=download)
+
+    def _served(self, request: Request, prefix: Prefix, opened: Opened, *, counted: bool) -> None:
+        """Count a served file in the metrics, and a page view in the view log (§ 11.4).
+
+        A view is a page someone opened: the entry or a rendered page, fetched with a plain
+        ``GET``. Assets, ``HEAD``, ``Range`` and prefetches are not views.
+        """
+        agent = request.headers.get("user-agent", "")
+        self._services.metrics.viewed(prefix.value, "bot" if is_unfurler(agent) else "view")
+        purpose = request.headers.get("sec-purpose", request.headers.get("purpose", ""))
+        if (
+            not counted
+            or request.method != "GET"
+            or "range" in request.headers
+            or purpose.split(";")[0].strip().lower() in PREFETCH
+        ):
+            return
+        self._services.artifacts.count_view(
+            opened,
+            route=prefix.value,
+            address=request.client.host if request.client else "-",
+            user_agent=agent,
+        )
 
     async def _authenticate(
         self, request: Request, scope: Scope, *, route: str, artifact: str | None = None
@@ -323,6 +409,22 @@ class WebRoutes:
                 artifact=artifact if artifact is not None and is_valid_id(artifact) else None,
             )
         )
+
+    async def _unlock_fields(self, request: Request) -> tuple[str, str]:
+        """The passcode and the path asked for; a path that is not one opens the entry."""
+        try:
+            async with request.form(max_files=0, max_fields=UNLOCK_FIELDS) as form:
+                passcode = form.get("passcode")
+                path = form.get("path")
+        except HTTPException as error:
+            raise Invalid(f"the body is not a form: {error.detail}") from None
+        passcode = passcode if isinstance(passcode, str) else ""
+        path = path if isinstance(path, str) else ""
+        try:
+            validate_path(path)
+        except Invalid:
+            path = ""
+        return passcode, path
 
     async def _form(self, request: Request) -> tuple[dict[str, bytes], _Fields]:
         """Parse the multipart body; a body the parser refuses is a 400, not Starlette's own."""
@@ -369,6 +471,12 @@ async def _run[T](call: Callable[[], T]) -> T:
 def _relative(path: str) -> str:
     """A ``Location`` that stays a path: ``./`` and escaping keep ``a:b`` from being a scheme."""
     return "./" + "/".join(quote(segment, safe="") for segment in path.split("/"))
+
+
+def _see_other(reference: str, path: str) -> Response:
+    """``303`` to a path under ``/s/{reference}/``, every segment escaped, never off-site."""
+    location = f"/s/{reference}/" + "/".join(quote(part, safe="") for part in path.split("/"))
+    return RedirectResponse(location, status_code=303, headers=security_headers())
 
 
 def _pinned(reference: str) -> tuple[str, int | None]:

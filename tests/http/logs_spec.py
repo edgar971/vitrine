@@ -8,7 +8,7 @@ import time
 import httpx2
 import pytest
 
-from mcp_vitrine.domain.models import PublishedArtifact
+from mcp_vitrine.domain.models import ArtifactLink, PublishedArtifact
 from mcp_vitrine.services.container import Services
 from mcp_vitrine.web.middleware import ACCESS_LOGGER
 from tests.http.conftest import CLIENT, FULL_TOKEN, signature
@@ -67,6 +67,29 @@ class DescribeTheAccessLog:
             grant = services.artifacts.upload_url("a.pdf", client=CLIENT)
             http.put(grant.put_url, content=b"%PDF")
             assert signature(grant.put_url, "/u/") not in _server_log(logged)
+
+    class WhenAPasscodeIsPosted:
+        @pytest.fixture
+        def locked(self, services: Services, published: PublishedArtifact) -> ArtifactLink:
+            """A recorded link with a generated passcode."""
+            return services.artifacts.link(published.id, client=CLIENT, passcode=True)
+
+        def it_never_logs_it(
+            self, http: httpx2.Client, locked: ArtifactLink, logged: pytest.LogCaptureFixture
+        ) -> None:
+            assert locked.passcode is not None
+            http.post(f"/s/{signature(locked.url)}/unlock", data={"passcode": locked.passcode})
+            assert locked.passcode not in _server_log(logged)
+
+        def it_never_logs_the_unlocked_signature(
+            self, http: httpx2.Client, locked: ArtifactLink, logged: pytest.LogCaptureFixture
+        ) -> None:
+            assert locked.passcode is not None
+            response = http.post(
+                f"/s/{signature(locked.url)}/unlock", data={"passcode": locked.passcode}
+            )
+            http.get(response.headers["Location"])
+            assert signature(response.headers["Location"]) not in _server_log(logged)
 
     class WhenABearerTokenIsSent:
         def it_never_logs_the_token(

@@ -37,9 +37,14 @@ class RecordingMetrics:
         """Remember a version."""
         self.counts["version", client] += 1
 
-    def viewed(self, route: str) -> None:
-        """Remember a view."""
+    def viewed(self, route: str, kind: str) -> None:
+        """Remember a view, by route and by kind."""
         self.counts["view", route] += 1
+        self.counts["view_kind", kind] += 1
+
+    def unlocked(self, outcome: str) -> None:
+        """Remember an unlock attempt."""
+        self.counts["unlock", outcome] += 1
 
     def gate(self, outcome: GateDecision) -> None:
         """Remember a verdict."""
@@ -148,9 +153,10 @@ class DescribeThePrometheusExporter:
     def scraped(self, exporter: PrometheusMetrics, created: str) -> str:
         """One scrape after a version, a view, a verdict and a refusal were counted."""
         exporter.version_created(CLIENT)
-        exporter.viewed("s")
+        exporter.viewed("s", "bot")
         exporter.gate(GateDecision.APPROVED)
         exporter.rejected("rate_limited")
+        exporter.unlocked("wrong")
         return generate_latest(exporter.registry).decode()
 
     class WhenItIsScraped:
@@ -163,8 +169,11 @@ class DescribeThePrometheusExporter:
         def it_exports_versions_by_client(self, scraped: str) -> None:
             assert 'vitrine_versions_created_total{client="hermes"} 1.0' in scraped
 
-        def it_exports_views_by_route(self, scraped: str) -> None:
-            assert 'vitrine_views_total{route="s"} 1.0' in scraped
+        def it_exports_views_by_route_and_kind(self, scraped: str) -> None:
+            assert 'vitrine_views_total{kind="bot",route="s"} 1.0' in scraped
+
+        def it_exports_unlocks_by_outcome(self, scraped: str) -> None:
+            assert 'vitrine_unlock_total{outcome="wrong"} 1.0' in scraped
 
         def it_exports_gate_verdicts(self, scraped: str) -> None:
             assert 'vitrine_public_gate_total{outcome="approved"} 1.0' in scraped

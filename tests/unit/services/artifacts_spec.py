@@ -671,11 +671,11 @@ class DescribeLink:
     class WhenTheArtifactIsPrivate:
         def it_mints_a_signed_link(self, service: ArtifactService) -> None:
             published = service.create(_draft(), client=CLIENT)
-            assert service.link(published.id).url.startswith(f"{BASE}/s/")
+            assert service.link(published.id, client=CLIENT).url.startswith(f"{BASE}/s/")
 
         def it_honours_the_ttl(self, service: ArtifactService, clock: Clock) -> None:
             published = service.create(_draft(), client=CLIENT)
-            link = service.link(published.id, ttl=timedelta(hours=1))
+            link = service.link(published.id, client=CLIENT, ttl=timedelta(hours=1))
             assert link.expires_at == clock.now() + timedelta(hours=1)
 
     class WhenTheArtifactIsPublic:
@@ -684,7 +684,7 @@ class DescribeLink:
             service.set_visibility(
                 published.id, Visibility.PUBLIC, client=CLIENT, gate=GateDecision.APPROVED
             )
-            link = service.link(published.id)
+            link = service.link(published.id, client=CLIENT)
             assert (link.url, link.expires_at) == (f"{BASE}/a/{published.id}/", None)
 
     class WhenTheArtifactHasExpired:
@@ -696,7 +696,7 @@ class DescribeLink:
             )
             advance(timedelta(minutes=2))
             with pytest.raises(Expired):
-                service.link(published.id)
+                service.link(published.id, client=CLIENT)
 
 
 class DescribeUploadUrl:
@@ -926,7 +926,7 @@ class DescribeOpenSigned:
     class WhenTheLinkIsValid:
         def it_opens_the_artifact(self, service: ArtifactService) -> None:
             published = service.create(_draft(), client=CLIENT)
-            assert service.open_signed(_signature(published.url, "/s/")).id == published.id
+            assert service.open_signed(_signature(published.url, "/s/")).artifact.id == published.id
 
     class WhenTheLinksWereRevoked:
         def it_is_not_found(self, service: ArtifactService) -> None:
@@ -960,7 +960,7 @@ class DescribeOpenPublic:
             service.set_visibility(
                 published.id, Visibility.PUBLIC, client=CLIENT, gate=GateDecision.APPROVED
             )
-            assert service.open_public(published.id).id == published.id
+            assert service.open_public(published.id).artifact.id == published.id
 
     class WhenTheArtifactIsPrivate:
         def it_is_not_found(self, service: ArtifactService) -> None:
@@ -987,12 +987,12 @@ class DescribeLocate:
             service.update(
                 published.id, VersionDraft(files={ENTRY: b"<h1>two</h1>"}), client=CLIENT
             )
-            artifact = service.open_signed(_signature(published.url, "/s/"), version=1)
+            artifact = service.open_signed(_signature(published.url, "/s/"), version=1).artifact
             assert service.locate(artifact, ENTRY, version=1).read_bytes() == b"<h1>hi</h1>"
 
     class WhenThePathEscapes:
         def it_refuses_it(self, service: ArtifactService) -> None:
             published = service.create(_draft(), client=CLIENT)
-            artifact = service.open_signed(_signature(published.url, "/s/"))
+            artifact = service.open_signed(_signature(published.url, "/s/")).artifact
             with pytest.raises(Invalid):
                 service.locate(artifact, "../meta.json")

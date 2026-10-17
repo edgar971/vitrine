@@ -29,18 +29,20 @@ class ChangedMeta(_Result):
 
 
 class VisibilityChange(_Result):
-    """``artifact_set_visibility``: the visibility now, and the URL that opens it."""
+    """``artifact_set_visibility``: the visibility now, the URL that opens it, and until when."""
 
     id: str
     visibility: Visibility
     url: str
+    public_until: AwareDatetime | None = None
 
 
 class RevokedLinks(_Result):
-    """``artifact_revoke_links``: the new link epoch; every older private link is dead."""
+    """``artifact_revoke_links``: the link epoch now, and the one link revoked, if only one."""
 
     id: str
     link_epoch: int = Field(ge=0)
+    link: str | None = None
 
 
 class UploadUrl(_Result):

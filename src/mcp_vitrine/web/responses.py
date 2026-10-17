@@ -8,6 +8,7 @@ route cannot word one that says whether a private artifact exists.
 from __future__ import annotations
 
 from enum import StrEnum
+from html import escape
 from http import HTTPStatus
 from pathlib import Path, PurePosixPath
 
@@ -23,6 +24,7 @@ from mcp_vitrine.domain.errors import (
     Conflict,
     Expired,
     Invalid,
+    Locked,
     NotFound,
     OverQuota,
     RateLimited,
@@ -44,10 +46,51 @@ TEXT_CHARSET = "; charset=utf-8"
 NO_STORE = "private, no-store"
 PUBLIC_CACHE = "public, max-age=60"
 INTERNAL = "internal error"
+# The unlock form is vitrine's own page: nothing loads, nothing frames it, it posts only home.
+UNLOCK_CSP = (
+    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'"
+)
+WRONG_PASSCODE = "That passcode did not work."
+UNLOCK_PAGE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Passcode required</title>
+<style>
+body {{ font: 16px/1.5 system-ui, sans-serif; margin: 0; display: grid; place-items: center;
+  min-height: 100vh; background: #f6f6f4; color: #1d1d1b; }}
+form {{ display: grid; gap: 12px; padding: 24px; max-width: 320px; width: calc(100% - 32px); }}
+input {{ font: inherit; padding: 8px 10px; border: 1px solid #999; border-radius: 6px; }}
+button {{ font: inherit; padding: 8px 10px; border: 0; border-radius: 6px; background: #1d1d1b;
+  color: #fff; }}
+p {{ margin: 0; }}
+.error {{ color: #a1260d; }}
+@media (prefers-color-scheme: dark) {{
+  body {{ background: #1b1b1a; color: #ececea; }}
+  input {{ background: #2a2a28; color: inherit; border-color: #666; }}
+  button {{ background: #ececea; color: #1b1b1a; }}
+  .error {{ color: #f08a70; }}
+}}
+</style>
+</head>
+<body>
+<form method="post" action="{action}">
+<p>This link needs a passcode.</p>
+{message}<input type="password" name="passcode" aria-label="Passcode" autocomplete="off"
+  autofocus required maxlength="128">
+<input type="hidden" name="path" value="{path}">
+<button type="submit">Open</button>
+</form>
+</body>
+</html>
+"""
 
 _STATUS: tuple[tuple[type[VitrineError], int], ...] = (
     (NotFound, 404),
     (Expired, 410),
+    (Locked, 401),
     (Invalid, 400),
     (Conflict, 409),
     (TooLarge, 413),
@@ -126,6 +169,21 @@ def problem(error: VitrineError, *, view: bool = False) -> Response:
     if view:
         return PlainTextResponse(message, status_code=status, headers=headers)
     return JSONResponse({"error": message}, status_code=status, headers=headers)
+
+
+def unlock_form(ref: str, path: str, *, wrong: bool = False) -> Response:
+    """401 and vitrine's own passcode form: no title, no file list, nothing from the artifact.
+
+    ``path`` is the one the viewer asked for, so a right passcode lands them on it.
+    """
+    headers = security_headers()
+    headers["Content-Security-Policy"] = UNLOCK_CSP
+    # Under no-referrer a browser posts the form with ``Origin: null``, which the guard refuses;
+    # same-origin sends vitrine's own origin to vitrine and nothing to anyone else.
+    headers["Referrer-Policy"] = "same-origin"
+    message = f'<p class="error" role="alert">{WRONG_PASSCODE}</p>\n' if wrong else ""
+    page = UNLOCK_PAGE.format(action=escape(f"/s/{ref}/unlock"), path=escape(path), message=message)
+    return HTMLResponse(page, status_code=401, headers=headers)
 
 
 def unauthorized() -> Response:

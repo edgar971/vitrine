@@ -11,6 +11,8 @@ opens in any browser.
 - **Private by default.** Links are signed, expire and can be revoked. An artifact becomes public
   only after you approve it.
 - **One link per artifact.** When the agent revises it, the link stays the same.
+- **Know what happened to a link.** A link can carry a passcode, be revoked on its own and
+  count its views, anonymously. A public artifact can go private again on a date.
 - **Any MCP client.** Claude Code, Hermes Agent, or anything that speaks MCP over HTTP.
 - **Easy to run.** One process, one port, one folder of files. No database.
 
@@ -115,9 +117,9 @@ What the agent can do:
 | `artifact_upload_url` | `write` | A single-use upload URL for binaries and large files |
 | `artifact_delete` | `write` | Remove an artifact and every link to it |
 | `artifact_get` / `artifact_list` | `read` | Read an artifact back, or search earlier ones by words, project, tag or expiry |
-| `artifact_link` | `share` | A fresh private link, with its own expiry |
-| `artifact_revoke_links` | `share` | Revoke every private link issued so far |
-| `artifact_set_visibility` | `publish` | Make an artifact public, after you approve |
+| `artifact_link` | `share` | A fresh private link, with its own expiry, label and optional passcode |
+| `artifact_revoke_links` | `share` | Revoke one private link, or every private link issued so far |
+| `artifact_set_visibility` | `publish` | Make an artifact public, after you approve; optionally only for a while |
 
 Approval goes through your MCP client's confirmation prompt. If the client cannot ask, or you
 decline or don't answer, the artifact stays private.

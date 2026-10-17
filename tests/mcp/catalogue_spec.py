@@ -143,7 +143,7 @@ class DescribeTheServerInstructions:
 
 class DescribeTheResourceTemplates:
     class WhenAFullScopeTokenLists:
-        async def it_offers_the_three_templates(
+        async def it_offers_the_four_templates(
             self, client: Client[Any], server: FastMCP[dict[str, Services]]
         ) -> None:
             templates = {
@@ -153,4 +153,5 @@ class DescribeTheResourceTemplates:
                 "artifact://{id}",
                 "artifact://{id}/{path*}",
                 "artifact://{id}/history",
+                "artifact://{id}/views",
             }

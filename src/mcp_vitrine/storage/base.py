@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -14,6 +14,7 @@ from mcp_vitrine.domain.models import (
     ArtifactPage,
     ArtifactQuery,
     FileEntry,
+    LinkRecord,
     MetaChange,
     VersionDraft,
     Visibility,
@@ -130,17 +131,36 @@ class Store(Protocol):
         ...
 
     def set_visibility(
-        self, artifact_id: str, visibility: Visibility, *, if_version: int | None = None
+        self,
+        artifact_id: str,
+        visibility: Visibility,
+        *,
+        if_version: int | None = None,
+        public_until: datetime | None = None,
     ) -> Artifact:
         """Persist a visibility change the gate has already decided (spec § 6).
 
         ``if_version`` is the version the human was shown; a later one is a ``Conflict``, so
         content added while they decided is never published under their approval (security T20).
+        A change of visibility increments ``link_epoch`` and drops every link record; going
+        public sets ``public_until``, going private clears it. Asking a public artifact to be
+        public again only moves ``public_until`` (spec § 4.3).
         """
         ...
 
     def revoke_links(self, artifact_id: str) -> Artifact:
-        """Increment ``link_epoch``, revoking every private link (spec § 2)."""
+        """Increment ``link_epoch`` and drop every link record, revoking every private link."""
+        ...
+
+    def add_link(self, artifact_id: str, record: LinkRecord, *, limit: int) -> Artifact:
+        """Record a minted link, dropping expired records first (spec § 3).
+
+        ``TooLarge`` when ``limit`` live records already exist.
+        """
+        ...
+
+    def remove_link(self, artifact_id: str, lid: str) -> Artifact:
+        """Delete one link record, revoking that link alone; ``NotFound`` if there is none."""
         ...
 
     def set_meta(self, artifact_id: str, change: MetaChange) -> tuple[Artifact, Artifact]:
@@ -151,8 +171,12 @@ class Store(Protocol):
         """
         ...
 
-    def replace_meta(self, artifact: Artifact) -> None:
-        """Write ``meta.json`` as given, to compensate a mutation whose audit write failed."""
+    def replace_meta(self, artifact: Artifact, *, if_current: Artifact | None = None) -> bool:
+        """Write ``meta.json`` as given, to compensate a mutation whose audit write failed.
+
+        With ``if_current``, only while ``meta.json`` still is that, so a compensation never
+        undoes a change that landed after the one it compensates; whether it wrote.
+        """
         ...
 
     def vitrine_version(self, artifact_id: str, version: int) -> None:
@@ -176,6 +200,14 @@ class Store(Protocol):
 
     def expired_ids(self) -> tuple[str, ...]:
         """Ids past ``expires_at``; ``ArtifactService`` deletes and audits them (spec § 4.3)."""
+        ...
+
+    def lapsed_ids(self) -> tuple[str, ...]:
+        """Ids public on disk past ``public_until``; ``ArtifactService`` makes them private."""
+        ...
+
+    def sweep_links(self) -> int:
+        """Drop link records past their expiry; how many were dropped."""
         ...
 
     def sweep_staging(self, *, grace: timedelta = timedelta(0)) -> int:

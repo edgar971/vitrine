@@ -54,6 +54,9 @@ The contract, including the accepted formats, is [spec § 8](spec.md#8-configura
 | `rate_links` | `VITRINE_RATE_LINKS` | `120/m` | Per-client link bucket |
 | `rate_reads` | `VITRINE_RATE_READS` | `600/m` | Per-client read bucket |
 | `rate_views` | `VITRINE_RATE_VIEWS` | `1200/m` | Per-IP view bucket |
+| `rate_unlock` | `VITRINE_RATE_UNLOCK` | `10/m` | Wrong passcodes per link and source IP; a right one spends nothing |
+| `rate_unlock_link` | `VITRINE_RATE_UNLOCK_LINK` | `100/h` | Wrong passcodes per link, from every source together |
+| `max_links` | `VITRINE_MAX_LINKS` | `500` | Live recorded links per artifact |
 
 ## Links
 
@@ -63,6 +66,8 @@ The contract, including the accepted formats, is [spec § 8](spec.md#8-configura
 | `link_ttl_max` | `VITRINE_LINK_TTL_MAX` | `90d` | Longest private link lifetime |
 | `upload_ttl` | `VITRINE_UPLOAD_TTL` | `15m` | Default upload URL lifetime |
 | `upload_ttl_max` | `VITRINE_UPLOAD_TTL_MAX` | `1h` | Longest upload URL lifetime |
+| `unlock_ttl` | `VITRINE_UNLOCK_TTL` | `12h` | How long an unlocked passcode link works, at most until the link expires |
+| `public_ttl_max` | `VITRINE_PUBLIC_TTL_MAX` | `off` | Longest public window: every public artifact goes private after it; `off` for none |
 
 ## Operations
 
@@ -70,6 +75,8 @@ The contract, including the accepted formats, is [spec § 8](spec.md#8-configura
 |---|---|---|---|
 | `sweep_interval` | `VITRINE_SWEEP_INTERVAL` | `1h` | Period of the expiry, staging, idempotency-record and audit-retention sweep |
 | `audit_retention` | `VITRINE_AUDIT_RETENTION` | `365d` | Audit months older than this are deleted |
+| `view_log` | `VITRINE_VIEW_LOG` | `counts` | `counts` per artifact, link and hour (no IPs, no user agents), or `off` |
+| `view_retention` | `VITRINE_VIEW_RETENTION` | `90d` | View-count months older than this are deleted |
 | `metrics_port` | `VITRINE_METRICS_PORT` | `0` | Prometheus listener, `0` for off; needs the `metrics` extra |
 | `log_level` | `VITRINE_LOG_LEVEL` | `INFO` | Log level |
 | `log_format` | `VITRINE_LOG_FORMAT` | `text` | `text` or `json` |

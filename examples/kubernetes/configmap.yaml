@@ -17,4 +17,6 @@ data:
     public_mode     = "confirm"
     quota           = "20GB"
     metrics_port    = 9090
+    # The listener has no auth: the network policy lets only the scraper reach port 9090.
+    metrics_host    = "0.0.0.0"
     log_format      = "json"

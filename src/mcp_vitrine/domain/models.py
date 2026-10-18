@@ -17,7 +17,8 @@ SCHEMA_VERSION = 2
 TAG_LIMIT = 200
 TAG_MAX = 64
 TITLE_MAX = 200
-NONCES_KEPT = 50
+# Spent nonces recorded before each kept its URL's expiry; the newest are kept, as 0.1 did.
+LEGACY_NONCES_KEPT = 50
 PROJECT_PATTERN = r"^[a-z0-9][a-z0-9_.-]{0,63}$"
 
 type Project = Annotated[str, Field(pattern=PROJECT_PATTERN)]
@@ -123,6 +124,30 @@ class Passcode(BaseModel):
     p: int = Field(ge=1)
 
 
+class SpentNonce(BaseModel):
+    """An upload URL's nonce, kept until the URL itself expires (spec § 7.3).
+
+    Until then the URL's signature still verifies, so forgetting the nonce earlier would let a
+    leaked, used URL land a second time. ``expires_at`` is ``None`` only for a nonce recorded
+    before expiries were kept.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    nonce: str
+    expires_at: AwareDatetime | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_a_bare_nonce(cls, value: object) -> object:
+        """Read a nonce as 0.1 stored it, a bare string, with no expiry."""
+        return {"nonce": value} if isinstance(value, str) else value
+
+    def is_live(self, now: datetime) -> bool:
+        """Whether the URL this nonce belongs to could still be used."""
+        return self.expires_at is None or now < self.expires_at
+
+
 class LinkRecord(BaseModel):
     """One live private link that ``artifact_link`` minted (spec § 4.2)."""
 
@@ -181,7 +206,7 @@ class ArtifactMeta(BaseModel):
     client_ref: str | None = None
     tags: tuple[str, ...] = ()
     link_epoch: int = 0
-    used_upload_nonces: tuple[str, ...] = ()
+    used_upload_nonces: tuple[SpentNonce, ...] = ()
     fallback: str | None = None
     public_until: AwareDatetime | None = None
     project: Project | None = None
@@ -313,7 +338,7 @@ class ArtifactDraft(BaseModel):
     note: str = ""
     expires_at: AwareDatetime | None = None
     client_ref: str | None = None
-    upload_nonce: str | None = None
+    upload: SpentNonce | None = None
     fallback: str | None = None
 
 
@@ -332,7 +357,7 @@ class VersionDraft(BaseModel):
     note: str = ""
     expires_at: AwareDatetime | None = None
     clear_expiry: bool = False
-    upload_nonce: str | None = None
+    upload: SpentNonce | None = None
     # ``""`` clears the fallback; ``None`` keeps it.
     fallback: str | None = None
 

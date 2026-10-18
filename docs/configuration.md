@@ -82,5 +82,6 @@ The contract, including the accepted formats, is [spec § 8](spec.md#8-configura
 | `view_log` | `VITRINE_VIEW_LOG` | `counts` | `counts` per artifact, link and hour (no IPs, no user agents), or `off` |
 | `view_retention` | `VITRINE_VIEW_RETENTION` | `90d` | View-count months older than this are deleted |
 | `metrics_port` | `VITRINE_METRICS_PORT` | `0` | Prometheus listener, `0` for off; needs the `metrics` extra |
+| `metrics_host` | `VITRINE_METRICS_HOST` | `127.0.0.1` | Prometheus listener address (no auth) |
 | `log_level` | `VITRINE_LOG_LEVEL` | `INFO` | Log level |
 | `log_format` | `VITRINE_LOG_FORMAT` | `text` | `text` or `json` |

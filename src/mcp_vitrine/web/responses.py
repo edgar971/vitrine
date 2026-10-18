@@ -43,6 +43,13 @@ SANDBOX_CSP = (
 )
 # The types a browser runs script in. XML is here because an XHTML namespace makes it a page.
 ACTIVE_TYPES = frozenset({"text/html", "image/svg+xml", "application/xml"})
+# Everything else is sandboxed with no exceptions, so a file a browser renders anyway (a type it
+# sniffs, a viewer it hands the file to) cannot run script or reach vitrine as the viewer.
+PASSIVE_CSP = "sandbox; frame-ancestors 'none'"
+# Chromium and Firefox refuse to render a PDF in a sandboxed document; their viewers already run
+# isolated from the page, so a PDF only gets the framing rule.
+PDF_TYPE = "application/pdf"
+PDF_CSP = "frame-ancestors 'none'"
 TEXT_CHARSET = "; charset=utf-8"
 NO_STORE = "private, no-store"
 PUBLIC_CACHE = "public, max-age=60"
@@ -130,8 +137,7 @@ def artifact_file(
     """Stream one stored file with the allowlisted type; ``Range`` and ``HEAD`` come with it."""
     kind = content_type(path)
     headers = security_headers(prefix.cache_control)
-    if kind in ACTIVE_TYPES:
-        headers["Content-Security-Policy"] = SANDBOX_CSP
+    headers["Content-Security-Policy"] = _policy_for(kind)
     attachment = download or kind == OCTET_STREAM
     return FileResponse(
         file,
@@ -141,6 +147,13 @@ def artifact_file(
         filename=PurePosixPath(path).name if attachment else None,
         content_disposition_type="attachment",
     )
+
+
+def _policy_for(kind: str) -> str:
+    """The CSP a stored file is served with: every type gets one (spec § 7.2)."""
+    if kind in ACTIVE_TYPES:
+        return SANDBOX_CSP
+    return PDF_CSP if kind == PDF_TYPE else PASSIVE_CSP
 
 
 def rendered(html: str, *, prefix: Prefix, status: int = HTTPStatus.OK) -> Response:

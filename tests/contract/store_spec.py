@@ -20,6 +20,7 @@ from mcp_vitrine.domain.models import (
     ListSort,
     MetaChange,
     Passcode,
+    SpentNonce,
     VersionDraft,
     Visibility,
 )
@@ -34,6 +35,11 @@ def _draft(**changes: object) -> ArtifactDraft:
     fields: dict[str, object] = {"title": "Energy, September", "files": {ENTRY: b"<h1>hi</h1>"}}
     fields.update(changes)
     return ArtifactDraft.model_validate(fields)
+
+
+def _nonce(name: str, clock: Clock) -> SpentNonce:
+    """An upload nonce whose URL lives 15 minutes from now."""
+    return SpentNonce(nonce=name, expires_at=clock.now() + timedelta(minutes=15))
 
 
 def _create(store: Store, **changes: object) -> str:
@@ -815,33 +821,46 @@ class DescribeUsage:
 
 class DescribeUploadNonces:
     class WhenACreateSpendsOne:
-        def it_records_it(self, store: Store) -> None:
-            assert store.get(_create(store, upload_nonce="n1")).used_upload_nonces == ("n1",)
+        def it_records_it(self, store: Store, clock: Clock) -> None:
+            nonce = _nonce("n1", clock)
+            assert store.get(_create(store, upload=nonce)).used_upload_nonces == (nonce,)
 
     class WhenAVersionSpendsOne:
-        def it_records_it_after_the_earlier_ones(self, store: Store) -> None:
-            artifact_id = _create(store, upload_nonce="n1")
-            store.add_version(artifact_id, VersionDraft(merge=True, upload_nonce="n2"))
-            assert store.get(artifact_id).used_upload_nonces == ("n1", "n2")
+        def it_records_it_after_the_earlier_ones(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store, upload=_nonce("n1", clock))
+            store.add_version(artifact_id, VersionDraft(merge=True, upload=_nonce("n2", clock)))
+            spent = store.get(artifact_id).used_upload_nonces
+            assert [nonce.nonce for nonce in spent] == ["n1", "n2"]
 
     class WhenTheNonceWasAlreadySpent:
-        def it_conflicts(self, store: Store) -> None:
-            artifact_id = _create(store, upload_nonce="n1")
+        def it_conflicts(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store, upload=_nonce("n1", clock))
             with pytest.raises(Conflict):
-                store.add_version(artifact_id, VersionDraft(merge=True, upload_nonce="n1"))
+                store.add_version(artifact_id, VersionDraft(merge=True, upload=_nonce("n1", clock)))
 
-        def it_writes_no_version(self, store: Store) -> None:
-            artifact_id = _create(store, upload_nonce="n1")
+        def it_writes_no_version(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store, upload=_nonce("n1", clock))
             with pytest.raises(Conflict):
-                store.add_version(artifact_id, VersionDraft(merge=True, upload_nonce="n1"))
+                store.add_version(artifact_id, VersionDraft(merge=True, upload=_nonce("n1", clock)))
             assert store.get(artifact_id).version == 1
 
-    class WhenMoreThanFiftyAreSpent:
-        def it_keeps_the_newest_fifty(self, store: Store) -> None:
-            artifact_id = _create(store, upload_nonce="n0")
-            for number in range(1, 51):
-                store.add_version(artifact_id, VersionDraft(upload_nonce=f"n{number}"))
-            assert store.get(artifact_id).used_upload_nonces[0] == "n1"
+    class WhenMoreThanFiftyAreSpentWhileTheFirstUrlIsLive:
+        def it_still_refuses_the_first_one(self, store: Store, clock: Clock) -> None:
+            artifact_id = _create(store, upload=_nonce("n0", clock))
+            for number in range(1, 60):
+                store.add_version(artifact_id, VersionDraft(upload=_nonce(f"n{number}", clock)))
+            with pytest.raises(Conflict):
+                store.add_version(artifact_id, VersionDraft(upload=_nonce("n0", clock)))
+
+    class WhenAUrlHasExpired:
+        def it_forgets_its_nonce_at_the_next_spend(
+            self, store: Store, clock: Clock, advance: Callable[[timedelta], None]
+        ) -> None:
+            artifact_id = _create(store, upload=_nonce("n0", clock))
+            advance(timedelta(minutes=20))
+            store.add_version(artifact_id, VersionDraft(upload=_nonce("n1", clock)))
+            spent = store.get(artifact_id).used_upload_nonces
+            assert [nonce.nonce for nonce in spent] == ["n1"]
 
 
 class DescribeLocate:

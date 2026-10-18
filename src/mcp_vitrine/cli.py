@@ -87,7 +87,7 @@ def _serve(args: argparse.Namespace) -> int:
     services = Services.from_settings(settings, metrics=metrics)
     if metrics is not None:
         metrics.measure(services.artifacts.usage)
-        metrics.serve(host=settings.host, port=settings.metrics_port)
+        metrics.serve(host=settings.metrics_host, port=settings.metrics_port)
     uvicorn.run(
         build_app(settings, services),
         host=settings.host,
@@ -148,8 +148,22 @@ def _token_new(args: argparse.Namespace) -> int:
 
 
 def _token_hash(args: argparse.Namespace) -> int:
-    """Print the hash of an existing token."""
-    print(token_hash(args.token))
+    """Print the hash of an existing token, read from stdin or the terminal, never argv.
+
+    On argv it would land in shell history and in the process list of every local user.
+    """
+    if args.token is not None:
+        # Not echoed back: it is already where it should not be.
+        _fail("pass the token on stdin (`mcp-vitrine token hash < file`), not as an argument")
+        return MISCONFIGURED
+    if sys.stdin.isatty():
+        token = getpass.getpass("Token: ")
+    else:
+        token = sys.stdin.readline().rstrip("\r\n")
+    if not token:
+        _fail("no token was given on stdin")
+        return FAILED
+    print(token_hash(token))
     return OK
 
 
@@ -331,9 +345,12 @@ def _parser() -> argparse.ArgumentParser:
         default=",".join(_short(scope) for scope in Scope),
         help="comma-separated: read, write, share, publish (default: all four)",
     )
-    hash_token = token_commands.add_parser("hash", help="Print the hash of an existing token.")
+    hash_token = token_commands.add_parser(
+        "hash", help="Print the hash of an existing token, read from stdin."
+    )
     hash_token.set_defaults(command=_token_hash)
-    hash_token.add_argument("token")
+    # Kept only to refuse it with a clear message instead of argparse's, which would echo it.
+    hash_token.add_argument("token", nargs="?", help=argparse.SUPPRESS)
 
     secret = commands.add_parser("secret", help="Create the signing secret.")
     secret_commands = secret.add_subparsers(title="commands", required=True, metavar="COMMAND")

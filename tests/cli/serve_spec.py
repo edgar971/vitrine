@@ -19,6 +19,7 @@ import uvicorn
 from mcp_vitrine.config import Settings
 from mcp_vitrine.domain import layout
 from mcp_vitrine.domain.models import SCHEMA_VERSION, ArtifactDraft
+from mcp_vitrine.metrics import PrometheusMetrics
 from mcp_vitrine.services.container import Services
 from tests.cli.conftest import Runner
 from tests.http.conftest import free_port
@@ -135,6 +136,43 @@ class DescribeServe:
         ) -> None:
             _set_schema(settings, artifact_id, SCHEMA_VERSION + 1)
             assert "pre-upgrade backup" in run("serve").err
+
+    class WhenMetricsAreOn:
+        @pytest.fixture
+        def metrics_bound(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+            """Stand in for the exporter's listener, keeping where it was asked to bind."""
+            seen: dict[str, object] = {}
+
+            def serve(_self: object, *, host: str, port: int) -> None:
+                seen.update(host=host, port=port)
+
+            monkeypatch.setattr(PrometheusMetrics, "serve", serve)
+            return seen
+
+        def it_keeps_the_listener_on_loopback_when_the_server_listens_everywhere(
+            self,
+            run: Runner,
+            environment: None,
+            monkeypatch: pytest.MonkeyPatch,
+            uvicorn_run: dict[str, Any],
+            metrics_bound: dict[str, object],
+        ) -> None:
+            monkeypatch.setenv("VITRINE_METRICS_PORT", "9090")
+            run("serve", "--host", "0.0.0.0")
+            assert metrics_bound["host"] == "127.0.0.1"
+
+        def it_binds_where_metrics_host_says(
+            self,
+            run: Runner,
+            environment: None,
+            monkeypatch: pytest.MonkeyPatch,
+            uvicorn_run: dict[str, Any],
+            metrics_bound: dict[str, object],
+        ) -> None:
+            monkeypatch.setenv("VITRINE_METRICS_PORT", "9090")
+            monkeypatch.setenv("VITRINE_METRICS_HOST", "0.0.0.0")
+            run("serve")
+            assert metrics_bound["host"] == "0.0.0.0"
 
     class WhenMetricsAreOnWithoutTheExtra:
         def it_exits_as_misconfigured(

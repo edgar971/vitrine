@@ -44,6 +44,7 @@ from mcp_vitrine.domain.models import (
     LinkRecord,
     MetaChange,
     PublishedArtifact,
+    SpentNonce,
     Spooled,
     UploadGrant,
     VersionDraft,
@@ -439,18 +440,20 @@ class ArtifactService:
         """Create the pre-allocated artifact, or add a version, spending the URL's nonce."""
         if claims.client is None or claims.nonce is None:
             raise NotFound()
+        # Kept for as long as the URL could be replayed, not for a fixed count of uploads.
+        spent = SpentNonce(nonce=claims.nonce, expires_at=claims.expires_at)
         try:
             self._store.get(claims.id)
         except NotFound:
             if any(event.event in GONE for event in self._audit.query(artifact=claims.id)):
                 raise NotFound() from None
-            draft = ArtifactDraft(title=title, files=files, upload_nonce=claims.nonce)
+            draft = ArtifactDraft(title=title, files=files, upload=spent)
             try:
                 return self._create(claims.id, draft, client=claims.client)
             except Conflict:
                 # Another PUT of the same URL created it first.
                 raise Conflict(UPLOAD_REUSED) from None
-        version = VersionDraft(files=files, merge=merge, upload_nonce=claims.nonce)
+        version = VersionDraft(files=files, merge=merge, upload=spent)
         return self.update(claims.id, version, client=claims.client)
 
     def open_public(self, artifact_id: str, *, version: int | None = None) -> Opened:
@@ -597,12 +600,17 @@ class ArtifactService:
         it, which needs the gate like any publish (spec § 4.3).
         """
         artifact = self._store.get(artifact_id)
-        if artifact.visibility is visibility and (
+        unchanged = artifact.visibility is visibility and (
             visibility is Visibility.PRIVATE or artifact.public_until == public_until
+        )
+        # A human who answered is counted even when the artifact got there another way
+        # meanwhile; a call nobody was asked about is not a verdict.
+        if visibility is Visibility.PUBLIC and not (
+            unchanged and gate is GateDecision.NOT_REQUIRED
         ):
-            return artifact
-        if visibility is Visibility.PUBLIC:
             self._metrics.gate(gate)
+        if unchanged:
+            return artifact
         if visibility is Visibility.PUBLIC and not gate.approves():
             self._refuse_publish(
                 artifact,

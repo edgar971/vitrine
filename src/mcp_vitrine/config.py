@@ -439,6 +439,11 @@ class Settings(BaseSettings):
         ge=0,
         le=65535,
     )
+    # Not `host`: the metrics listener has no auth and no Host check, so it stays on loopback
+    # unless the operator opens it on purpose, for a scraper on a network they control.
+    metrics_host: str = setting(
+        "127.0.0.1", group=OPERATIONS, description="Prometheus listener address (no auth)"
+    )
     log_level: LogLevel = setting(LogLevel.INFO, group=OPERATIONS, description="Log level")
     log_format: LogFormat = setting(
         LogFormat.TEXT, group=OPERATIONS, description="`text` or `json`"

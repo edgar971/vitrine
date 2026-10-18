@@ -201,6 +201,31 @@ class DescribeThePublicView:
             response = http.get(f"/a/{published.id}/")
             assert (response.status_code, response.text) == (404, unknown.text)
 
+    class WhenAVersionKeptFromBeforeItWentPublicIsPinned:
+        @pytest.fixture
+        def approved(self, services: Services, published: PublishedArtifact) -> str:
+            """The id, made public at version 2 with version 1 still kept."""
+            services.artifacts.update(
+                published.id, VersionDraft(files={"index.html": b"<h1>two</h1>"}), client=CLIENT
+            )
+            services.artifacts.set_visibility(
+                published.id,
+                Visibility.PUBLIC,
+                client=CLIENT,
+                gate=GateDecision.APPROVED,
+                seen_version=2,
+            )
+            return published.id
+
+        def it_answers_like_an_unknown_artifact(
+            self, http: httpx2.Client, approved: str, unknown: httpx2.Response
+        ) -> None:
+            response = http.get(f"/a/{approved}@1/")
+            assert (response.status_code, response.text) == (404, unknown.text)
+
+        def it_serves_the_approved_version_pinned(self, http: httpx2.Client, approved: str) -> None:
+            assert http.get(f"/a/{approved}@2/").text.startswith("<h1>two</h1>")
+
     class WhenTheIdIsMalformed:
         def it_answers_404(self, http: httpx2.Client) -> None:
             assert http.get("/a/not-an-id/").status_code == 404

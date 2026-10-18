@@ -149,8 +149,14 @@ def artifacts(raw_args: str) -> str:
     if not rows:
         return "no artifacts"
     return "\n".join(
-        f"{row['id']}  {row['visibility']:<7}  v{row['version']}  {row['title']}" for row in rows
+        f"{row['id']}  {row['visibility']:<7}  v{row['version']}  {_plain(row['title'])}"
+        for row in rows
     )
+
+
+def _plain(text: str) -> str:
+    """Agent-written text, with anything a terminal would act on shown as an escape instead."""
+    return "".join(c if c.isprintable() else c.encode("unicode_escape").decode() for c in text)
 
 
 def register(ctx: PluginContext) -> None:

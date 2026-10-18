@@ -125,7 +125,7 @@ def _list(args: argparse.Namespace) -> int:
     if args.json:
         return _json(items)
     for item in items:
-        print(f"{item['id']}\t{item['visibility']}\tv{item['version']}\t{item['title']}")
+        print(f"{item['id']}\t{item['visibility']}\tv{item['version']}\t{_plain(item['title'])}")
     return OK
 
 
@@ -136,13 +136,16 @@ def _get(args: argparse.Namespace) -> int:
     if args.json:
         return _json(detail)
     artifact = detail["artifact"]
-    print(f"{artifact['id']}  {artifact['title']}")
-    print(f"  {artifact['visibility']}, version {detail['version']}, entry {artifact['entry']}")
+    print(f"{artifact['id']}  {_plain(artifact['title'])}")
+    entry = _plain(artifact["entry"])
+    print(f"  {artifact['visibility']}, version {detail['version']}, entry {entry}")
     for file in detail["files"]:
-        print(f"  file  {file['path']} ({file['bytes']} bytes)")
+        print(f"  file  {_plain(file['path'])} ({file['bytes']} bytes)")
     for link in detail["links"]:
         lock = ", passcode" if link["passcode"] else ""
-        print(f"  link  {link['lid']} {link['label'] or '-'} until {link['expires_at']}{lock}")
+        print(
+            f"  link  {link['lid']} {_plain(link['label']) or '-'} until {link['expires_at']}{lock}"
+        )
     views = detail.get("views")
     if views is not None:
         print(f"  views {views['total']} ({views['visitors']} visitors, {views['bots']} bots)")
@@ -195,8 +198,8 @@ def _tag(args: argparse.Namespace) -> int:
         result = client.meta(args.id, body)
     if args.json:
         return _json(result)
-    tags = ", ".join(result["tags"]) or "-"
-    _say(f"{result['id']}: tags {tags}, project {result['project'] or '-'}")
+    tags = _plain(", ".join(result["tags"])) or "-"
+    _say(f"{result['id']}: tags {tags}, project {_plain(result['project'] or '-')}")
     return OK
 
 
@@ -234,6 +237,15 @@ def _endpoint(args: argparse.Namespace) -> Endpoint:
 def _json(value: Any) -> int:  # noqa: ANN401 - whatever the API answered
     print(json.dumps(value, indent=2, ensure_ascii=False))
     return OK
+
+
+def _plain(text: str) -> str:
+    """Agent-written text, with anything a terminal would act on shown as an escape instead.
+
+    A title holding ESC or OSC sequences could rewrite the screen, hide a row or set the
+    clipboard of whoever runs ``vitrine list``.
+    """
+    return "".join(c if c.isprintable() else c.encode("unicode_escape").decode() for c in text)
 
 
 def _say(message: str) -> None:

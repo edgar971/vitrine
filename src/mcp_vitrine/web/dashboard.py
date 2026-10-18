@@ -17,7 +17,7 @@ from importlib import resources
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-from anyio import to_thread
+from anyio import CapacityLimiter, to_thread
 from pydantic import ValidationError
 from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException
@@ -64,6 +64,8 @@ AUDIT_PAGE = 100
 # More digits than any audit log has pages.
 PAGE_DIGITS = 6
 LIST_PAGE = 25
+# Password checks that may run at once, whoever sends them.
+PASSWORD_CHECKS = 2
 CONFIRMABLE = frozenset({"private", "delete", "revoke"})
 WRONG_PASSWORD = "That password didn't work."  # noqa: S105 - a message, not a password
 TOO_MANY = "Too many attempts. Wait a minute, then try again."
@@ -90,6 +92,9 @@ class DashboardRoutes:
         self._origin = settings.public_base_url
         # Compared as an origin, so an explicit default port on either side still matches.
         self._own = origin_of(settings.public_base_url)
+        # Each check is a 32 MiB scrypt. The login bucket is per address, so without a cap
+        # here a few addresses together could fill the thread pool and the memory limit.
+        self._checks = CapacityLimiter(PASSWORD_CHECKS)
 
     def routes(self) -> list[Route]:
         """The table, named as ``ROUTE_ACCESS`` names it."""
@@ -151,7 +156,9 @@ class DashboardRoutes:
             return limited
         form = await _form(request)
         password = form.get("password") if form is not None else None
-        right = isinstance(password, str) and await _run(partial(self._login.verify, password))
+        right = isinstance(password, str) and await to_thread.run_sync(
+            partial(self._login.verify, password), limiter=self._checks
+        )
         if not right:
             return self._page(pages.login(message=WRONG_PASSWORD), status=401)
         limits.refund(Bucket.ADMIN_LOGIN, address)

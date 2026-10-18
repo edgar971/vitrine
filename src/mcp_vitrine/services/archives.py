@@ -37,6 +37,13 @@ UTF8_FLAG = 0x800
 ENCRYPTED_FLAG = 0x1
 METHODS = frozenset({zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED})
 WARN_BYTES = 2 * 1024 * 1024
+# The central directory an archive may declare: room for each entry's fixed record, a full path
+# and the usual extra fields, for four entries per file a version may hold (folders and junk).
+DIRECTORY_BYTES_PER_ENTRY = 1024
+DIRECTORY_ENTRIES_PER_FILE = 4
+# zipfile's own reads while it looks for the end record (APPNOTE 4.3.16): the 22-byte record
+# and an archive comment of up to 64 KiB.
+END_RECORD_SEARCH = 22 + (1 << 16)
 _ROOT_ABSOLUTE = re.compile(rb"""(?:src|href)\s*=\s*["']?/(?!/)""", re.IGNORECASE)
 ROOT_ABSOLUTE_WARNING = (
     '{entry} loads assets from root-absolute URLs (src="/…" or href="/…"), which resolve '
@@ -68,8 +75,12 @@ def unpack(archive: Path, into: Path, limits: ArchiveLimits) -> Unpacked:
     The checks that need only the central directory run first, so a refused archive writes
     nothing at all; the sizes are then enforced while inflating, where they cannot lie.
     """
+    cap = max(
+        limits.max_files * DIRECTORY_ENTRIES_PER_FILE * DIRECTORY_BYTES_PER_ENTRY,
+        END_RECORD_SEARCH,
+    )
     try:
-        with zipfile.ZipFile(archive) as reader:
+        with archive.open("rb") as raw, zipfile.ZipFile(_CappedReads(raw, cap)) as reader:
             members, skipped = _members(reader.infolist(), limits)
         into.mkdir(parents=True, exist_ok=True)
         files: dict[str, Content] = {}
@@ -82,6 +93,34 @@ def unpack(archive: Path, into: Path, limits: ArchiveLimits) -> Unpacked:
     except zipfile.BadZipFile, zipfile.LargeZipFile, EOFError, zlib.error, struct.error:
         raise Invalid(UNREADABLE) from None
     return Unpacked(files=files, skipped=skipped)
+
+
+class _CappedReads:
+    """An archive file that refuses any single read over ``cap`` bytes.
+
+    zipfile reads the whole central directory in one call, at the size the archive declares, and
+    builds an object per entry before any can be counted: a directory listing millions of empty
+    entries fits in one upload and exhausts memory long before ``max_files`` is checked.
+    """
+
+    def __init__(self, file: BinaryIO, cap: int) -> None:
+        """Wrap ``file``, an archive opened for reading."""
+        self._file = file
+        self._cap = cap
+
+    def read(self, size: int = -1) -> bytes:
+        """Read ``size`` bytes, refusing an unbounded read or one over the cap."""
+        if not 0 <= size <= self._cap:
+            raise TooLarge("the archive lists more entries than a version can hold")
+        return self._file.read(size)
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        """Move as the wrapped file does."""
+        return self._file.seek(offset, whence)
+
+    def tell(self) -> int:
+        """Where the wrapped file is."""
+        return self._file.tell()
 
 
 def warnings(files: Mapping[str, Content], *, entry: str | None) -> tuple[str, ...]:

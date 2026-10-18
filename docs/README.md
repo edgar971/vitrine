@@ -13,6 +13,7 @@ it in production, understanding how it works, and changing it.
 │ vitrine: one process, one port                                      │
 │   /mcp      tools, resources, the public gate                       │
 │   /api /u   uploads              /a /s   views         /healthz     │
+│   /_admin   the operator dashboard   /_vitrine  JSX assets          │
 ├─────────────────────────────────────────────────────────────────────┤
 │ data_dir/   artifacts/<id>/meta.json + v<n>/ · audit/ refs/ views/  │
 └─────────────────────────────────────────────────────────────────────┘
@@ -48,7 +49,7 @@ The full picture is in [design](design.md).
 | [design](design.md) | Architecture, storage, flows, extension points, test conventions |
 | [adr](adr/) | The decisions that are expensive to reverse |
 | [research](research.md) | The platform facts and alternatives behind the design |
-| [roadmap](roadmap.md) | What shipped in `0.1.0`, and what comes after |
+| [roadmap](roadmap.md) | What shipped, and what comes next |
 
 ## Contributing
 

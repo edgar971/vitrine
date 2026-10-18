@@ -16,9 +16,12 @@ from starlette.datastructures import Headers
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from mcp_vitrine.web.responses import PASSIVE_CSP, security_headers
+
 ACCESS_LOGGER = "mcp_vitrine.access"
 MCP_PATH = "/mcp"
 SIGNED_PATH = "/s"
+PUBLIC_PATH = "/a"
 # An unlock posts one short form; nothing else under /s/ takes a body.
 UNLOCK_BODY = 1024
 REDACTED = "[redacted]"
@@ -173,6 +176,41 @@ class AccessLog:
                 status,
                 (time.perf_counter() - started) * 1000,
             )
+
+
+class ViewHeaders:
+    """The § 7.2 headers on every response under ``/a/`` and ``/s/``, whoever built it.
+
+    Views set them through ``responses``; this covers what Starlette answers on its own (a 405,
+    a 400 or 416 for a bad ``Range``) and what a middleware refuses (421, 413). A header the
+    response already carries is kept.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        """Wrap the app."""
+        self._app = app
+        defaults = security_headers() | {"Content-Security-Policy": PASSIVE_CSP}
+        self._defaults = [
+            (name.lower().encode(), value.encode()) for name, value in defaults.items()
+        ]
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Add each missing header to the response start."""
+        if scope["type"] != "http" or not (
+            _under(scope["path"], PUBLIC_PATH) or _under(scope["path"], SIGNED_PATH)
+        ):
+            await self._app(scope, receive, send)
+            return
+
+        async def completed(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                present = {name.lower() for name, _ in headers}
+                headers += [pair for pair in self._defaults if pair[0] not in present]
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self._app(scope, receive, completed)
 
 
 class _BodyTooLargeError(Exception):

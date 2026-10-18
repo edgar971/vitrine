@@ -115,6 +115,47 @@ class DescribeThePrivateView:
             response = http.get(published.url.rstrip("/"))
             assert response.headers["Location"].endswith(f"{signature(published.url)}/")
 
+        def it_redirects_relatively_whatever_the_scheme_seen(
+            self, http: httpx2.Client, published: PublishedArtifact
+        ) -> None:
+            response = http.get(published.url.rstrip("/"))
+            assert response.headers["Location"] == f"./{signature(published.url)}/"
+
+        def it_keeps_the_redirect_out_of_caches(
+            self, http: httpx2.Client, published: PublishedArtifact
+        ) -> None:
+            response = http.get(published.url.rstrip("/"))
+            assert response.headers["Cache-Control"] == "private, no-store"
+
+
+class DescribeAResponseStarletteBuilds:
+    @pytest.mark.parametrize(
+        ("method", "suffix", "headers"),
+        [
+            ("GET", "", {"Range": "bytes=999999-"}),
+            ("GET", "", {"Range": "pages=1-2"}),
+            ("POST", "index.html", {}),
+        ],
+        ids=["unsatisfiable range", "malformed range", "method not allowed"],
+    )
+    def it_carries_the_view_headers(
+        self,
+        http: httpx2.Client,
+        published: PublishedArtifact,
+        method: str,
+        suffix: str,
+        headers: dict[str, str],
+    ) -> None:
+        response = http.request(method, published.url + suffix, headers=headers)
+        assert {
+            name: response.headers.get(name)
+            for name in ("X-Content-Type-Options", "Referrer-Policy", "Cache-Control")
+        } == {
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+            "Cache-Control": "private, no-store",
+        }
+
 
 class DescribeVersionPinning:
     class WhenAnOlderVersionIsPinned:

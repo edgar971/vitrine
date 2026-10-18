@@ -31,6 +31,7 @@ from mcp_vitrine.web.middleware import (
     AccessLog,
     BodyLimit,
     HostGuard,
+    ViewHeaders,
 )
 from mcp_vitrine.web.pages import ADMIN_PREFIX
 from mcp_vitrine.web.routes import build_routes
@@ -67,6 +68,8 @@ def build_app(settings: Settings, services: Services | None = None) -> Starlette
             # Outermost first: the client address is settled before anything logs or limits it.
             Middleware(ProxyHeadersMiddleware, trusted_hosts=settings.forwarded_allow_ips),
             Middleware(AccessLog),
+            # Outside the guard and the limit, so their refusals carry the view headers too.
+            Middleware(ViewHeaders),
             Middleware(
                 HostGuard,
                 base_url=settings.public_base_url,

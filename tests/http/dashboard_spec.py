@@ -8,7 +8,10 @@ what agents wrote, and offers no action that makes anything public.
 from __future__ import annotations
 
 import re
+import threading
+import time
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx2
 import pytest
@@ -19,8 +22,10 @@ from mcp_vitrine.domain.models import (
     PublishedArtifact,
     Visibility,
 )
+from mcp_vitrine.services.admin import AdminLogin
 from mcp_vitrine.services.audit import AuditEventName
 from mcp_vitrine.services.container import Services
+from mcp_vitrine.web.dashboard import PASSWORD_CHECKS
 from tests.conftest import ADMIN_HASH, ADMIN_PASSWORD
 from tests.http.conftest import CLIENT, FULL_TOKEN
 
@@ -156,6 +161,47 @@ class DescribeTheDashboard:
             http.post("/_admin/login", data={"password": ADMIN_PASSWORD}, headers=origin)
             response = http.post("/_admin/login", data={"password": ADMIN_PASSWORD}, headers=origin)
             assert response.status_code == 303
+
+    class WhenManyLoginsArriveAtOnce:
+        @pytest.fixture
+        def overrides(self) -> dict[str, str]:
+            """A bucket wide enough that only the cap on checks holds them back."""
+            return {"VITRINE_ADMIN_PASSWORD": ADMIN_HASH, "VITRINE_RATE_ADMIN_LOGIN": "50/m"}
+
+        @pytest.fixture
+        def overlapping(
+            self, base: str, origin: dict[str, str], monkeypatch: pytest.MonkeyPatch
+        ) -> int:
+            """The most password checks that ran at the same time across 8 parallel logins."""
+            running = 0
+            most = 0
+            guard = threading.Lock()
+
+            def slow(_: AdminLogin, __: str) -> bool:
+                nonlocal running, most
+                with guard:
+                    running += 1
+                    most = max(most, running)
+                time.sleep(0.1)
+                with guard:
+                    running -= 1
+                return False
+
+            monkeypatch.setattr(AdminLogin, "verify", slow)
+
+            def attempt(_: int) -> int:
+                with httpx2.Client(base_url=base) as client:
+                    response = client.post(
+                        "/_admin/login", data={"password": "wrong"}, headers=origin
+                    )
+                    return response.status_code
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                list(pool.map(attempt, range(8)))
+            return most
+
+        def it_runs_at_most_password_checks_at_once(self, overlapping: int) -> None:
+            assert overlapping <= PASSWORD_CHECKS
 
     class WhenALoginComesFromAnotherOrigin:
         def it_answers_403(self, http: httpx2.Client) -> None:

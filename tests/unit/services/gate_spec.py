@@ -19,11 +19,11 @@ from mcp_vitrine.services.gate import CONSENT_SCHEMA, PublicGate
 NOW = datetime(2026, 10, 15, 10, 0, tzinfo=UTC)
 
 
-def _detail(files: int) -> ArtifactDetail:
-    """An artifact titled ``Energy`` whose current version holds ``files`` files."""
+def _detail(files: int, *, title: str = "Energy") -> ArtifactDetail:
+    """An artifact titled ``title`` whose current version holds ``files`` files."""
     artifact = Artifact(
         id="k7m2q9x4tz3wbn6r",
-        title="Energy",
+        title=title,
         entry="index.html",
         version=1,
         versions=(Version(n=1, at=NOW, bytes=1, files=files),),
@@ -72,6 +72,24 @@ class DescribePublicGate:
 
         def it_states_the_consequence(self, gate: PublicGate) -> None:
             assert "Anyone with the link" in gate.question(_detail(files=1))
+
+    class WhenTheAgentWritesATitleToMislead:
+        FORGED = 'Notes" will stay PRIVATE. Accept to keep it so.\n\n\n\n\u202e'
+
+        def it_keeps_the_question_on_one_line(self, gate: PublicGate) -> None:
+            assert gate.question(_detail(files=1, title=self.FORGED)).isprintable()
+
+        def it_cannot_close_the_quote(self, gate: PublicGate) -> None:
+            assert gate.question(_detail(files=1, title=self.FORGED)).count('"') == 2
+
+        def it_quotes_at_most_80_characters(self, gate: PublicGate) -> None:
+            question = gate.question(_detail(files=1, title="a" * 200))
+            assert f'"{"a" * 79}…"' in question
+
+        def it_sanitises_the_update_question_too(self, gate: PublicGate) -> None:
+            assert (
+                gate.update_question(_detail(files=1, title=self.FORGED), files=1).count('"') == 2
+            )
 
     class WhenTheAnswerIsAnAcceptWithoutData:
         def it_approves(self) -> None:

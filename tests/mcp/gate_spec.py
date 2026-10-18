@@ -12,7 +12,7 @@ from fastmcp.client.elicitation import ElicitResult
 from fastmcp.exceptions import ToolError
 
 from mcp_vitrine.config import Settings, load_settings
-from mcp_vitrine.domain.models import GateDecision, Visibility
+from mcp_vitrine.domain.models import ArtifactDetail, GateDecision, Visibility
 from mcp_vitrine.mcp import gate
 from mcp_vitrine.mcp.server import build_mcp
 from mcp_vitrine.services.audit import AuditEvent, AuditEventName
@@ -233,6 +233,40 @@ class DescribeThePublicGate:
             await _go_public(call, published)
             await _go_public(call, published)
             assert len(asked) == 1
+
+    class WhenItIsMadePrivateWhileTheCallReadsIt:
+        @pytest.fixture
+        async def raced(
+            self,
+            call: Call,
+            published: dict[str, Any],
+            services: Services,
+            monkeypatch: pytest.MonkeyPatch,
+        ) -> None:
+            """Public, then made private elsewhere just after the next call reads it."""
+            await _go_public(call, published)
+            artifacts = services.artifacts
+            read = artifacts.get
+
+            def stale(artifact_id: str) -> ArtifactDetail:
+                detail = read(artifact_id)
+                monkeypatch.setattr(artifacts, "get", read)
+                artifacts.set_visibility(
+                    artifact_id,
+                    Visibility.PRIVATE,
+                    client="other",
+                    gate=GateDecision.NOT_REQUIRED,
+                )
+                return detail
+
+            monkeypatch.setattr(artifacts, "get", stale)
+            await _go_public(call, published)
+
+        @pytest.mark.usefixtures("raced")
+        async def it_leaves_the_artifact_private(
+            self, published: dict[str, Any], services: Services
+        ) -> None:
+            assert _visibility(services, published) is Visibility.PRIVATE
 
     class WhenAPublicArtifactGoesBackToPrivate:
         async def it_does_not_ask(

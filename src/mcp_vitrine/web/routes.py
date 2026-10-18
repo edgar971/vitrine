@@ -119,6 +119,9 @@ class Access(StrEnum):
 
 ROUTE_ACCESS: dict[str, Access] = {
     "view_public": Access.PUBLIC,
+    # Both answer one redirect for any ref, checked or not, and open nothing themselves.
+    "slash_public": Access.PUBLIC,
+    "slash_private": Access.PUBLIC,
     "view_private": Access.SIGNATURE,
     "unlock_private": Access.SIGNATURE,
     "upload": Access.SIGNATURE,
@@ -238,7 +241,9 @@ class WebRoutes:
     def routes(self) -> list[Route]:
         """The table, named as ``ROUTE_ACCESS`` names it."""
         return [
+            Route("/a/{ref}", self.add_slash, methods=["GET"], name="slash_public"),
             Route("/a/{ref}/{path:path}", self.view_public, methods=["GET"], name="view_public"),
+            Route("/s/{ref}", self.add_slash, methods=["GET"], name="slash_private"),
             Route("/s/{ref}/unlock", self.unlock_private, methods=["POST"], name="unlock_private"),
             Route("/s/{ref}/{path:path}", self.view_private, methods=["GET"], name="view_private"),
             Route("/u/{sig}", self.upload, methods=["PUT"], name="upload"),
@@ -261,6 +266,21 @@ class WebRoutes:
             ),
             *build_dashboard(self._settings, self._services),
         ]
+
+    async def add_slash(self, request: Request) -> Response:
+        """``GET /a/{ref}``, ``/s/{ref}``: the view with its slash, so relative assets resolve.
+
+        The ``Location`` is relative. Starlette's own redirect is absolute, built from the
+        request's scheme, which is ``http`` behind a TLS proxy outside ``forwarded_allow_ips``:
+        the signed link would cross the network in clear.
+        """
+        query = request.url.query
+        location = f"./{quote(request.path_params['ref'], safe='@')}/"
+        return RedirectResponse(
+            f"{location}?{query}" if query else location,
+            status_code=HTTPStatus.TEMPORARY_REDIRECT,
+            headers=security_headers(),
+        )
 
     async def view_public(self, request: Request) -> Response:
         """``GET /a/{id}[@n]/[path]``: a public artifact, no credentials."""

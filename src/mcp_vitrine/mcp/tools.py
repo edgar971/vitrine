@@ -565,17 +565,22 @@ async def artifact_set_visibility(
             return answer
         decision, seen_version = answer.decision, answer.version
         _log_gate(id, client, decision)
-    artifact = await to_thread.run_sync(
-        partial(
-            service.set_visibility,
-            id,
-            visibility,
-            client=client,
-            gate=decision,
-            seen_version=seen_version,
-            public_until=until,
+    if visibility is Visibility.PUBLIC and not widens:
+        # Nothing was asked, so nothing may be written: passing NOT_REQUIRED on would publish
+        # an artifact made private since ``detail`` was read, with nobody asked (security T20).
+        artifact = (await to_thread.run_sync(partial(service.get, id))).artifact
+    else:
+        artifact = await to_thread.run_sync(
+            partial(
+                service.set_visibility,
+                id,
+                visibility,
+                client=client,
+                gate=decision,
+                seen_version=seen_version,
+                public_until=until,
+            )
         )
-    )
     link = service.url_for(artifact)
     return VisibilityChange(
         id=artifact.id,

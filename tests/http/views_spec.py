@@ -115,6 +115,47 @@ class DescribeThePrivateView:
             response = http.get(published.url.rstrip("/"))
             assert response.headers["Location"].endswith(f"{signature(published.url)}/")
 
+        def it_redirects_relatively_whatever_the_scheme_seen(
+            self, http: httpx2.Client, published: PublishedArtifact
+        ) -> None:
+            response = http.get(published.url.rstrip("/"))
+            assert response.headers["Location"] == f"./{signature(published.url)}/"
+
+        def it_keeps_the_redirect_out_of_caches(
+            self, http: httpx2.Client, published: PublishedArtifact
+        ) -> None:
+            response = http.get(published.url.rstrip("/"))
+            assert response.headers["Cache-Control"] == "private, no-store"
+
+
+class DescribeAResponseStarletteBuilds:
+    @pytest.mark.parametrize(
+        ("method", "suffix", "headers"),
+        [
+            ("GET", "", {"Range": "bytes=999999-"}),
+            ("GET", "", {"Range": "pages=1-2"}),
+            ("POST", "index.html", {}),
+        ],
+        ids=["unsatisfiable range", "malformed range", "method not allowed"],
+    )
+    def it_carries_the_view_headers(
+        self,
+        http: httpx2.Client,
+        published: PublishedArtifact,
+        method: str,
+        suffix: str,
+        headers: dict[str, str],
+    ) -> None:
+        response = http.request(method, published.url + suffix, headers=headers)
+        assert {
+            name: response.headers.get(name)
+            for name in ("X-Content-Type-Options", "Referrer-Policy", "Cache-Control")
+        } == {
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+            "Cache-Control": "private, no-store",
+        }
+
 
 class DescribeVersionPinning:
     class WhenAnOlderVersionIsPinned:
@@ -200,6 +241,31 @@ class DescribeThePublicView:
         ) -> None:
             response = http.get(f"/a/{published.id}/")
             assert (response.status_code, response.text) == (404, unknown.text)
+
+    class WhenAVersionKeptFromBeforeItWentPublicIsPinned:
+        @pytest.fixture
+        def approved(self, services: Services, published: PublishedArtifact) -> str:
+            """The id, made public at version 2 with version 1 still kept."""
+            services.artifacts.update(
+                published.id, VersionDraft(files={"index.html": b"<h1>two</h1>"}), client=CLIENT
+            )
+            services.artifacts.set_visibility(
+                published.id,
+                Visibility.PUBLIC,
+                client=CLIENT,
+                gate=GateDecision.APPROVED,
+                seen_version=2,
+            )
+            return published.id
+
+        def it_answers_like_an_unknown_artifact(
+            self, http: httpx2.Client, approved: str, unknown: httpx2.Response
+        ) -> None:
+            response = http.get(f"/a/{approved}@1/")
+            assert (response.status_code, response.text) == (404, unknown.text)
+
+        def it_serves_the_approved_version_pinned(self, http: httpx2.Client, approved: str) -> None:
+            assert http.get(f"/a/{approved}@2/").text.startswith("<h1>two</h1>")
 
     class WhenTheIdIsMalformed:
         def it_answers_404(self, http: httpx2.Client) -> None:

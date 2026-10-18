@@ -147,6 +147,14 @@ class DescribeUnpackingAnArchive:
         with pytest.raises(TooLarge):
             unpack(archive(tmp_path / "a.zip", entries), into, LIMITS)
 
+    def it_refuses_a_central_directory_too_long_for_max_files(
+        self, tmp_path: Path, into: Path
+    ) -> None:
+        # Folder entries are never counted as files, so only the directory's size can stop them.
+        folders = {f"d{n}/": b"" for n in range(LIMITS.max_files * 100)}
+        with pytest.raises(TooLarge):
+            unpack(archive(tmp_path / "a.zip", folders | {"index.html": b"x"}), into, LIMITS)
+
     def it_refuses_an_archive_that_inflates_past_max_artifact(
         self, tmp_path: Path, into: Path
     ) -> None:

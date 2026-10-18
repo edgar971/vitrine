@@ -27,7 +27,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: vitrine
-          image: ghcr.io/edgar971/vitrine:0.1.0
+          image: ghcr.io/edgar971/vitrine:0.2.0
           imagePullPolicy: IfNotPresent
           args: ["serve", "--config", "/etc/vitrine/vitrine.toml"]
           envFrom:

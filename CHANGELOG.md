@@ -9,6 +9,27 @@ Each version's section is generated from its Conventional Commits by git-cliff
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-18
+
+### Security
+
+- take the zip inflation ratio over the bytes actually read, and serve a site's fallback per version and under nested routes
+- keep upload nonces until their URL expires, bind metrics to loopback, read `token hash` from stdin, and give every served file a CSP (**breaking**)
+- review the threat model against the code shipping in 0.2.0
+- serve only the approved version publicly, close a gate race, bound zip directories and login checks (**breaking**)
+- give every view response the security headers, and redirect a missing slash relatively
+
+### Added
+
+- meta.json schema 2, projects, artifact_set_meta and multi-term search; run `mcp-vitrine migrate` after upgrading (**breaking**)
+- per-link passcodes and revoke, scheduled unpublish, and anonymous view counts
+- /api parity: get, delete, metadata edits, links and revoke over HTTP
+- render GitHub-flavoured Markdown: tables, task lists, footnotes, front matter and heading anchors
+- zip site uploads with a SPA fallback, and request bodies streamed to disk
+- the `vitrine` client command: publish, list, get, link, revoke, tag, delete and open over /api
+- render JSX and TSX components offline, from a runtime vitrine ships
+- an operator dashboard at /_admin/, off until VITRINE_ADMIN_PASSWORD is set
+
 ## [0.1.0] - 2026-10-16
 
 The first release. Everything below is new.

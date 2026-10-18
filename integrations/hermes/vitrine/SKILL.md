@@ -1,7 +1,7 @@
 ---
 name: vitrine
 description: Share output as a link. Use when the output is HTML, a report or dashboard, a PDF or image the user will open in a browser, revise later, or pass to someone else.
-version: 0.1.0
+version: 0.2.0
 ---
 # Sharing artifacts with vitrine
 

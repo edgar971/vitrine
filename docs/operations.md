@@ -132,7 +132,7 @@ Every key is in the generated [configuration reference](configuration.md). The r
 header. The image includes the `metrics` extra. The CLI runs inside it with the server's
 environment, for example `docker exec vitrine mcp-vitrine audit --since 24h`.
 
-**Image tags.** Every release is tagged with its version (`0.1.0`), and `stable` follows the
+**Image tags.** Every release is tagged with its version (`0.2.0`), and `stable` follows the
 newest final release, never a pre-release. `stable` is for trying vitrine; a deployment pins a
 version or a digest, so an upgrade happens when you choose it, after the backup and migration
 steps in § 4.

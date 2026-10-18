@@ -1,6 +1,7 @@
 # vitrine roadmap
 
-`0.1.0` shipped on 2026-10-16, and `0.2.0` is complete on `main`; the release procedure is in
+`0.1.0` shipped on 2026-10-16 and `0.2.0` on 2026-10-18
+([release](https://github.com/edgar971/vitrine/releases/tag/v0.2.0)); the release procedure is in
 [CONTRIBUTING.md § Releasing](../CONTRIBUTING.md#releasing), and the per-version history is in
 [CHANGELOG.md](../CHANGELOG.md).
 

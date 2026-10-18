@@ -18,6 +18,8 @@ ACCEPT = "accept"
 # How long a question's state stays answerable: past the MCP layer's own wait for the human.
 GATE_STATE_TTL = timedelta(minutes=15)
 CONFIRM_FIELD = "confirm"
+# How much of a title the question quotes: enough to recognise it, too little to argue with.
+QUESTION_TITLE_MAX = 80
 
 # One boolean that defaults to true: approve/deny-only clients answer ``accept`` with ``{}``, and
 # a required field would turn every such approval into a validation failure (research F2).
@@ -61,21 +63,21 @@ class PublicGate:
         if detail.artifact.visibility is Visibility.PUBLIC:
             if until is None:
                 return (
-                    f'Keep "{detail.artifact.title}" ({files}) PUBLIC with no end date? '
+                    f'Keep "{_shown(detail.artifact.title)}" ({files}) PUBLIC with no end date? '
                     "Anyone with the link can view it until it is made private."
                 )
             return (
-                f'Keep "{detail.artifact.title}" ({files}) PUBLIC until {_day(until)}? '
+                f'Keep "{_shown(detail.artifact.title)}" ({files}) PUBLIC until {_day(until)}? '
                 "Anyone with the link can view it until then."
             )
         if until is None:
             return (
-                f'Make "{detail.artifact.title}" ({files}) PUBLIC? '
+                f'Make "{_shown(detail.artifact.title)}" ({files}) PUBLIC? '
                 "Anyone with the link will be able to view it, and existing private links stop "
                 "working."
             )
         return (
-            f'Make "{detail.artifact.title}" ({files}) PUBLIC until {_day(until)}? '
+            f'Make "{_shown(detail.artifact.title)}" ({files}) PUBLIC until {_day(until)}? '
             "Anyone with the link can view it until then, and existing private links stop working."
         )
 
@@ -83,7 +85,7 @@ class PublicGate:
         """What the human reads before new content lands on a public artifact (security T19)."""
         change = "its metadata" if files is None else ("1 file" if files == 1 else f"{files} files")
         return (
-            f'"{detail.artifact.title}" is PUBLIC. Publish a new version with {change}? '
+            f'"{_shown(detail.artifact.title)}" is PUBLIC. Publish a new version with {change}? '
             "Anyone with the link will see it immediately."
         )
 
@@ -93,6 +95,19 @@ class PublicGate:
         if action == ACCEPT and (content or {}).get(CONFIRM_FIELD) is not False:
             return GateDecision.APPROVED
         return GateDecision.DECLINED
+
+
+def _shown(title: str) -> str:
+    """A title as the question quotes it: one line, no double quotes, at most 80 characters.
+
+    The agent writes the title. Verbatim, it could close the quote, state a false consequence
+    and push the real one out of view with blank lines.
+    """
+    flat = " ".join("".join(c if c.isprintable() else " " for c in title).split())
+    flat = flat.replace('"', "'")
+    if len(flat) <= QUESTION_TITLE_MAX:
+        return flat
+    return flat[: QUESTION_TITLE_MAX - 1] + "…"
 
 
 def _day(moment: datetime) -> str:

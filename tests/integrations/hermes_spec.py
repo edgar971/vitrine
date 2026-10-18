@@ -283,6 +283,12 @@ class DescribeTheArtifactsCommand:
         result = published(paths=["site"], title="Energy")
         assert registered.commands["artifacts"]("") == f"{result['id']}  private  v1  Energy"
 
+    def it_escapes_terminal_controls_in_a_title(
+        self, registered: Recorder, connected: str, site: Path
+    ) -> None:
+        published(paths=["site"], title="Energy\x1b]52;c;cHduZWQ=\x07")
+        assert registered.commands["artifacts"]("").endswith("Energy\\x1b]52;c;cHduZWQ=\\x07")
+
     def it_filters_by_the_query(self, registered: Recorder, connected: str, site: Path) -> None:
         published(paths=["site"], title="Energy")
         assert registered.commands["artifacts"]("water") == "no artifacts"

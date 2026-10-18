@@ -340,7 +340,7 @@ class ArtifactService:
             passcode=shown if passcode is True else None,
         )
 
-    def url_for(self, artifact: Artifact, *, ttl: timedelta | None = None) -> ArtifactLink:
+    def url_for(self, artifact: ArtifactMeta, *, ttl: timedelta | None = None) -> ArtifactLink:
         """The URL that opens ``artifact`` as it is now: unrecorded, or the public URL.
 
         The public URL expires with the public window (``public_until``), or never.
@@ -460,9 +460,13 @@ class ArtifactService:
         """The artifact behind ``/a/{id}``: a private id is as unknown as a missing one (§ 7.1).
 
         So is one whose public window ran out, before the sweep has made it private (§ 4.3).
+        A pin names the current version only: the human approved that one, never the older
+        versions kept beside it.
         """
         artifact = self._store.get(artifact_id)
         if not artifact.is_public_at(self._clock.now()):
+            raise NotFound()
+        if version is not None and version != artifact.version:
             raise NotFound()
         return Opened(self._viewable(artifact, version))
 

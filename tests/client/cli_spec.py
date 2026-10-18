@@ -185,6 +185,13 @@ class DescribeList:
     ) -> None:
         assert vitrine("list").out.startswith(f"{artifact.id}\tprivate\tv1\tEnergy")
 
+    class WhenATitleHoldsTerminalControls:
+        def it_prints_them_escaped(self, vitrine: Vitrine, services: Services) -> None:
+            services.artifacts.create(
+                ArtifactDraft(title="Energy\x1b[2K\x1b[1A", files={"a.txt": b"x"}), client=CLIENT
+            )
+            assert vitrine("list").out.rstrip("\n").endswith("Energy\\x1b[2K\\x1b[1A")
+
     class WhenAllIsAsked:
         def it_follows_the_cursors(self, vitrine: Vitrine, services: Services) -> None:
             for number in range(3):

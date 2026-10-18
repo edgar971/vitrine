@@ -50,6 +50,7 @@ client-agnostic equivalent.
 | `Annotated[T, Field(description=…, max_length=…)]` lands in the input schema | Parameter docs and limits live with the signature |
 | `Depends(...)` and `CurrentAccessToken()` parameters are injected and hidden from the schema | Services and caller identity without globals |
 | `auth=require_scopes(...)` hides the tool from tokens without the scope; calling it fails as an unknown tool | Least-privilege token scopes (spec § 5.0) |
+| **No server-side `resources/subscribe` on a `LocalProvider`, and the capabilities report `"subscribe": false`** | Resources are readable, but a client cannot be *notified*: `artifact://{id}/views` and `…/history` updates wait for FastMCP ([#53](https://github.com/edgar971/vitrine/issues/53)) rather than going through the lower-level `mcp` server hooks |
 
 ### Hermes Agent
 

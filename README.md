@@ -5,8 +5,8 @@
 ![license](https://img.shields.io/badge/license-MIT-green)
 
 **Shareable links for what your AI agent makes.** vitrine is a small, self-hosted MCP server. Your
-agent publishes an HTML report, a chart, a PDF or a folder of files, and gets back a link that
-opens in any browser.
+agent publishes an HTML report, a chart, a PDF, a folder of files or a single React component, and
+gets back a link that opens in any browser.
 
 - **Private by default.** Links are signed, expire and can be revoked. An artifact becomes public
   only after you approve it.
@@ -31,6 +31,10 @@ Or with Docker. `stable` is the newest release; for a deployment, pin a version 
 ```bash
 docker pull ghcr.io/edgar971/vitrine:stable
 ```
+
+**Upgrading from `0.1.x`?** `0.2.0` moves `meta.json` to schema 2, so run `uvx mcp-vitrine migrate`
+once against your `data_dir` before starting the new version — `serve` refuses to start on old data
+until you do. See [operations § 4](https://github.com/edgar971/vitrine/blob/main/docs/operations.md#4-upgrades-and-migrations).
 
 ## Run it
 

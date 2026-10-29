@@ -29,7 +29,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           # Pinned so a run is reproducible; bump deliberately, with the lock.
           # astral-sh publishes no floating `v10` tag: the full version is required.
@@ -39,7 +39,7 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install just
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: just@1.58.0
 
@@ -83,12 +83,12 @@ jobs:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.13.1"
 
       - name: Install just
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: just@1.58.0
 
@@ -111,7 +111,7 @@ jobs:
           persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.13.1"
           python-version: "3.15"
@@ -119,7 +119,7 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install just
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: just@1.58.0
 
@@ -143,7 +143,7 @@ jobs:
           persist-credentials: false
 
       - name: Install just
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: just@1.58.0
 
@@ -165,7 +165,7 @@ jobs:
       # built-in tools and the install-time security scan (docs/design.md § 8). PyPI's
       # hermes-agent predates the command, so the action builds it from source at the pinned ref.
       - name: hermes plugins validate
-        uses: NousResearch/hermes-agent/.github/actions/plugin-validate@acc3cada0da86c81efc8aa6c5a291989549ca900
+        uses: NousResearch/hermes-agent/.github/actions/plugin-validate@ef75bc708867e3884cb40a91363be6dc6fddc034
         with:
           path: integrations/hermes/vitrine
           # The Hermes the plugin is admitted against; bump it with the action's pin.
@@ -182,7 +182,7 @@ jobs:
           persist-credentials: false
 
       - name: Install just
-        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
         with:
           tool: just@1.58.0
 

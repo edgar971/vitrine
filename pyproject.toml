@@ -25,7 +25,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "fastmcp>=4.1,<4.2",
+  "fastmcp>=4.1,<4.3",
   "httpx2>=2.13",
   "markdown-it-py>=4.2",
   "mdit-py-plugins>=0.5",

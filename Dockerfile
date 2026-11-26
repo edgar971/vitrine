@@ -6,7 +6,7 @@ ARG PYTHON_VERSION=3.15
 
 # Base images are pinned by digest, so a moved tag cannot change a signed release; Dependabot
 # bumps the tag and the digest together.
-FROM ghcr.io/astral-sh/uv:0.13.1-trixie-slim@sha256:2a4b12b30aa1a0f1d1f420ad3f4ac27716d5c2962302ac8a7af67ac3287bf36c AS build
+FROM ghcr.io/astral-sh/uv:0.13.10-trixie-slim@sha256:8b48445a9a356d395bc87d0cc15d6a65e91e67424562f6de9fdcd6205ac3f040 AS build
 ARG PYTHON_VERSION
 # A uv-managed CPython under /python, copied whole into the runtime image; bytecode is compiled
 # here because the runtime filesystem is read-only.
